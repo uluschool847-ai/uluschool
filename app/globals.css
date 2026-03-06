@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ulu-oxford-blue: #0f2a5f;
+  --ulu-cambridge-sky: #e1ebf4;
+  --ulu-scholars-gold: #d4af37;
+  --ulu-white: #ffffff;
+  --ulu-soft-gray: #f8f9fa;
+  --ulu-ink: #1a1a1a;
+
+  --background: 0 0% 100%;
+  --foreground: 0 0% 10%;
+  --card: 210 20% 98%;
+  --card-foreground: 0 0% 10%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 10%;
+  --primary: 220 72% 22%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 210 43% 92%;
+  --secondary-foreground: 220 72% 22%;
+  --accent: 45 63% 52%;
+  --accent-foreground: 220 72% 22%;
+  --muted: 210 20% 98%;
+  --muted-foreground: 220 8% 35%;
+  --destructive: 0 72% 50%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 210 43% 90%;
+  --input: 210 43% 90%;
+  --ring: 220 72% 22%;
+  --radius: 0.75rem;
+}
+
+.dark {
+  --background: 220 69% 6%;
+  --foreground: 0 0% 100%;
+  --card: 220 72% 22%;
+  --card-foreground: 0 0% 100%;
+  --popover: 220 72% 22%;
+  --popover-foreground: 0 0% 100%;
+  --primary: 45 63% 52%;
+  --primary-foreground: 220 72% 22%;
+  --secondary: 220 44% 18%;
+  --secondary-foreground: 0 0% 100%;
+  --accent: 220 44% 18%;
+  --accent-foreground: 45 63% 60%;
+  --muted: 220 44% 18%;
+  --muted-foreground: 216 14% 73%;
+  --destructive: 0 65% 55%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 220 44% 26%;
+  --input: 220 44% 26%;
+  --ring: 45 63% 52%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-body;
+    background-image: radial-gradient(circle at 10% 10%, rgba(15, 42, 95, 0.06), transparent 35%),
+      radial-gradient(circle at 88% 95%, rgba(212, 175, 55, 0.08), transparent 40%);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-heading tracking-[0.01em];
+  }
+
+  h1 {
+    @apply text-[32px] leading-tight md:text-[48px];
+  }
+
+  h2 {
+    @apply text-[28px] leading-tight md:text-[36px];
+  }
+
+  p {
+    @apply text-base leading-7;
+  }
+}
+
+@layer components {
+  .section-shell {
+    @apply py-16 md:py-20;
+  }
+
+  .prestige-surface {
+    @apply rounded-xl border border-secondary bg-white shadow-prestige dark:bg-card;
+  }
+
+  .floating-field {
+    @apply relative;
+  }
+
+  .floating-field > label {
+    @apply pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 bg-background px-1 text-sm text-muted-foreground transition-all;
+  }
+
+  .floating-field > .peer:focus + label,
+  .floating-field > .peer:not(:placeholder-shown) + label,
+  .floating-field > .peer[data-has-value="true"] + label {
+    @apply top-0 translate-y-[-50%] text-xs text-primary;
+  }
+}
