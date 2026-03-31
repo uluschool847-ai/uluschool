@@ -12,10 +12,18 @@ export function FreeTrialCtaSection() {
             Apply now to begin admissions, or book a free trial class to experience ULU Online School.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Button asChild variant="default">
+            <Button
+              asChild
+              variant="secondary"
+              className="border-primary-foreground/40 bg-primary-foreground text-primary hover:bg-primary-foreground/90 hover:text-primary"
+            >
               <Link href="/admissions">Apply Now</Link>
             </Button>
-            <Button asChild variant="secondary">
+            <Button
+              asChild
+              variant="secondary"
+              className="border-primary-foreground/40 bg-primary-foreground text-primary hover:bg-primary-foreground/90 hover:text-primary"
+            >
               <Link href="/enrol">Book Free Trial Class</Link>
             </Button>
           </div>
