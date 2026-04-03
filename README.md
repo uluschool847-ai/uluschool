@@ -1,6 +1,6 @@
 # Ulu School
 
-Production-ready Next.js 15 web platform for Cambridge online tutoring.
+Next.js 15 web platform for ULU Online School with enquiry capture, admin review workflow, and email notifications.
 
 ## Tech Stack
 - Next.js 15 (App Router)
@@ -21,15 +21,42 @@ Production-ready Next.js 15 web platform for Cambridge online tutoring.
 5. Seed baseline content: `npm run prisma:seed`
 6. Start dev server: `npm run dev`
 
+## Production Migration
+Use deploy-time migrations in production:
+
+```bash
+npx prisma migrate deploy
+```
+
 ## Environment Variables
 - `DATABASE_URL`
+- `DIRECT_URL`
 - `SMTP_HOST`
 - `SMTP_PORT`
 - `SMTP_USER`
 - `SMTP_PASS`
 - `SMTP_SECURE`
 - `SMTP_FROM`
+- `SCHOOL_INBOX_EMAIL`
+- `SMTP_MAX_RETRIES`
+- `NEXT_PUBLIC_TURNSTILE_SITE_KEY`
+- `TURNSTILE_SECRET_KEY`
+- `TURNSTILE_ENFORCE`
+- `MIN_FORM_FILL_MS`
+- `ENROL_FORM_MAX_REQUESTS`
+- `ENROL_FORM_WINDOW_MS`
+- `CONTACT_FORM_MAX_REQUESTS`
+- `CONTACT_FORM_WINDOW_MS`
 - `NEXT_PUBLIC_SITE_URL`
+
+## Email Deliverability Checklist
+Before going live, configure these DNS records for your sending domain:
+
+1. SPF: authorize your SMTP provider.
+2. DKIM: publish provider DKIM public keys.
+3. DMARC: start with monitoring policy, then tighten policy after validation.
+
+Without SPF/DKIM/DMARC alignment, delivery can be unreliable even if SMTP credentials are valid.
 
 ## Folder Structure
 ```text
@@ -119,6 +146,6 @@ Production-ready Next.js 15 web platform for Cambridge online tutoring.
 ```
 
 ## Notes
-- Pricing is intentionally non-hardcoded and surfaced as enquiry-based messaging.
-- Enrolment form uses Server Actions + Zod validation + Prisma persistence + Nodemailer email delivery.
-- Admin route and CMS adapter are prepared for future expansion.
+- Enrolment and Contact forms use Server Actions + Zod validation + Prisma persistence + Nodemailer delivery.
+- Admin dashboard supports status workflow (`new`, `in_review`, `accepted`, `rejected`) and admin notes.
+- Basic anti-spam includes honeypot, minimum submit time guard, optional Turnstile captcha, and in-memory rate limiting.

@@ -23,10 +23,13 @@ export default function TeachersPage() {
           <div className="mb-8 rounded-xl border bg-card p-5 text-sm text-muted-foreground">
             Each teacher profile includes qualification, teaching experience, and subjects taught.
           </div>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="flex flex-wrap justify-center gap-8">
           {teachers.map((teacher) => (
-            <Card key={teacher.name} className="overflow-hidden">
-              <div className="h-48 bg-gradient-to-br from-secondary to-background" />
+            <Card key={teacher.name} className="w-full max-w-[300px] overflow-hidden">
+              {/* @ts-ignore */}
+              {teacher.image ? (
+                <img src={teacher.image} alt={teacher.name} className="aspect-[4/5] w-full object-cover object-center" />
+              ) : null}
               <CardHeader>
                 <CardTitle className="text-xl">{teacher.name}</CardTitle>
                 <p className="text-sm font-medium text-primary">{teacher.title}</p>

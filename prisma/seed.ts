@@ -73,6 +73,11 @@ async function main() {
       name: "Business Studies",
       description: "IGCSE business concepts, analysis, and exam preparation.",
     },
+    {
+      slug: "kiswahili",
+      name: "Kiswahili",
+      description: "Language learning with reading, writing, and communication practice.",
+    },
   ];
 
   for (const level of levels) {

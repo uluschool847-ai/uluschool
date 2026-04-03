@@ -4,9 +4,9 @@ export const siteConfig = {
   description:
     "ULU Online School delivers structured, interactive, and exam-focused Cambridge education to students anywhere in the world.",
   contact: {
-    email: "info@uluglobalacademy.com",
-    phone: "+254 XXX XXX XXX",
-    whatsapp: "+254 XXX XXX XXX",
+    email: process.env.NEXT_PUBLIC_CONTACT_EMAIL || "info@uluglobalacademy.com",
+    phone: process.env.NEXT_PUBLIC_CONTACT_PHONE || "+254 XXX XXX XXX",
+    whatsapp: process.env.NEXT_PUBLIC_CONTACT_WHATSAPP || "+254 XXX XXX XXX",
   },
 };
 
@@ -37,10 +37,15 @@ export const mobileNavItems = [
 ];
 
 export const trustLogos = [
-  "Cambridge Curriculum",
-  "Live Interactive Classes",
-  "Recorded Lesson Access",
-  "International Learning Community",
+  "Mathematics",
+  "English Language",
+  "Kiswahili",
+  "Biology",
+  "Chemistry",
+  "Physics",
+  "Business Studies",
+  "ICT",
+  "Geography",
 ];
 
 export const whyChooseItems = [
@@ -103,7 +108,7 @@ export const academicJourney = [
     label: "Primary",
     years: "Years 1-6",
     summary: "Strong foundations in literacy, numeracy, science, and global perspectives.",
-    subjects: ["English", "Mathematics", "Science", "Global Perspectives"],
+    subjects: ["English", "Mathematics", "Science", "Global Perspectives", "Kiswahili"],
   },
   {
     id: "lower-secondary",
@@ -119,6 +124,7 @@ export const academicJourney = [
       "Geography",
       "ICT",
       "Global Perspectives",
+      "Kiswahili",
     ],
   },
   {
@@ -135,6 +141,7 @@ export const academicJourney = [
       "Business Studies",
       "ICT",
       "Geography",
+      "Kiswahili",
     ],
   },
 ];
@@ -145,7 +152,14 @@ export const levels = [
     label: "Primary (Years 1-6)",
     description:
       "Strong foundation in literacy, numeracy, and scientific thinking through guided online learning.",
-    subjects: ["English", "Mathematics", "Science", "Global Perspectives", "ICT (optional)"],
+    subjects: [
+      "English",
+      "Mathematics",
+      "Science",
+      "Global Perspectives",
+      "ICT (optional)",
+      "Kiswahili",
+    ],
     formats: ["Weekly quizzes", "Monthly progress tests", "Term exams"],
   },
   {
@@ -162,6 +176,7 @@ export const levels = [
       "Geography",
       "ICT",
       "Global Perspectives",
+      "Kiswahili",
     ],
     formats: ["Weekly quizzes", "Monthly tests", "Term exams"],
   },
@@ -179,6 +194,7 @@ export const levels = [
       "Business Studies",
       "ICT",
       "Geography",
+      "Kiswahili",
     ],
     formats: ["Coursework support (where required)", "Mock examinations", "Final exam preparation"],
   },
@@ -186,29 +202,26 @@ export const levels = [
 
 export const teachers = [
   {
-    name: "Ms. Grace Wambui",
-    title: "Cambridge Primary & Lower Secondary Lead",
-    credentials: "B.Ed, Cambridge-trained, 11 years experience",
-    focus: "English, Global Perspectives, and learner development",
+    name: "Mr. Nick",
+    title: "Math and Science Teacher",
+    credentials: "Lower Secondary specialist",
+    focus: "Math and Science",
+    image: "/nick.jpg"
   },
   {
-    name: "Mr. Daniel Mwangi",
-    title: "Mathematics Subject Specialist",
-    credentials: "BSc Mathematics, 10 years experience",
-    focus: "Primary, Lower Secondary, and IGCSE Mathematics",
+    name: "Mr. Alphonse",
+    title: "English Teacher",
+    credentials: "High School specialist",
+    focus: "English Language",
+    image: "/alphonse.jpg"
   },
   {
-    name: "Dr. Amina Yusuf",
-    title: "Science Department Coordinator",
-    credentials: "MSc Education, 13 years experience",
-    focus: "Biology, Chemistry, and Physics (Lower Secondary & IGCSE)",
-  },
-  {
-    name: "Mr. Kelvin Otieno",
-    title: "IGCSE Humanities & ICT Teacher",
-    credentials: "BA + PGDE, 9 years experience",
-    focus: "Business Studies, Geography, and ICT",
-  },
+    name: "Ms. Cholette",
+    title: "Primary Teacher",
+    credentials: "Lower Primary specialist",
+    focus: "Lower Primary Education",
+    image: "/cholette.jpg"
+  }
 ];
 
 export const testimonials = [

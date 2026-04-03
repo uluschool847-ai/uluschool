@@ -1,3 +1,5 @@
+import { EnquiryStatus } from "@prisma/client";
+
 import { prisma } from "@/lib/prisma";
 import type { EnrolmentInput } from "@/lib/validations/enrolment";
 
@@ -24,6 +26,31 @@ export async function createEnquiry(input: EnrolmentInput) {
       phoneWhatsapp: input.phoneWhatsapp,
       preferredSchedule: input.preferredSchedule,
       additionalNotes: input.additionalNotes || null,
+    },
+  });
+}
+
+export async function listEnquiries(status?: EnquiryStatus) {
+  return prisma.enquiry.findMany({
+    where: status ? { status } : undefined,
+    include: {
+      curriculumLevel: {
+        select: {
+          name: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+}
+
+export async function updateEnquiryReview(id: string, status: EnquiryStatus, adminNotes: string) {
+  return prisma.enquiry.update({
+    where: { id },
+    data: {
+      status,
+      adminNotes: adminNotes.trim() || null,
     },
   });
 }

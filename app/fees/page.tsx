@@ -80,11 +80,14 @@ export default function FeesPage() {
               <CardTitle>Payment Methods</CardTitle>
             </CardHeader>
             <CardContent>
-              <ul className="list-disc space-y-2 pl-5 text-sm text-muted-foreground">
+              <ul className="list-disc space-y-2 pl-5 text-sm text-muted-foreground mb-4">
                 {paymentMethods.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
               </ul>
+              <div className="rounded-md border border-primary/20 bg-primary/5 p-3 text-sm text-primary font-medium">
+                Note: Fees can still be paid monthly even though learning is organized by terms.
+              </div>
             </CardContent>
           </Card>
         </div>

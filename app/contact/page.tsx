@@ -3,13 +3,11 @@ import Link from "next/link";
 
 import { siteConfig } from "@/lib/content";
 
+import { ContactForm } from "@/components/contact/contact-form";
 import { FaqSection } from "@/components/sections/faq-section";
 import { PageHero } from "@/components/sections/page-hero";
 import { SafeguardingSection } from "@/components/sections/safeguarding-section";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 
 export const metadata: Metadata = {
   title: "Contact",
@@ -44,32 +42,7 @@ export default function ContactPage() {
             </div>
           </div>
 
-          <form className="rounded-xl border bg-card p-6">
-            <h2 className="text-xl font-semibold">Inquiry Form</h2>
-            <div className="mt-5 grid gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="fullName">Full Name</Label>
-                <Input id="fullName" name="fullName" placeholder="Full Name" />
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input id="email" name="email" type="email" placeholder="Email" />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="studentGrade">Student Grade</Label>
-                  <Input id="studentGrade" name="studentGrade" placeholder="e.g. Year 7 / IGCSE" />
-                </div>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="message">Message</Label>
-                <Textarea id="message" name="message" placeholder="Tell us what support you need." />
-              </div>
-              <div>
-                <Button type="submit">Submit</Button>
-              </div>
-            </div>
-          </form>
+          <ContactForm />
         </div>
       </section>
       <FaqSection />

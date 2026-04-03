@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 
 import { levels } from "@/lib/content";
 import type { EnrolmentFormState, EnrolmentInput } from "@/lib/validations/enrolment";
 
 import { submitEnrolment } from "@/app/enrol/actions";
+import { TurnstileWidget } from "@/components/forms/turnstile-widget";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,7 +21,19 @@ const initialState: EnrolmentFormState = {
 };
 
 const steps = ["Parent Info", "Student Details", "Schedule Trial"];
-const subjectOptions = ["Mathematics", "English", "Science", "Biology", "Chemistry", "Physics"];
+const subjectOptions = [
+  "Mathematics",
+  "English",
+  "Science",
+  "Biology",
+  "Chemistry",
+  "Physics",
+  "English Language",
+  "Business Studies",
+  "ICT",
+  "Geography",
+  "Kiswahili",
+];
 
 type FieldKey = keyof EnrolmentInput;
 
@@ -66,6 +79,7 @@ export function EnrolForm() {
   const [state, formAction] = useFormState(submitEnrolment, initialState);
   const [step, setStep] = useState(1);
   const [curriculumLevel, setCurriculumLevel] = useState("");
+  const startedAtRef = useRef(Date.now());
   const fieldTone = useFieldTone(state);
 
   useEffect(() => {
@@ -120,6 +134,16 @@ export function EnrolForm() {
         </div>
 
         <form action={formAction} className="grid gap-6">
+          <input
+            type="text"
+            name="companyWebsite"
+            tabIndex={-1}
+            autoComplete="off"
+            className="hidden"
+            aria-hidden="true"
+          />
+          <input type="hidden" name="startedAt" value={startedAtRef.current} />
+
           <section className={cn(step === 1 ? "grid gap-5" : "hidden")} aria-hidden={step !== 1}>
             <div className="floating-field">
               <Input
@@ -289,6 +313,8 @@ export function EnrolForm() {
 
             {step === 3 ? <SubmitButton /> : null}
           </div>
+
+          {step === 3 ? <TurnstileWidget /> : null}
 
           {state.message ? (
             <output
