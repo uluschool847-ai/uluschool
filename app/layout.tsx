@@ -46,12 +46,20 @@ export const metadata: Metadata = {
   },
 };
 
+import { generateStructuredData } from "@/lib/seo";
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const jsonLd = generateStructuredData("Organization", {});
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body
         className={`${headingFont.variable} ${bodyFont.variable} min-h-screen bg-background text-foreground antialiased`}
       >
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

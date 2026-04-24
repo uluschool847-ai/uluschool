@@ -1,5 +1,6 @@
 "use server";
 
+import { getAttributionFromRequest } from "@/lib/analytics/attribution";
 import { createEnquiry } from "@/lib/repositories/enquiry-repository";
 import { checkRateLimit } from "@/lib/security/rate-limit";
 import { getRequestIdentifier, honeypotTriggered, submittedTooFast } from "@/lib/security/spam-guard";
@@ -72,8 +73,9 @@ export async function submitEnrolment(
 
   try {
     const data = parsed.data;
+    const attribution = await getAttributionFromRequest();
 
-    await createEnquiry(data);
+    await createEnquiry(data, attribution);
     const emailResult = await sendEnquiryEmail(data);
 
     if (!emailResult.delivered) {

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState, useEffect, useRef, useState } from "react";
+import { useFormStatus } from "react-dom";
 
 import { levels } from "@/lib/content";
 import type { EnrolmentFormState, EnrolmentInput } from "@/lib/validations/enrolment";
@@ -76,7 +76,7 @@ function useFieldTone(state: EnrolmentFormState) {
 }
 
 export function EnrolForm() {
-  const [state, formAction] = useFormState(submitEnrolment, initialState);
+  const [state, formAction] = useActionState(submitEnrolment, initialState);
   const [step, setStep] = useState(1);
   const [curriculumLevel, setCurriculumLevel] = useState("");
   const startedAtRef = useRef(Date.now());

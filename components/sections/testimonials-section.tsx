@@ -10,8 +10,8 @@ export function TestimonialsSection() {
       <div className="container">
         <h2>Testimonials</h2>
         <div className="mt-8 grid gap-4 md:grid-cols-3">
-          {testimonials.map((testimonial) => (
-            <Card key={testimonial.label}>
+          {testimonials.map((testimonial, index) => (
+            <Card key={`${testimonial.label}-${index}`}>
               <CardContent className="pt-6">
                 <div
                   className="mb-4 flex items-center gap-1 text-accent"

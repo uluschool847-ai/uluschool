@@ -14,13 +14,49 @@ enum EnquiryStatus {
   REJECTED  @map("rejected")
 }
 
+enum UserRole {
+  ADMIN
+  TEACHER
+  PARENT
+  STUDENT
+}
+
+enum ReminderChannel {
+  EMAIL
+  WHATSAPP
+}
+
+enum ReminderDeliveryStatus {
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  PAST_DUE
+}
+
+enum PaymentStatus {
+  SUCCESS
+  FAILED
+  PENDING
+}
+
 model Enquiry {
-  id                 String   @id @default(cuid())
+  id                 String        @id @default(cuid())
   studentName        String
   ageYearLevel       String
   subjects           String[]
   curriculumLevelId  String
-  curriculumLevel    Level    @relation(fields: [curriculumLevelId], references: [id], onDelete: Restrict)
+  curriculumLevel    Level         @relation(fields: [curriculumLevelId], references: [id], onDelete: Restrict)
   parentGuardianName String
   email              String
   phoneWhatsapp      String
@@ -28,11 +64,19 @@ model Enquiry {
   additionalNotes    String?
   status             EnquiryStatus @default(NEW)
   adminNotes         String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  utmSource          String?
+  utmMedium          String?
+  utmCampaign        String?
+  referrer           String?
+  convertedAt        DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  managerTasks ManagerTask[]
 
   @@index([status, createdAt])
   @@index([curriculumLevelId])
+  @@index([utmSource, createdAt])
 }
 
 model ContactLead {
@@ -44,10 +88,99 @@ model ContactLead {
   message       String
   status        EnquiryStatus @default(NEW)
   adminNotes    String?
+  utmSource     String?
+  utmMedium     String?
+  utmCampaign   String?
+  referrer      String?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
   @@index([status, createdAt])
+  @@index([utmSource, createdAt])
+}
+
+model AppUser {
+  id                   String   @id @default(cuid())
+  email                String   @unique
+  fullName             String
+  role                 UserRole
+  passwordHash         String
+  phoneWhatsapp        String?
+  isActive             Boolean  @default(true)
+  twoFactorEnabled     Boolean  @default(false)
+  twoFactorSecret      String?
+  twoFactorBackupCodes String[] @default([])
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  scheduledAsTeacher ScheduledClass[] @relation("TeacherScheduledClasses")
+  adminAuditLogs     AdminAuditLog[]
+
+  // CMS Relations
+  blogPosts BlogPost[]
+
+  // Dashboard Relations
+  homeworkSubmissions HomeworkSubmission[]
+  studentProgresses   StudentProgress[]
+
+  // Automation Relations
+  assignedTasks ManagerTask[]
+
+  // BI Relations
+  subscriptions StudentSubscription[]
+  payments      PaymentTransaction[]
+}
+
+model ScheduledClass {
+  id                    String   @id @default(cuid())
+  title                 String
+  description           String?
+  startAt               DateTime
+  endAt                 DateTime
+  liveLessonUrl         String
+  teacherId             String?
+  teacher               AppUser? @relation("TeacherScheduledClasses", fields: [teacherId], references: [id], onDelete: SetNull)
+  participantUserIds    String[]
+  reminderMinutesBefore Int      @default(60)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  reminders ReminderLog[]
+  homeworks Homework[]
+
+  @@index([startAt])
+  @@index([teacherId, startAt])
+}
+
+model ReminderLog {
+  id               String                 @id @default(cuid())
+  scheduledClassId String
+  scheduledClass   ScheduledClass         @relation(fields: [scheduledClassId], references: [id], onDelete: Cascade)
+  recipientUserId  String
+  recipientEmail   String
+  channel          ReminderChannel
+  status           ReminderDeliveryStatus @default(SENT)
+  details          String?
+  createdAt        DateTime               @default(now())
+
+  @@index([scheduledClassId, recipientUserId, channel, createdAt])
+  @@index([status, createdAt])
+}
+
+model AdminAuditLog {
+  id          String   @id @default(cuid())
+  adminUserId String
+  adminUser   AppUser  @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  action      String
+  targetType  String
+  targetId    String?
+  before      Json?
+  after       Json?
+  meta        Json?
+  createdAt   DateTime @default(now())
+
+  @@index([adminUserId, createdAt])
+  @@index([action, createdAt])
 }
 
 model Teacher {
@@ -65,30 +198,33 @@ model Teacher {
 }
 
 model Testimonial {
-  id            String   @id @default(cuid())
-  studentName   String
-  guardianName  String?
-  quote         String
-  levelLabel    String
-  teacherId     String?
-  teacher       Teacher? @relation(fields: [teacherId], references: [id], onDelete: SetNull)
-  isPublished   Boolean  @default(true)
-  displayOrder  Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(cuid())
+  studentName  String
+  guardianName String?
+  quote        String
+  levelLabel   String
+  teacherId    String?
+  teacher      Teacher? @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  isPublished  Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([isPublished, displayOrder])
 }
 
 model Subject {
-  id              String           @id @default(cuid())
-  slug            String           @unique
-  name            String
-  description     String
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
   levelSubjects   LevelSubject[]
   teacherSubjects TeacherSubject[]
+  courseMaterials CourseMaterial[]
+  studentProgress StudentProgress[]
 }
 
 model Level {
@@ -118,4 +254,166 @@ model TeacherSubject {
   subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
 
   @@id([teacherId, subjectId])
+}
+
+// ==========================================
+// NEW MODELS: CMS (Content Management)
+// ==========================================
+
+model PageContent {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  content     Json
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([slug])
+}
+
+model BlogPost {
+  id          String    @id @default(cuid())
+  slug        String    @unique
+  title       String
+  content     String
+  authorId    String
+  author      AppUser   @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  isPublished Boolean   @default(false)
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([slug])
+  @@index([isPublished, publishedAt])
+}
+
+model FaqItem {
+  id           String   @id @default(cuid())
+  category     String
+  question     String
+  answer       String
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([category, displayOrder])
+}
+
+// ==========================================
+// NEW MODELS: Dashboards v2
+// ==========================================
+
+model CourseMaterial {
+  id        String   @id @default(cuid())
+  title     String
+  fileUrl   String
+  type      String
+  subjectId String
+  subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([subjectId])
+}
+
+model Homework {
+  id               String               @id @default(cuid())
+  title            String
+  description      String
+  dueDate          DateTime
+  scheduledClassId String
+  scheduledClass   ScheduledClass       @relation(fields: [scheduledClassId], references: [id], onDelete: Cascade)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  submissions      HomeworkSubmission[]
+
+  @@index([scheduledClassId])
+  @@index([dueDate])
+}
+
+model HomeworkSubmission {
+  id          String   @id @default(cuid())
+  studentId   String
+  student     AppUser  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  homeworkId  String
+  homework    Homework @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+  contentUrl  String
+  grade       String?
+  feedback    String?
+  submittedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([studentId, homeworkId])
+  @@index([homeworkId])
+}
+
+model StudentProgress {
+  id           String   @id @default(cuid())
+  studentId    String
+  student      AppUser  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subjectId    String
+  subject      Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  gradeLevel   String
+  teacherNotes String
+  recordedAt   DateTime @default(now())
+
+  @@index([studentId, subjectId])
+}
+
+// ==========================================
+// NEW MODELS: Process Automation & CRM
+// ==========================================
+
+model ManagerTask {
+  id               String     @id @default(cuid())
+  title            String
+  description      String
+  assignedToId     String?
+  assignedTo       AppUser?   @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+  dueDate          DateTime
+  status           TaskStatus @default(PENDING)
+  relatedEnquiryId String?
+  relatedEnquiry   Enquiry?   @relation(fields: [relatedEnquiryId], references: [id], onDelete: SetNull)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([assignedToId, status])
+  @@index([dueDate])
+}
+
+// ==========================================
+// NEW MODELS: BI Dashboards & Payments
+// ==========================================
+
+model StudentSubscription {
+  id        String               @id @default(cuid())
+  studentId String
+  student   AppUser              @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  planName  String
+  status    SubscriptionStatus   @default(ACTIVE)
+  startDate DateTime             @default(now())
+  endDate   DateTime?
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  payments  PaymentTransaction[]
+
+  @@index([studentId, status])
+}
+
+model PaymentTransaction {
+  id             String               @id @default(cuid())
+  subscriptionId String?
+  subscription   StudentSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  studentId      String
+  student        AppUser              @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  amount         Float
+  currency       String               @default("USD")
+  status         PaymentStatus        @default(PENDING)
+  paymentDate    DateTime             @default(now())
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([studentId])
+  @@index([status, paymentDate])
 }

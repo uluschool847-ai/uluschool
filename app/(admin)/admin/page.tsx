@@ -1,9 +1,16 @@
-import { EnquiryStatus } from "@prisma/client";
+import { EnquiryStatus, UserRole } from "@prisma/client";
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { updateContactLeadAction, updateEnquiryAction } from "@/app/(admin)/admin/actions";
+import {
+  runReminderDispatchAction,
+  updateContactLeadAction,
+  updateEnquiryAction,
+} from "@/app/(admin)/admin/actions";
 import { enquiryStatuses, getStatusLabel, parseStatus } from "@/lib/admin/enquiry-status";
+import { requireRole } from "@/lib/auth/session";
+import { getAdminAnalyticsOverview } from "@/lib/repositories/analytics-repository";
+import { listRecentAdminAuditLogs } from "@/lib/repositories/admin-audit-repository";
 import { listContactLeads } from "@/lib/repositories/contact-lead-repository";
 import { listEnquiries } from "@/lib/repositories/enquiry-repository";
 import { Button } from "@/components/ui/button";
@@ -47,15 +54,56 @@ function StatusOptions() {
 }
 
 export default async function AdminPage({ searchParams }: AdminPageProps) {
+  await requireRole([UserRole.ADMIN]);
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const filterStatus = parseStatus(resolvedSearchParams?.status);
-  const [enquiries, contactLeads] = await Promise.all([
+  const [enquiries, contactLeads, analytics, auditLogs] = await Promise.all([
     listEnquiries(filterStatus ?? undefined),
     listContactLeads(filterStatus ?? undefined),
+    getAdminAnalyticsOverview(),
+    listRecentAdminAuditLogs(25),
   ]);
 
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Analytics Overview</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 text-sm md:grid-cols-4">
+          <div className="rounded-lg border border-secondary p-3">
+            <p className="text-muted-foreground">Applications</p>
+            <p className="text-xl font-semibold">{analytics.totalApplications}</p>
+          </div>
+          <div className="rounded-lg border border-secondary p-3">
+            <p className="text-muted-foreground">Accepted</p>
+            <p className="text-xl font-semibold">{analytics.acceptedApplications}</p>
+          </div>
+          <div className="rounded-lg border border-secondary p-3">
+            <p className="text-muted-foreground">Conversion</p>
+            <p className="text-xl font-semibold">{analytics.conversionRate.toFixed(1)}%</p>
+          </div>
+          <div className="rounded-lg border border-secondary p-3">
+            <p className="text-muted-foreground">Contact Leads</p>
+            <p className="text-xl font-semibold">{analytics.totalContactLeads}</p>
+          </div>
+        </CardContent>
+        <CardContent className="pt-0">
+          <p className="mb-2 text-sm font-medium">Traffic Sources</p>
+          {analytics.trafficSources.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No source data yet.</p>
+          ) : (
+            <ul className="grid gap-2 text-sm md:grid-cols-3">
+              {analytics.trafficSources.map((source) => (
+                <li key={source.source} className="rounded-md border border-secondary px-3 py-2">
+                  <strong>{source.source}</strong>: {source.count}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>MVP Admin Dashboard</CardTitle>
@@ -78,6 +126,27 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 <Link href={`/admin?status=${getStatusLabel(status)}`}>{getStatusLabel(status)}</Link>
               </Button>
             ))}
+            <Button asChild variant="secondary" size="sm">
+              <Link href="/admin/security">Security</Link>
+            </Button>
+            <Button asChild variant="secondary" size="sm">
+              <Link href="/admin/cms">Content (CMS)</Link>
+            </Button>
+            <Button asChild variant="secondary" size="sm">
+              <Link href="/admin/analytics">BI Analytics</Link>
+            </Button>
+          </div>
+          <div className="rounded-lg border border-secondary p-3">
+            <p className="mb-2 font-medium">Reminder Dispatch</p>
+            <p className="mb-3 text-muted-foreground">
+              Production cron should call <code>/api/reminders/send-due</code>. You can also run
+              it manually from here.
+            </p>
+            <form action={runReminderDispatchAction}>
+              <Button type="submit" size="sm">
+                Run Reminder Job Now
+              </Button>
+            </form>
           </div>
         </CardContent>
       </Card>
@@ -119,6 +188,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   </p>
                   <p className="text-muted-foreground md:col-span-2">
                     Submitted: {formatDate(item.createdAt)}
+                  </p>
+                  <p className="text-muted-foreground md:col-span-2">
+                    Source: {item.utmSource || "direct"} / {item.utmMedium || "n/a"} /{" "}
+                    {item.utmCampaign || "n/a"}
                   </p>
                 </div>
 
@@ -184,6 +257,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   <p className="text-muted-foreground md:col-span-2">
                     Submitted: {formatDate(item.createdAt)}
                   </p>
+                  <p className="text-muted-foreground md:col-span-2">
+                    Source: {item.utmSource || "direct"} / {item.utmMedium || "n/a"} /{" "}
+                    {item.utmCampaign || "n/a"}
+                  </p>
                 </div>
 
                 <form
@@ -218,6 +295,32 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 </form>
               </article>
             ))
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Admin Audit Logs ({auditLogs.length})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {auditLogs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No admin audit logs yet.</p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {auditLogs.map((log) => (
+                <li key={log.id} className="rounded-lg border border-secondary p-3">
+                  <p>
+                    <strong>{log.action}</strong> by {log.adminUser.fullName} ({log.adminUser.email})
+                  </p>
+                  <p className="text-muted-foreground">
+                    Target: {log.targetType}
+                    {log.targetId ? ` (${log.targetId})` : ""}
+                  </p>
+                  <p className="text-muted-foreground">At: {formatDate(log.createdAt)}</p>
+                </li>
+              ))}
+            </ul>
           )}
         </CardContent>
       </Card>

@@ -153,3 +153,45 @@ export async function sendEnquiryEmail(payload: EnrolmentInput) {
 export async function sendContactEmail(payload: ContactInput) {
   return sendWithRetry(buildContactMessage(payload));
 }
+
+export async function sendClassReminderEmail(input: {
+  recipientEmail: string;
+  recipientName: string;
+  classTitle: string;
+  startAt: Date;
+  endAt: Date;
+  liveLessonUrl: string;
+}) {
+  const formattedStart = new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(input.startAt);
+  const formattedEnd = new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(input.endAt);
+
+  return sendWithRetry({
+    subject: `Class reminder: ${input.classTitle}`,
+    replyTo: getToAddress(),
+    text: [
+      `Hello ${input.recipientName},`,
+      "",
+      `This is a reminder for your upcoming class: ${input.classTitle}`,
+      `Start: ${formattedStart}`,
+      `End: ${formattedEnd}`,
+      `Join link: ${input.liveLessonUrl}`,
+      "",
+      "ULU Online School",
+    ].join("\n"),
+    html: `
+      <h2>Class Reminder</h2>
+      <p>Hello ${input.recipientName},</p>
+      <p>This is a reminder for your upcoming class: <strong>${input.classTitle}</strong></p>
+      <p><strong>Start:</strong> ${formattedStart}</p>
+      <p><strong>End:</strong> ${formattedEnd}</p>
+      <p><a href="${input.liveLessonUrl}">Join Live Lesson</a></p>
+      <p>ULU Online School</p>
+    `,
+  });
+}

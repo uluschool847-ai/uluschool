@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef } from "react";
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState, useRef } from "react";
+import { useFormStatus } from "react-dom";
 
-import { initialContactFormState, submitContactEnquiry } from "@/app/contact/actions";
+import { submitContactEnquiry } from "@/app/contact/actions";
 import { TurnstileWidget } from "@/components/forms/turnstile-widget";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { ContactFormState } from "@/lib/validations/contact";
 import { cn } from "@/lib/utils";
+
+const initialContactFormState: ContactFormState = {
+  success: false,
+  message: "",
+};
 
 function FieldError({ errors }: { errors?: string[] }) {
   if (!errors?.length) return null;
@@ -46,7 +51,7 @@ function SubmitButton() {
 }
 
 export function ContactForm() {
-  const [state, formAction] = useFormState(submitContactEnquiry, initialContactFormState);
+  const [state, formAction] = useActionState(submitContactEnquiry, initialContactFormState);
   const startedAtRef = useRef(Date.now());
   const fieldTone = useFieldTone(state);
 

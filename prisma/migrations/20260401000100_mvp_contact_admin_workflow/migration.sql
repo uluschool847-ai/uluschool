@@ -8,8 +8,9 @@ SET "status" = LOWER("status");
 -- AlterTable
 ALTER TABLE "Enquiry"
 ADD COLUMN "adminNotes" TEXT,
+ALTER COLUMN "status" DROP DEFAULT,
 ALTER COLUMN "status" TYPE "EnquiryStatus" USING ("status"::"EnquiryStatus"),
-ALTER COLUMN "status" SET DEFAULT 'new';
+ALTER COLUMN "status" SET DEFAULT 'new'::"EnquiryStatus";
 
 -- CreateTable
 CREATE TABLE "ContactLead" (
@@ -19,7 +20,7 @@ CREATE TABLE "ContactLead" (
     "phoneWhatsapp" TEXT,
     "studentGrade" TEXT,
     "message" TEXT NOT NULL,
-    "status" "EnquiryStatus" NOT NULL DEFAULT 'new',
+    "status" "EnquiryStatus" NOT NULL DEFAULT 'new'::"EnquiryStatus",
     "adminNotes" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,

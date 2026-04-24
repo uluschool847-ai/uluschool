@@ -41,6 +41,9 @@ export function SiteFooter() {
             <Link className="text-muted-foreground hover:text-primary" href="/contact">
               Contact
             </Link>
+            <Link className="text-muted-foreground hover:text-primary" href="/pages">
+              Published Pages
+            </Link>
             <Link className="text-muted-foreground hover:text-primary" href="/privacy-policy">
               Privacy Policy
             </Link>

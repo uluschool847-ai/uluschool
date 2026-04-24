@@ -1,16 +1,12 @@
 "use server";
 
+import { getAttributionFromRequest } from "@/lib/analytics/attribution";
 import { createContactLead } from "@/lib/repositories/contact-lead-repository";
 import { checkRateLimit } from "@/lib/security/rate-limit";
 import { getRequestIdentifier, honeypotTriggered, submittedTooFast } from "@/lib/security/spam-guard";
 import { verifyTurnstileToken } from "@/lib/security/turnstile";
 import { sendContactEmail } from "@/lib/services/email";
 import { type ContactFormState, contactSchema } from "@/lib/validations/contact";
-
-const initialState: ContactFormState = {
-  success: false,
-  message: "",
-};
 
 export async function submitContactEnquiry(
   _prevState: ContactFormState,
@@ -70,7 +66,8 @@ export async function submitContactEnquiry(
 
   try {
     const data = parsed.data;
-    await createContactLead(data);
+    const attribution = await getAttributionFromRequest();
+    await createContactLead(data, attribution);
     const emailResult = await sendContactEmail(data);
 
     if (!emailResult.delivered) {
@@ -91,5 +88,3 @@ export async function submitContactEnquiry(
     };
   }
 }
-
-export { initialState as initialContactFormState };

@@ -1,8 +1,9 @@
 import type { MetadataRoute } from "next";
 
 import { siteConfig } from "@/lib/content";
+import { listPublishedPages } from "@/lib/repositories/cms-repository";
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const routes = [
     "",
     "/about",
@@ -14,19 +15,33 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/privacy-policy",
     "/prospectus",
     "/results",
-    "/student-portal",
     "/subjects",
     "/teachers",
     "/terms-and-conditions",
     "/contact",
     "/enrol",
     "/pricing",
+    "/pages",
   ];
 
-  return routes.map((route) => ({
+  const staticRoutes: MetadataRoute.Sitemap = routes.map((route) => ({
     url: `${siteConfig.url}${route}`,
     lastModified: new Date(),
     changeFrequency: "weekly",
     priority: route === "" ? 1 : 0.8,
   }));
+
+  try {
+    const publishedPages = await listPublishedPages();
+    const cmsRoutes: MetadataRoute.Sitemap = publishedPages.map((page) => ({
+      url: `${siteConfig.url}/pages/${page.slug}`,
+      lastModified: page.updatedAt,
+      changeFrequency: "weekly",
+      priority: 0.7,
+    }));
+
+    return [...staticRoutes, ...cmsRoutes];
+  } catch {
+    return staticRoutes;
+  }
 }

@@ -3,14 +3,18 @@ import type { Metadata } from "next";
 import { PageHero } from "@/components/sections/page-hero";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { constructMetadata, generateStructuredData } from "@/lib/seo";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = constructMetadata({
   title: "Curriculum",
-  description:
-    "Explore ULU's Cambridge curriculum pathways across Primary, Lower Secondary, and IGCSE.",
-};
+  description: "Explore ULU's Cambridge curriculum pathways across Primary, Lower Secondary, and IGCSE.",
+});
 
 export default function CurriculumPage() {
+  const jsonLd = generateStructuredData("Course", {
+    name: "Cambridge Curriculum",
+    description: "Explore ULU's Cambridge curriculum pathways across Primary, Lower Secondary, and IGCSE."
+  });
   const termDates = [
     {
       term: "Term 1",
@@ -91,6 +95,10 @@ export default function CurriculumPage() {
 
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <PageHero
         title="Cambridge Curriculum"
         description="ULU follows the curriculum developed by Cambridge Assessment International Education."
@@ -99,7 +107,7 @@ export default function CurriculumPage() {
         <div className="container grid gap-5 mb-8">
           <Card>
             <CardHeader>
-              <CardTitle>Academic Calendar (Cambridge Online School)</CardTitle>
+              <CardTitle>Academic Calendar</CardTitle>
             </CardHeader>
             <CardContent>
               <p className="mb-4 text-sm text-muted-foreground">
