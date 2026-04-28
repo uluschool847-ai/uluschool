@@ -84,12 +84,13 @@ export default function AdmissionsPage() {
               <CardTitle>Term Dates</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="mb-3 text-sm text-muted-foreground">
-                Three academic terms per year:
-              </p>
+              <p className="mb-3 text-sm text-muted-foreground">Three academic terms per year:</p>
               <ul className="grid gap-3 md:grid-cols-3">
                 {termDates.map((term) => (
-                  <li key={term} className="rounded-md border border-secondary px-3 py-3 text-sm text-muted-foreground">
+                  <li
+                    key={term}
+                    className="rounded-md border border-secondary px-3 py-3 text-sm text-muted-foreground"
+                  >
                     {term}
                   </li>
                 ))}

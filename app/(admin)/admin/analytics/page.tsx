@@ -1,9 +1,12 @@
 import { UserRole } from "@prisma/client";
-import { Metadata } from "next";
+import type { Metadata } from "next";
 
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/session";
-import { getAdvancedBIMetrics, getAdminAnalyticsOverview } from "@/lib/repositories/analytics-repository";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  getAdminAnalyticsOverview,
+  getAdvancedBIMetrics,
+} from "@/lib/repositories/analytics-repository";
 
 export const metadata: Metadata = {
   title: "BI Analytics - Admin",
@@ -14,7 +17,7 @@ export default async function AnalyticsDashboardPage() {
 
   const [basicAnalytics, advancedMetrics] = await Promise.all([
     getAdminAnalyticsOverview(),
-    getAdvancedBIMetrics()
+    getAdvancedBIMetrics(),
   ]);
 
   return (
@@ -30,13 +33,17 @@ export default async function AnalyticsDashboardPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total Revenue</CardDescription>
-            <CardTitle className="text-4xl">${advancedMetrics.totalRevenue.toLocaleString()}</CardTitle>
+            <CardTitle className="text-4xl">
+              ${advancedMetrics.totalRevenue.toLocaleString()}
+            </CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Average LTV</CardDescription>
-            <CardTitle className="text-4xl">${advancedMetrics.ltv.toLocaleString(undefined, { maximumFractionDigits: 2 })}</CardTitle>
+            <CardTitle className="text-4xl">
+              ${advancedMetrics.ltv.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+            </CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -57,7 +64,9 @@ export default async function AnalyticsDashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle>Traffic Channels & Conversion</CardTitle>
-            <CardDescription>Overall Conversion Rate: {basicAnalytics.conversionRate.toFixed(1)}%</CardDescription>
+            <CardDescription>
+              Overall Conversion Rate: {basicAnalytics.conversionRate.toFixed(1)}%
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {basicAnalytics.trafficSources.length === 0 ? (
@@ -69,9 +78,11 @@ export default async function AnalyticsDashboardPage() {
                     <div className="w-1/3 text-sm font-medium">{source.source}</div>
                     <div className="w-2/3">
                       <div className="flex items-center gap-2">
-                        <div 
-                          className="h-2 bg-primary rounded-full" 
-                          style={{ width: `${Math.max(5, (source.count / basicAnalytics.trafficSources[0].count) * 100)}%` }}
+                        <div
+                          className="h-2 bg-primary rounded-full"
+                          style={{
+                            width: `${Math.max(5, (source.count / basicAnalytics.trafficSources[0].count) * 100)}%`,
+                          }}
                         />
                         <span className="text-xs text-muted-foreground w-8">{source.count}</span>
                       </div>
@@ -94,18 +105,24 @@ export default async function AnalyticsDashboardPage() {
             ) : (
               <div className="space-y-4 mt-2">
                 {/* Note: In a production app, use Recharts or Tremor here. Falling back to a simple bar chart. */}
-                {advancedMetrics.revenueChartData.map((data, index) => {
-                  const maxAmount = Math.max(...advancedMetrics.revenueChartData.map(d => d.amount));
+                {advancedMetrics.revenueChartData.map((data) => {
+                  const maxAmount = Math.max(
+                    ...advancedMetrics.revenueChartData.map((d) => d.amount),
+                  );
                   return (
-                    <div key={index} className="flex items-center">
-                      <div className="w-1/4 text-xs font-medium text-muted-foreground">{data.month}</div>
+                    <div key={`${data.month}-${data.amount}`} className="flex items-center">
+                      <div className="w-1/4 text-xs font-medium text-muted-foreground">
+                        {data.month}
+                      </div>
                       <div className="w-3/4">
                         <div className="flex items-center gap-2">
-                          <div 
-                            className="h-4 bg-green-500 rounded-sm" 
+                          <div
+                            className="h-4 bg-green-500 rounded-sm"
                             style={{ width: `${Math.max(2, (data.amount / maxAmount) * 100)}%` }}
                           />
-                          <span className="text-xs font-semibold">${data.amount.toLocaleString()}</span>
+                          <span className="text-xs font-semibold">
+                            ${data.amount.toLocaleString()}
+                          </span>
                         </div>
                       </div>
                     </div>

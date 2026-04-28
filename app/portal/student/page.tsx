@@ -1,12 +1,12 @@
 import { UserRole } from "@prisma/client";
-import { Metadata } from "next";
+import type { Metadata } from "next";
 
+import { submitHomeworkAction } from "@/app/portal/actions";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { requireRole } from "@/lib/auth/session";
 import { getStudentProgress, listStudentHomework } from "@/lib/repositories/portal-repository";
-import { submitHomeworkAction } from "@/app/portal/actions";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 
 export const metadata: Metadata = {
   title: "Student Portal - mathSchool",
@@ -22,7 +22,7 @@ function formatDate(date: Date) {
 
 export default async function StudentPortalDashboard() {
   const session = await requireRole([UserRole.STUDENT]);
-  
+
   const homeworkList = await listStudentHomework(session.uid);
   const progressList = await getStudentProgress(session.uid);
 
@@ -55,28 +55,38 @@ export default async function StudentPortalDashboard() {
                       </span>
                     </div>
                     <p className="text-sm text-muted-foreground">{hw.description}</p>
-                    <p className="text-xs font-medium text-primary">Class: {hw.scheduledClass.title}</p>
-                    
+                    <p className="text-xs font-medium text-primary">
+                      Class: {hw.scheduledClass.title}
+                    </p>
+
                     {submission ? (
                       <div className="bg-muted p-3 rounded-md text-sm">
-                        <p><strong>Status:</strong> Submitted on {formatDate(submission.submittedAt)}</p>
+                        <p>
+                          <strong>Status:</strong> Submitted on {formatDate(submission.submittedAt)}
+                        </p>
                         {submission.grade && (
                           <div className="mt-2 text-green-700">
-                            <p><strong>Grade:</strong> {submission.grade}</p>
-                            <p><strong>Feedback:</strong> {submission.feedback}</p>
+                            <p>
+                              <strong>Grade:</strong> {submission.grade}
+                            </p>
+                            <p>
+                              <strong>Feedback:</strong> {submission.feedback}
+                            </p>
                           </div>
                         )}
                       </div>
                     ) : (
                       <form action={submitHomeworkAction} className="flex items-center gap-2 mt-2">
                         <input type="hidden" name="homeworkId" value={hw.id} />
-                        <Input 
-                          name="contentUrl" 
-                          placeholder="Paste Google Drive/Dropbox link here" 
-                          required 
+                        <Input
+                          name="contentUrl"
+                          placeholder="Paste Google Drive/Dropbox link here"
+                          required
                           className="flex-1 text-sm h-9"
                         />
-                        <Button type="submit" size="sm">Submit</Button>
+                        <Button type="submit" size="sm">
+                          Submit
+                        </Button>
                       </form>
                     )}
                   </div>
@@ -99,7 +109,9 @@ export default async function StudentPortalDashboard() {
                   <li key={progress.id} className="rounded-lg border p-4">
                     <div className="flex justify-between items-center mb-2">
                       <span className="font-semibold">{progress.subject.name}</span>
-                      <span className="text-xs text-muted-foreground">Level: {progress.gradeLevel}</span>
+                      <span className="text-xs text-muted-foreground">
+                        Level: {progress.gradeLevel}
+                      </span>
                     </div>
                     <p className="text-sm text-muted-foreground">"{progress.teacherNotes}"</p>
                     <p className="text-xs text-muted-foreground mt-2 text-right">

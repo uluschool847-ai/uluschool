@@ -40,10 +40,7 @@ function getSessionSecret() {
 
 // Helper for Base64URL encoding/decoding without Node.js Buffer
 function toBase64Url(str: string): string {
-  return btoa(str)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
+  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function fromBase64Url(str: string): string {
@@ -62,12 +59,12 @@ async function signPayload(payloadBase64: string): Promise<string> {
     keyData,
     { name: "HMAC", hash: "SHA-256" },
     false,
-    ["sign"]
+    ["sign"],
   );
 
   const signature = await crypto.subtle.sign("HMAC", key, data);
   const signatureArray = Array.from(new Uint8Array(signature));
-  const signatureStr = signatureArray.map(b => String.fromCharCode(b)).join("");
+  const signatureStr = signatureArray.map((b) => String.fromCharCode(b)).join("");
   return toBase64Url(signatureStr);
 }
 
@@ -81,12 +78,12 @@ async function verifySignature(payloadBase64: string, signatureBase64: string): 
     keyData,
     { name: "HMAC", hash: "SHA-256" },
     false,
-    ["verify"]
+    ["verify"],
   );
 
   // Decode signatureBase64 back to Uint8Array
   const signatureStr = fromBase64Url(signatureBase64);
-  const signatureArray = new Uint8Array(signatureStr.split("").map(c => c.charCodeAt(0)));
+  const signatureArray = new Uint8Array(signatureStr.split("").map((c) => c.charCodeAt(0)));
 
   return await crypto.subtle.verify("HMAC", key, signatureArray, data);
 }
@@ -117,6 +114,54 @@ async function decodeSignedPayload<T>(token: string): Promise<T | null> {
 
 function isNotExpired(exp: number | undefined) {
   return Boolean(exp && Date.now() <= exp);
+}
+
+const PORTAL_DASHBOARD_PATHS: Record<UserRole, string> = {
+  [UserRole.ADMIN]: "/admin",
+  [UserRole.TEACHER]: "/portal/teacher",
+  [UserRole.STUDENT]: "/portal/student",
+  [UserRole.PARENT]: "/portal/parent",
+};
+
+function isSafePortalNextPath(nextPath: string, role: UserRole) {
+  if (!nextPath.startsWith("/") || nextPath.startsWith("//")) {
+    return false;
+  }
+
+  switch (role) {
+    case UserRole.ADMIN:
+      return nextPath.startsWith("/admin");
+    case UserRole.TEACHER:
+      return nextPath.startsWith("/portal/teacher");
+    case UserRole.STUDENT:
+      return nextPath.startsWith("/portal/student");
+    case UserRole.PARENT:
+      return nextPath.startsWith("/portal/parent");
+    default:
+      return false;
+  }
+}
+
+export function getPortalDashboardPath(role: UserRole) {
+  return PORTAL_DASHBOARD_PATHS[role];
+}
+
+export function getPortalLoginPath(nextPath?: string | null) {
+  const normalized = nextPath?.trim();
+  if (normalized?.startsWith("/") && !normalized.startsWith("//")) {
+    return `/portal/login?next=${encodeURIComponent(normalized)}`;
+  }
+
+  return "/portal/login";
+}
+
+export function getPortalRedirectPath(role: UserRole, nextPath?: string | null) {
+  const normalized = nextPath?.trim();
+  if (normalized && isSafePortalNextPath(normalized, role)) {
+    return normalized;
+  }
+
+  return getPortalDashboardPath(role);
 }
 
 export async function createSession(input: {
@@ -170,7 +215,9 @@ export async function getSession(): Promise<SessionPayload | null> {
 /**
  * Lightweight session verification for use in Middleware (Edge Runtime).
  */
-export async function verifySessionToken(token: string | undefined): Promise<SessionPayload | null> {
+export async function verifySessionToken(
+  token: string | undefined,
+): Promise<SessionPayload | null> {
   if (!token) return null;
   const payload = await decodeSignedPayload<SessionPayload>(token);
   if (!payload || !isNotExpired(payload.exp)) {
@@ -219,7 +266,7 @@ export async function clearAdminPendingTwoFactor() {
 export async function requireSession() {
   const session = await getSession();
   if (!session) {
-    redirect("/student-portal");
+    redirect("/portal/login");
   }
   return session;
 }
@@ -227,7 +274,7 @@ export async function requireSession() {
 export async function requireRole(allowedRoles: UserRole[]) {
   const session = await requireSession();
   if (!allowedRoles.includes(session.role)) {
-    redirect("/student-portal");
+    redirect(getPortalDashboardPath(session.role));
   }
 
   if (
@@ -236,7 +283,7 @@ export async function requireRole(allowedRoles: UserRole[]) {
     session.authMethod !== "sso" &&
     !session.mfaVerified
   ) {
-    redirect("/student-portal/verify-2fa");
+    redirect("/portal/login/verify-2fa");
   }
 
   return session;

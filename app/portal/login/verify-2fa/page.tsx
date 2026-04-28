@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { getAdminPendingTwoFactor } from "@/lib/auth/session";
 import { TwoFactorForm } from "@/components/auth/two-factor-form";
 import { PageHero } from "@/components/sections/page-hero";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getAdminPendingTwoFactor } from "@/lib/auth/session";
 
 export const metadata: Metadata = {
   title: "Verify 2FA",
@@ -16,8 +16,14 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function VerifyTwoFactorPage() {
+export default async function VerifyTwoFactorPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ next?: string }>;
+}) {
   const pending = await getAdminPendingTwoFactor();
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const nextPath = resolvedSearchParams?.next?.trim();
 
   return (
     <>
@@ -37,7 +43,7 @@ export default async function VerifyTwoFactorPage() {
                   <p className="text-sm text-muted-foreground">
                     Pending admin session for <strong>{pending.email}</strong>.
                   </p>
-                  <TwoFactorForm />
+                  <TwoFactorForm nextPath={nextPath} />
                 </>
               ) : (
                 <>
@@ -45,7 +51,7 @@ export default async function VerifyTwoFactorPage() {
                     2FA session is missing or expired. Please sign in again.
                   </p>
                   <Button asChild>
-                    <Link href="/student-portal">Back to Login</Link>
+                    <Link href="/portal/login">Back to Login</Link>
                   </Button>
                 </>
               )}

@@ -1,7 +1,10 @@
-import { ReminderChannel, ReminderDeliveryStatus } from "@prisma/client";
+import { ReminderChannel, type ReminderDeliveryStatus } from "@prisma/client";
 
+import {
+  createReminderLog,
+  listUpcomingClassesForReminders,
+} from "@/lib/repositories/schedule-repository";
 import { getUsersByIds } from "@/lib/repositories/user-repository";
-import { createReminderLog, listUpcomingClassesForReminders } from "@/lib/repositories/schedule-repository";
 import { sendClassReminderEmail } from "@/lib/services/email";
 
 async function sendWhatsAppReminder(input: {

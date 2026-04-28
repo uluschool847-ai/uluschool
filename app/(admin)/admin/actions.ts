@@ -5,39 +5,42 @@ import { revalidatePath } from "next/cache";
 
 import { requireRole } from "@/lib/auth/session";
 import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
-import { getContactLeadById, updateContactLeadReview } from "@/lib/repositories/contact-lead-repository";
+import {
+  getContactLeadById,
+  updateContactLeadReview,
+} from "@/lib/repositories/contact-lead-repository";
 import { getEnquiryById, updateEnquiryReview } from "@/lib/repositories/enquiry-repository";
 import { processDueReminders } from "@/lib/services/reminders";
 
-function parseStatus(value: FormDataEntryValue | null) {
-  if (!value || typeof value !== "string") return null;
+import { z } from "zod";
 
-  const normalized = value.toUpperCase();
-  if (
-    normalized !== EnquiryStatus.NEW &&
-    normalized !== EnquiryStatus.IN_REVIEW &&
-    normalized !== EnquiryStatus.ACCEPTED &&
-    normalized !== EnquiryStatus.REJECTED
-  ) {
-    return null;
-  }
-
-  return normalized;
-}
+const updateReviewSchema = z.object({
+  id: z.string().min(1, "ID is required"),
+  status: z.nativeEnum(EnquiryStatus, { 
+    required_error: "Status is required", 
+    invalid_type_error: "Invalid status" 
+  }),
+  adminNotes: z.string().optional(),
+});
 
 export async function updateEnquiryAction(formData: FormData) {
   const session = await requireRole([UserRole.ADMIN]);
 
-  const id = String(formData.get("id") || "");
-  const status = parseStatus(formData.get("status"));
-  const adminNotes = String(formData.get("adminNotes") || "");
+  const rawInput = {
+    id: formData.get("id"),
+    status: formData.get("status")?.toString().toUpperCase(),
+    adminNotes: formData.get("adminNotes") || "",
+  };
 
-  if (!id || !status) {
-    return;
+  const parsed = updateReviewSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { success: false, errors: parsed.error.flatten().fieldErrors };
   }
 
+  const { id, status, adminNotes } = parsed.data;
+
   const before = await getEnquiryById(id);
-  const after = await updateEnquiryReview(id, status, adminNotes);
+  const after = await updateEnquiryReview(id, status, adminNotes || "");
   await createAdminAuditLog({
     adminUserId: session.uid,
     action: "ENQUIRY_REVIEW_UPDATED",
@@ -53,21 +56,27 @@ export async function updateEnquiryAction(formData: FormData) {
     },
   });
   revalidatePath("/admin");
+  return { success: true };
 }
 
 export async function updateContactLeadAction(formData: FormData) {
   const session = await requireRole([UserRole.ADMIN]);
 
-  const id = String(formData.get("id") || "");
-  const status = parseStatus(formData.get("status"));
-  const adminNotes = String(formData.get("adminNotes") || "");
+  const rawInput = {
+    id: formData.get("id"),
+    status: formData.get("status")?.toString().toUpperCase(),
+    adminNotes: formData.get("adminNotes") || "",
+  };
 
-  if (!id || !status) {
-    return;
+  const parsed = updateReviewSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { success: false, errors: parsed.error.flatten().fieldErrors };
   }
 
+  const { id, status, adminNotes } = parsed.data;
+
   const before = await getContactLeadById(id);
-  const after = await updateContactLeadReview(id, status, adminNotes);
+  const after = await updateContactLeadReview(id, status, adminNotes || "");
   await createAdminAuditLog({
     adminUserId: session.uid,
     action: "CONTACT_REVIEW_UPDATED",
@@ -82,6 +91,7 @@ export async function updateContactLeadAction(formData: FormData) {
     },
   });
   revalidatePath("/admin");
+  return { success: true };
 }
 
 export async function runReminderDispatchAction() {

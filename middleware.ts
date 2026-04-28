@@ -1,12 +1,19 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { verifySessionToken } from "./lib/auth/session";
+import { getPortalDashboardPath, getPortalLoginPath, verifySessionToken } from "./lib/auth/session";
 
 const SESSION_COOKIE = "ulu_session";
 const ADMIN_PENDING_2FA_COOKIE = "ulu_admin_2fa_pending";
 const ATTRIBUTION_MAX_AGE = 60 * 60 * 24 * 30;
-const TOKEN_AUTH_API_PREFIXES = ["/api/alerts/test", "/api/reminders/send-due", "/api/cron/automation"] as const;
+
+const TOKEN_AUTH_API_PREFIXES = [
+  "/api/alerts/test",
+  "/api/reminders/send-due",
+  "/api/cron/automation",
+] as const;
+
 type AppRole = "ADMIN" | "TEACHER" | "STUDENT" | "PARENT";
+
 const ROLE_ROUTE_RULES: Array<{ prefix: string; roles: readonly AppRole[] }> = [
   { prefix: "/admin", roles: ["ADMIN"] },
   { prefix: "/api/admin", roles: ["ADMIN"] },
@@ -47,42 +54,58 @@ function setAttributionCookies(request: NextRequest, response: NextResponse) {
   }
 }
 
+// Precise path matching: matches exactly the prefix or any sub-path of it
+function matchesPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+function matchesAnyPrefix(pathname: string, prefixes: readonly string[]): boolean {
+  return prefixes.some((prefix) => matchesPrefix(pathname, prefix));
+}
+
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
-  const response = NextResponse.next();
 
-  setAttributionCookies(request, response);
-
-  // --- A/B Testing Middleware ---
-  if (pathname === "/pricing") {
-    let bucket = request.cookies.get("ab_pricing_bucket")?.value;
-    if (!bucket) {
-      bucket = Math.random() < 0.5 ? "A" : "B";
-      response.cookies.set("ab_pricing_bucket", bucket, { path: "/" });
+  // --- Legacy Compatibility Redirects ---
+  if (matchesPrefix(pathname, "/student-portal")) {
+    if (matchesPrefix(pathname, "/student-portal/login")) {
+      const newPath = pathname.replace(/^\/student-portal\/login/, "/portal/login");
+      const redirectUrl = new URL(`${newPath}${request.nextUrl.search}`, request.url);
+      return NextResponse.redirect(redirectUrl);
     }
-    if (bucket === "B") {
-      return NextResponse.rewrite(new URL("/pricing-v2", request.url));
-    }
+    const newPath = pathname.replace(/^\/student-portal/, "/portal/student");
+    const redirectUrl = new URL(`${newPath}${request.nextUrl.search}`, request.url);
+    return NextResponse.redirect(redirectUrl);
   }
 
-  // --- Centralized RBAC & API Protection ---
-  const isApiPath = pathname.startsWith("/api");
-  const isAdminPath =
-    pathname.startsWith("/admin") ||
-    pathname.startsWith("/api/admin") ||
-    pathname.startsWith("/portal/admin");
-  const isPortalPath = pathname.startsWith("/portal") || pathname.startsWith("/api/portal");
-  const isProtectedPath = isAdminPath || isPortalPath || isApiPath;
+  const response = NextResponse.next();
+  setAttributionCookies(request, response);
+
+  // Define active route policies
+  const isPortalLoginPath = matchesPrefix(pathname, "/portal/login");
+  const isAdminPath = matchesAnyPrefix(pathname, ["/admin", "/api/admin", "/portal/admin"]);
+  
+  // To avoid catching dead prefixes like /api/v1 or /portal-old, only protect defined active zones
+  const activeProtectedPrefixes = [
+    "/admin", "/portal", "/api/admin", "/api/teacher", "/api/student", "/api/parent", "/api/portal"
+  ];
+  
+  const isProtectedPath = matchesAnyPrefix(pathname, activeProtectedPrefixes) && !isPortalLoginPath;
+  const isApiPath = matchesPrefix(pathname, "/api");
 
   // Public exceptions
-  if (!isProtectedPath) return response;
-  if (pathname === "/api/health") return response;
-  if (pathname.startsWith("/api/auth/session")) return response;
-  if (pathname.startsWith("/api/auth/sso/callback")) return response;
+  if (!isProtectedPath) {
+    // If it's a token-protected API, we still need to process it if it matches precisely
+    const isTokenProtectedApi = matchesAnyPrefix(pathname, TOKEN_AUTH_API_PREFIXES);
+    if (!isTokenProtectedApi) return response;
+  }
+  
+  if (matchesPrefix(pathname, "/api/health")) return response;
+  if (matchesPrefix(pathname, "/api/auth/session")) return response;
+  if (matchesPrefix(pathname, "/api/auth/sso/callback")) return response;
 
   // Token-protected machine endpoints may authenticate via Bearer token
-  // and should reach the route-level token check without a session cookie.
-  const isTokenProtectedApi = TOKEN_AUTH_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+  const isTokenProtectedApi = matchesAnyPrefix(pathname, TOKEN_AUTH_API_PREFIXES);
   const hasBearerAuth = request.headers.get("authorization")?.startsWith("Bearer ");
   if (isTokenProtectedApi && hasBearerAuth) {
     return response;
@@ -98,17 +121,21 @@ export async function middleware(request: NextRequest) {
     }
     if (status === 401) {
       if (isAdminPath) {
-        const hasPendingAdminTwoFactor = Boolean(request.cookies.get(ADMIN_PENDING_2FA_COOKIE)?.value);
+        const hasPendingAdminTwoFactor = Boolean(
+          request.cookies.get(ADMIN_PENDING_2FA_COOKIE)?.value,
+        );
         if (hasPendingAdminTwoFactor) {
-          return NextResponse.redirect(new URL("/student-portal/verify-2fa", request.url));
+          const nextPath = `${pathname}${request.nextUrl.search}`;
+          const nextParam = nextPath ? `?next=${encodeURIComponent(nextPath)}` : "";
+          return NextResponse.redirect(new URL(`/portal/login/verify-2fa${nextParam}`, request.url));
         }
       }
-      const loginUrl = new URL("/student-portal", request.url);
-      loginUrl.searchParams.set("next", pathname);
+      const nextPath = `${pathname}${request.nextUrl.search}`;
+      const loginUrl = new URL(getPortalLoginPath(nextPath), request.url);
       return NextResponse.redirect(loginUrl);
     }
-    // 403 for UI: redirect to their base portal
-    return NextResponse.redirect(new URL("/portal", request.url));
+    // 403 for UI: redirect to dedicated unauthorized page
+    return NextResponse.redirect(new URL("/portal/unauthorized", request.url));
   };
 
   if (!session) {
@@ -120,15 +147,18 @@ export async function middleware(request: NextRequest) {
   // 1. Root /portal redirection (Fix for double-redirect)
   if (pathname === "/portal") {
     if (session.role === "ADMIN") return NextResponse.redirect(new URL("/admin", request.url));
-    if (session.role === "TEACHER") return NextResponse.redirect(new URL("/portal/teacher", request.url));
-    if (session.role === "STUDENT") return NextResponse.redirect(new URL("/portal/student", request.url));
-    if (session.role === "PARENT") return NextResponse.redirect(new URL("/portal/parent", request.url));
+    if (session.role === "TEACHER")
+      return NextResponse.redirect(new URL("/portal/teacher", request.url));
+    if (session.role === "STUDENT")
+      return NextResponse.redirect(new URL("/portal/student", request.url));
+    if (session.role === "PARENT")
+      return NextResponse.redirect(new URL("/portal/parent", request.url));
   }
 
   // 2. Role-isolated route protection (deny by default for protected role areas)
   const role = session.role as AppRole;
   for (const rule of ROLE_ROUTE_RULES) {
-    if (pathname.startsWith(rule.prefix) && !rule.roles.includes(role)) {
+    if (matchesPrefix(pathname, rule.prefix) && !rule.roles.includes(role)) {
       return denyAccess(403, "Forbidden");
     }
   }
@@ -139,10 +169,12 @@ export async function middleware(request: NextRequest) {
     process.env.ADMIN_REQUIRE_2FA !== "false" &&
     session.authMethod !== "sso" &&
     !session.mfaVerified &&
-    !pathname.startsWith("/student-portal/verify-2fa")
+    !matchesPrefix(pathname, "/portal/login/verify-2fa")
   ) {
     if (isApiPath) return NextResponse.json({ error: "MFA required" }, { status: 403 });
-    return NextResponse.redirect(new URL("/student-portal/verify-2fa", request.url));
+    const nextPath = `${pathname}${request.nextUrl.search}`;
+    const nextParam = nextPath ? `?next=${encodeURIComponent(nextPath)}` : "";
+    return NextResponse.redirect(new URL(`/portal/login/verify-2fa${nextParam}`, request.url));
   }
 
   return response;

@@ -1,4 +1,4 @@
-import { EnquiryStatus } from "@prisma/client";
+import type { EnquiryStatus } from "@prisma/client";
 
 import type { AttributionInput } from "@/lib/analytics/attribution";
 import { prisma } from "@/lib/prisma";

@@ -2,7 +2,12 @@ import { UserRole } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 
-export async function listScheduleForUser(userId: string, role: UserRole, monthStart: Date, monthEnd: Date) {
+export async function listScheduleForUser(
+  userId: string,
+  role: UserRole,
+  monthStart: Date,
+  monthEnd: Date,
+) {
   return prisma.scheduledClass.findMany({
     where: {
       startAt: {

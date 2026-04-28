@@ -1,10 +1,10 @@
 import { UserRole } from "@prisma/client";
-import { Metadata } from "next";
+import type { Metadata } from "next";
 import Link from "next/link";
 
-import { requireRole } from "@/lib/auth/session";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireRole } from "@/lib/auth/session";
 
 export const metadata: Metadata = {
   title: "Content Management System (CMS)",

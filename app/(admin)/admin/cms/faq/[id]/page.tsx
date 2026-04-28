@@ -1,15 +1,15 @@
 import { UserRole } from "@prisma/client";
-import { Metadata } from "next";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { requireRole } from "@/lib/auth/session";
-import { getFaqItem } from "@/lib/repositories/cms-repository";
 import { saveFaqItemAction } from "@/app/(admin)/admin/cms/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { requireRole } from "@/lib/auth/session";
+import { getFaqItem } from "@/lib/repositories/cms-repository";
 
 export const metadata: Metadata = {
   title: "Edit FAQ - CMS",
@@ -21,10 +21,10 @@ type EditFaqProps = {
 
 export default async function EditCMSFaq({ params }: EditFaqProps) {
   await requireRole([UserRole.ADMIN]);
-  
+
   const { id } = await params;
   const isNew = id === "new";
-  
+
   let faq = null;
   if (!isNew) {
     faq = await getFaqItem(id);
@@ -51,50 +51,58 @@ export default async function EditCMSFaq({ params }: EditFaqProps) {
         <CardContent>
           <form action={saveFaqItemAction} className="space-y-6">
             {!isNew && <input type="hidden" name="id" value={faq?.id} />}
-            
+
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <label htmlFor="category" className="text-sm font-medium">Category</label>
-                <Input 
-                  id="category" 
-                  name="category" 
-                  required 
-                  defaultValue={faq?.category || "General"} 
-                  placeholder="e.g. Payments, Classes, General" 
+                <label htmlFor="category" className="text-sm font-medium">
+                  Category
+                </label>
+                <Input
+                  id="category"
+                  name="category"
+                  required
+                  defaultValue={faq?.category || "General"}
+                  placeholder="e.g. Payments, Classes, General"
                 />
               </div>
               <div className="space-y-2">
-                <label htmlFor="displayOrder" className="text-sm font-medium">Display Order</label>
-                <Input 
-                  id="displayOrder" 
-                  name="displayOrder" 
+                <label htmlFor="displayOrder" className="text-sm font-medium">
+                  Display Order
+                </label>
+                <Input
+                  id="displayOrder"
+                  name="displayOrder"
                   type="number"
-                  required 
-                  defaultValue={faq?.displayOrder || 0} 
-                  placeholder="0" 
+                  required
+                  defaultValue={faq?.displayOrder || 0}
+                  placeholder="0"
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <label htmlFor="question" className="text-sm font-medium">Question</label>
-              <Input 
-                id="question" 
-                name="question" 
-                required 
-                defaultValue={faq?.question || ""} 
-                placeholder="e.g. How do I reset my password?" 
+              <label htmlFor="question" className="text-sm font-medium">
+                Question
+              </label>
+              <Input
+                id="question"
+                name="question"
+                required
+                defaultValue={faq?.question || ""}
+                placeholder="e.g. How do I reset my password?"
               />
             </div>
 
             <div className="space-y-2">
-              <label htmlFor="answer" className="text-sm font-medium">Answer</label>
-              <Textarea 
-                id="answer" 
-                name="answer" 
-                required 
-                className="min-h-[150px]" 
-                defaultValue={faq?.answer || ""} 
+              <label htmlFor="answer" className="text-sm font-medium">
+                Answer
+              </label>
+              <Textarea
+                id="answer"
+                name="answer"
+                required
+                className="min-h-[150px]"
+                defaultValue={faq?.answer || ""}
                 placeholder="Write the answer here..."
               />
             </div>
@@ -103,9 +111,7 @@ export default async function EditCMSFaq({ params }: EditFaqProps) {
               <Button asChild variant="outline">
                 <Link href="/admin/cms/faq">Cancel</Link>
               </Button>
-              <Button type="submit">
-                {isNew ? "Create FAQ" : "Save Changes"}
-              </Button>
+              <Button type="submit">{isNew ? "Create FAQ" : "Save Changes"}</Button>
             </div>
           </form>
         </CardContent>

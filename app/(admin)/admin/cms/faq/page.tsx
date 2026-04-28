@@ -1,12 +1,12 @@
 import { UserRole } from "@prisma/client";
-import { Metadata } from "next";
+import type { Metadata } from "next";
 import Link from "next/link";
 
-import { requireRole } from "@/lib/auth/session";
-import { listFaqItems } from "@/lib/repositories/cms-repository";
 import { deleteFaqItemAction } from "@/app/(admin)/admin/cms/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireRole } from "@/lib/auth/session";
+import { listFaqItems } from "@/lib/repositories/cms-repository";
 
 export const metadata: Metadata = {
   title: "Manage FAQs - CMS",
@@ -21,7 +21,9 @@ export default async function CMSFaqList() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">FAQ Items</h1>
-          <p className="text-muted-foreground mt-2">Manage frequently asked questions by category.</p>
+          <p className="text-muted-foreground mt-2">
+            Manage frequently asked questions by category.
+          </p>
         </div>
         <Button asChild>
           <Link href="/admin/cms/faq/new">Create New FAQ</Link>
@@ -34,7 +36,9 @@ export default async function CMSFaqList() {
         </CardHeader>
         <CardContent>
           {faqs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No FAQ items found. Create one to get started.</p>
+            <p className="text-sm text-muted-foreground">
+              No FAQ items found. Create one to get started.
+            </p>
           ) : (
             <div className="rounded-md border">
               <table className="w-full text-sm text-left">

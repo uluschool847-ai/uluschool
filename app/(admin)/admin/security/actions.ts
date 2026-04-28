@@ -4,8 +4,13 @@ import { UserRole } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { generateBackupCodes, generateTwoFactorSecret, getTotpUri, verifyTotpCode } from "@/lib/auth/two-factor";
 import { requireRole } from "@/lib/auth/session";
+import {
+  generateBackupCodes,
+  generateTwoFactorSecret,
+  getTotpUri,
+  verifyTotpCode,
+} from "@/lib/auth/two-factor";
 import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 import {
   disableAdminTwoFactor,
@@ -23,7 +28,10 @@ export type TwoFactorSetupState = {
 };
 
 const setupCodeSchema = z.object({
-  code: z.string().trim().regex(/^\d{6}$/, "Enter a 6-digit authenticator code."),
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, "Enter a 6-digit authenticator code."),
 });
 
 export async function beginTwoFactorSetupAction(

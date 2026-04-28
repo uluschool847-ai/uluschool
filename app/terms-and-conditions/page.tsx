@@ -16,9 +16,7 @@ export default function TermsAndConditionsPage() {
       />
       <section className="section-shell">
         <div className="container max-w-4xl space-y-4 text-sm text-muted-foreground">
-          <p className="text-foreground">
-            Effective date: April 21, 2026
-          </p>
+          <p className="text-foreground">Effective date: April 21, 2026</p>
           <h2 className="text-xl font-semibold text-foreground">1. Scope</h2>
           <p>
             These terms govern access to ULU Online School website pages, forms, class scheduling,
@@ -41,8 +39,8 @@ export default function TermsAndConditionsPage() {
           </p>
           <h2 className="text-xl font-semibold text-foreground">5. Attendance and Scheduling</h2>
           <p>
-            Families are responsible for attending scheduled lessons on time and notifying the school
-            when rescheduling is needed.
+            Families are responsible for attending scheduled lessons on time and notifying the
+            school when rescheduling is needed.
           </p>
           <h2 className="text-xl font-semibold text-foreground">6. Assessment and Outcomes</h2>
           <p>
@@ -66,7 +64,8 @@ export default function TermsAndConditionsPage() {
           </p>
           <h2 className="text-xl font-semibold text-foreground">10. Contact</h2>
           <p>
-            Questions about these terms should be sent to <strong>info@uluglobalacademy.com</strong>.
+            Questions about these terms should be sent to <strong>info@uluglobalacademy.com</strong>
+            .
           </p>
         </div>
       </section>

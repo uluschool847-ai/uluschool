@@ -22,6 +22,37 @@ Next.js 15 web platform for ULU Online School with enquiry capture, admin review
 5. Seed baseline content: `npm run prisma:seed`
 6. Start dev server: `npm run dev`
 
+## Local Environment Defaults (Safe Behavior)
+- Required for local runtime:
+  - `DATABASE_URL`, `DIRECT_URL`
+  - `AUTH_SESSION_SECRET`
+  - `DEFAULT_PORTAL_PASSWORD`
+  - `CRON_SECRET`
+  - `REMINDER_CRON_TOKEN`
+  - `ALERT_TEST_TOKEN`
+- Optional in local runtime:
+  - SMTP vars (`SMTP_*`, `EMAIL_USER`, `EMAIL_PASS`)
+  - Turnstile vars (`NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`)
+  - `WHATSAPP_WEBHOOK_URL`
+  - `ALERT_WEBHOOK_URL`
+  - Sentry vars (`SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`, trace sample rates)
+- SMTP:
+  - If `SMTP_*` (or fallback `EMAIL_USER`/`EMAIL_PASS`) is missing, email delivery is skipped safely.
+  - If SMTP values are left on example placeholders (`smtp.example.com` / `username` / `password`), delivery is skipped safely.
+  - In non-production, the app logs a local info message instead of attempting real delivery.
+- Turnstile:
+  - If `TURNSTILE_SECRET_KEY` is empty and `TURNSTILE_ENFORCE=false`, Turnstile checks are bypassed locally.
+  - If `TURNSTILE_ENFORCE=true` with no secret, verification fails with `NOT_CONFIGURED`.
+- Admin 2FA:
+  - `ADMIN_REQUIRE_2FA=true` is the secure default.
+  - In non-production, if admin 2FA is not configured yet, login uses a controlled dev bypass and redirects to `/admin/security?setup2fa=required`.
+  - Set `ADMIN_REQUIRE_2FA=false` only for local-only troubleshooting.
+- Cron/reminder/alert endpoints:
+  - `GET /api/cron/automation` requires `Authorization: Bearer <CRON_SECRET>` in all environments.
+  - `POST /api/reminders/send-due` requires `Authorization: Bearer <REMINDER_CRON_TOKEN>`.
+  - `POST /api/alerts/test` requires `Authorization: Bearer <ALERT_TEST_TOKEN>`.
+  - If `ALERT_WEBHOOK_URL` is empty, alerts fail safely with `ALERT_WEBHOOK_NOT_CONFIGURED`.
+
 ## Seeded Test Accounts (Portal)
 After `npm run prisma:seed`, these users are created:
 
@@ -76,6 +107,7 @@ npx prisma migrate deploy
 - `ADMIN_SSO_ENABLED`
 - `ADMIN_SSO_SHARED_SECRET`
 - `ADMIN_SSO_LOGIN_URL`
+- `CRON_SECRET`
 - `REMINDER_CRON_TOKEN`
 - `WHATSAPP_WEBHOOK_URL`
 - `SENTRY_DSN`
@@ -85,6 +117,7 @@ npx prisma migrate deploy
 - `ALERT_WEBHOOK_URL`
 - `ALERT_TEST_TOKEN`
 - `NEXT_PUBLIC_SITE_URL`
+- `NEXT_PUBLIC_APP_URL`
 
 ## Email Deliverability Checklist
 Before going live, configure these DNS records for your sending domain:
@@ -186,7 +219,8 @@ Without SPF/DKIM/DMARC alignment, delivery can be unreliable even if SMTP creden
 - Enrolment and Contact forms use Server Actions + Zod validation + Prisma persistence + Nodemailer delivery.
 - Admin dashboard supports status workflow (`new`, `in_review`, `accepted`, `rejected`) and admin notes.
 - Basic anti-spam includes honeypot, minimum submit time guard, optional Turnstile captcha, and in-memory rate limiting.
-- Student Portal v1 supports login with roles (`admin`, `teacher`, `parent`, `student`) and protected pages.
+- Portal login lives at `/portal/login`, and the student dashboard is available at `/portal/student`.
+- Portal v1 supports login with roles (`admin`, `teacher`, `parent`, `student`) and protected pages.
 - Admin hardening: `/admin` requires admin role and can be locked behind TOTP 2FA (`ADMIN_REQUIRE_2FA=true`) or SSO callback (`/api/auth/sso/callback`).
 - Schedule v1 is available at `/portal/schedule` with class calendar and live lesson links.
 - Reminder dispatch endpoint: `POST /api/reminders/send-due` with `Authorization: Bearer <REMINDER_CRON_TOKEN>`.

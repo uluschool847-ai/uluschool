@@ -295,7 +295,12 @@ export async function getStudentProgress(studentId: string) {
   });
 }
 
-export async function recordStudentProgress(data: { studentId: string; subjectId: string; gradeLevel: string; teacherNotes: string }) {
+export async function recordStudentProgress(data: {
+  studentId: string;
+  subjectId: string;
+  gradeLevel: string;
+  teacherNotes: string;
+}) {
   return prisma.studentProgress.create({
     data,
   });

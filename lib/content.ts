@@ -13,7 +13,7 @@ export const siteConfig = {
 export const mainNavItems = [
   { href: "/curriculum", label: "Curriculum" },
   { href: "/admissions", label: "Admissions" },
-  { href: "/fees", label: "Fees" },
+  { href: "/pricing", label: "Pricing" },
   { href: "/teachers", label: "Teachers" },
   { href: "/about", label: "About" },
   { href: "/contact", label: "Contact" },
@@ -27,10 +27,10 @@ export const mobileNavItems = [
   { href: "/subjects", label: "Subjects" },
   { href: "/teachers", label: "Teachers" },
   { href: "/admissions", label: "Admissions" },
-  { href: "/fees", label: "Fees" },
+  { href: "/pricing", label: "Pricing" },
   { href: "/results", label: "Results" },
   { href: "/blog", label: "Blog" },
-  { href: "/student-portal", label: "Student Portal" },
+  { href: "/portal/login", label: "Portal Login" },
   { href: "/prospectus", label: "Prospectus" },
   { href: "/contact", label: "Contact" },
   { href: "/enrol", label: "Book Trial" },
@@ -114,7 +114,8 @@ export const academicJourney = [
     id: "lower-secondary",
     label: "Lower Secondary",
     years: "Years 7-9",
-    summary: "Skill-based preparation for IGCSE with stronger analytical and exam-readiness habits.",
+    summary:
+      "Skill-based preparation for IGCSE with stronger analytical and exam-readiness habits.",
     subjects: [
       "English",
       "Mathematics",
@@ -206,29 +207,28 @@ export const teachers = [
     title: "Math and Science Teacher",
     credentials: "Lower Secondary specialist",
     focus: "Math and Science",
-    image: "/nick.jpg"
+    image: "/nick.jpg",
   },
   {
     name: "Mr. Alphonse",
     title: "English Teacher",
     credentials: "High School specialist",
     focus: "English Language",
-    image: "/alphonse.jpg"
+    image: "/alphonse.jpg",
   },
   {
     name: "Ms. Cholette",
     title: "Primary Teacher",
     credentials: "Lower Primary specialist",
     focus: "Lower Primary Education",
-    image: "/cholette.jpg"
-  }
+    image: "/cholette.jpg",
+  },
 ];
 
 export const testimonials = [
   {
     label: "Parent Testimonial",
-    quote:
-      "ULU has transformed our child’s learning experience.",
+    quote: "ULU has transformed our child’s learning experience.",
   },
   {
     label: "Parent Testimonial",
@@ -236,8 +236,7 @@ export const testimonials = [
   },
   {
     label: "Family Feedback",
-    quote:
-      "We appreciate the live classes, recorded lessons, and regular progress reports.",
+    quote: "We appreciate the live classes, recorded lessons, and regular progress reports.",
   },
 ];
 
@@ -248,7 +247,8 @@ export const faqItems = [
   },
   {
     question: "Are classes live or recorded?",
-    answer: "Students attend live interactive classes and can access recorded lessons for revision.",
+    answer:
+      "Students attend live interactive classes and can access recorded lessons for revision.",
   },
   {
     question: "Do you offer a free trial class?",

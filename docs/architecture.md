@@ -18,6 +18,9 @@ To enable non-developers to edit website content quickly, a custom built-in CMS 
 ### B. Educational Dashboards (Portals)
 Dedicated portals are built for different personas to streamline educational operations.
 
+- **Portal Login (`/portal/login`):**
+  - Single authentication entry point for portal users.
+  - Preserves the intended destination with `?next=` when users arrive from a protected page.
 - **Teacher Portal (`/portal/teacher`):**
   - Manage scheduled classes and upload course materials.
   - Assign homework and review/grade student submissions.

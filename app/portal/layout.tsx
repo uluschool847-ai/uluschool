@@ -1,16 +1,11 @@
-import Link from "next/link";
 import { UserRole } from "@prisma/client";
+import Link from "next/link";
 
-import { requireRole } from "@/lib/auth/session";
 import { Button } from "@/components/ui/button";
+import { getPortalDashboardPath, getSession } from "@/lib/auth/session";
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
-  const session = await requireRole([
-    UserRole.ADMIN,
-    UserRole.TEACHER,
-    UserRole.PARENT,
-    UserRole.STUDENT,
-  ]);
+  const session = await getSession();
 
   return (
     <section className="section-shell">
@@ -21,17 +16,25 @@ export default async function PortalLayout({ children }: { children: React.React
               <h1 className="text-2xl font-semibold">Portal</h1>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button asChild variant="secondary" size="sm">
-                <Link href="/portal">Overview</Link>
-              </Button>
-              <Button asChild variant="secondary" size="sm">
-                <Link href="/portal/schedule">Schedule</Link>
-              </Button>
-              {session.role === UserRole.ADMIN ? (
+              {session ? (
+                <>
+                  <Button asChild variant="secondary" size="sm">
+                    <Link href="/portal">Overview</Link>
+                  </Button>
+                  <Button asChild variant="secondary" size="sm">
+                    <Link href="/portal/schedule">Schedule</Link>
+                  </Button>
+                  {session.role === UserRole.ADMIN ? (
+                    <Button asChild variant="secondary" size="sm">
+                      <Link href={getPortalDashboardPath(UserRole.ADMIN)}>Admin</Link>
+                    </Button>
+                  ) : null}
+                </>
+              ) : (
                 <Button asChild variant="secondary" size="sm">
-                  <Link href="/admin">Admin</Link>
+                  <Link href="/portal/login">Log In</Link>
                 </Button>
-              ) : null}
+              )}
             </div>
           </div>
         </header>

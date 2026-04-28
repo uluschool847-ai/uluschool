@@ -19,7 +19,8 @@ export function WhyChooseSection() {
       <div className="container">
         <h2>Why Choose ULU?</h2>
         <p className="mt-3 max-w-3xl text-muted-foreground">
-          Certified teachers, structured classes, and continuous assessment in a flexible online environment.
+          Certified teachers, structured classes, and continuous assessment in a flexible online
+          environment.
         </p>
         <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {whyChooseItems.map((item, index) => {

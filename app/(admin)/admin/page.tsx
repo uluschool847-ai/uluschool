@@ -7,15 +7,15 @@ import {
   updateContactLeadAction,
   updateEnquiryAction,
 } from "@/app/(admin)/admin/actions";
-import { enquiryStatuses, getStatusLabel, parseStatus } from "@/lib/admin/enquiry-status";
-import { requireRole } from "@/lib/auth/session";
-import { getAdminAnalyticsOverview } from "@/lib/repositories/analytics-repository";
-import { listRecentAdminAuditLogs } from "@/lib/repositories/admin-audit-repository";
-import { listContactLeads } from "@/lib/repositories/contact-lead-repository";
-import { listEnquiries } from "@/lib/repositories/enquiry-repository";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { enquiryStatuses, getStatusLabel, parseStatus } from "@/lib/admin/enquiry-status";
+import { requireRole } from "@/lib/auth/session";
+import { listRecentAdminAuditLogs } from "@/lib/repositories/admin-audit-repository";
+import { getAdminAnalyticsOverview } from "@/lib/repositories/analytics-repository";
+import { listContactLeads } from "@/lib/repositories/contact-lead-repository";
+import { listEnquiries } from "@/lib/repositories/enquiry-repository";
 
 export const metadata: Metadata = {
   title: "Admin",
@@ -123,7 +123,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 variant={filterStatus === status ? "default" : "secondary"}
                 size="sm"
               >
-                <Link href={`/admin?status=${getStatusLabel(status)}`}>{getStatusLabel(status)}</Link>
+                <Link href={`/admin?status=${getStatusLabel(status)}`}>
+                  {getStatusLabel(status)}
+                </Link>
               </Button>
             ))}
             <Button asChild variant="secondary" size="sm">
@@ -139,8 +141,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           <div className="rounded-lg border border-secondary p-3">
             <p className="mb-2 font-medium">Reminder Dispatch</p>
             <p className="mb-3 text-muted-foreground">
-              Production cron should call <code>/api/reminders/send-due</code>. You can also run
-              it manually from here.
+              Production cron should call <code>/api/reminders/send-due</code>. You can also run it
+              manually from here.
             </p>
             <form action={runReminderDispatchAction}>
               <Button type="submit" size="sm">
@@ -195,7 +197,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   </p>
                 </div>
 
-                <form action={updateEnquiryAction} className="mt-4 grid gap-3 md:grid-cols-[180px_1fr_auto]">
+                <form
+                  action={updateEnquiryAction}
+                  className="mt-4 grid gap-3 md:grid-cols-[180px_1fr_auto]"
+                >
                   <input type="hidden" name="id" value={item.id} />
                   <label className="grid gap-1 text-sm">
                     <span>Status</span>
@@ -207,15 +212,16 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       <StatusOptions />
                     </select>
                   </label>
-                  <label className="grid gap-1 text-sm">
-                    <span>Admin notes</span>
+                  <div className="grid gap-1 text-sm">
+                    <label htmlFor={`enquiry-notes-${item.id}`}>Admin notes</label>
                     <Textarea
+                      id={`enquiry-notes-${item.id}`}
                       name="adminNotes"
                       defaultValue={item.adminNotes || ""}
                       className="min-h-[88px]"
                       placeholder="Internal note for review workflow"
                     />
-                  </label>
+                  </div>
                   <div className="flex items-end">
                     <Button type="submit" size="sm">
                       Save
@@ -278,15 +284,16 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       <StatusOptions />
                     </select>
                   </label>
-                  <label className="grid gap-1 text-sm">
-                    <span>Admin notes</span>
+                  <div className="grid gap-1 text-sm">
+                    <label htmlFor={`contact-notes-${item.id}`}>Admin notes</label>
                     <Textarea
+                      id={`contact-notes-${item.id}`}
                       name="adminNotes"
                       defaultValue={item.adminNotes || ""}
                       className="min-h-[88px]"
                       placeholder="Internal note for review workflow"
                     />
-                  </label>
+                  </div>
                   <div className="flex items-end">
                     <Button type="submit" size="sm">
                       Save
@@ -311,7 +318,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               {auditLogs.map((log) => (
                 <li key={log.id} className="rounded-lg border border-secondary p-3">
                   <p>
-                    <strong>{log.action}</strong> by {log.adminUser.fullName} ({log.adminUser.email})
+                    <strong>{log.action}</strong> by {log.adminUser.fullName} ({log.adminUser.email}
+                    )
                   </p>
                   <p className="text-muted-foreground">
                     Target: {log.targetType}

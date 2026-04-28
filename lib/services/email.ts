@@ -13,6 +13,13 @@ function getSmtpConfig() {
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
 
+  const isPlaceholderDefault =
+    host === "smtp.example.com" && user === "username" && pass === "password";
+
+  if (isPlaceholderDefault) {
+    return null;
+  }
+
   if (host && port && user && pass) {
     return {
       host,
@@ -115,6 +122,9 @@ async function sendWithRetry(message: {
 }): Promise<EmailDeliveryResult> {
   const smtp = getSmtpConfig();
   if (!smtp) {
+    if (process.env.NODE_ENV !== "production") {
+      console.info("[email] SMTP is not configured. Skipping delivery in local/dev mode.");
+    }
     return { delivered: false, reason: "SMTP_NOT_CONFIGURED", attempts: 0 };
   }
 

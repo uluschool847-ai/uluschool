@@ -1,12 +1,12 @@
 import { UserRole } from "@prisma/client";
-import { Metadata } from "next";
+import type { Metadata } from "next";
 import Link from "next/link";
 
-import { requireRole } from "@/lib/auth/session";
-import { listPages } from "@/lib/repositories/cms-repository";
 import { deletePageAction } from "@/app/(admin)/admin/cms/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireRole } from "@/lib/auth/session";
+import { listPages } from "@/lib/repositories/cms-repository";
 
 export const metadata: Metadata = {
   title: "Manage Pages - CMS",
@@ -45,7 +45,9 @@ export default async function CMSPagesList() {
         </CardHeader>
         <CardContent>
           {pages.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No pages found. Create one to get started.</p>
+            <p className="text-sm text-muted-foreground">
+              No pages found. Create one to get started.
+            </p>
           ) : (
             <div className="rounded-md border">
               <table className="w-full text-sm text-left">
@@ -64,11 +66,15 @@ export default async function CMSPagesList() {
                       <td className="px-4 py-3 font-medium">{page.title}</td>
                       <td className="px-4 py-3 text-muted-foreground">/pages/{page.slug}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${page.isPublished ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-800"}`}>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${page.isPublished ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-800"}`}
+                        >
                           {page.isPublished ? "Published" : "Draft"}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{formatDate(page.updatedAt)}</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {formatDate(page.updatedAt)}
+                      </td>
                       <td className="px-4 py-3 text-right space-x-2">
                         {page.isPublished ? (
                           <Button asChild variant="secondary" size="sm">

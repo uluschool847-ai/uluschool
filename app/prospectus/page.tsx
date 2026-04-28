@@ -7,7 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const metadata: Metadata = {
   title: "Prospectus",
-  description: "ULU mini prospectus content for programme overview, teaching approach, assessment, and technology platform.",
+  description:
+    "ULU mini prospectus content for programme overview, teaching approach, assessment, and technology platform.",
 };
 
 export default function ProspectusPage() {
@@ -46,9 +47,7 @@ export default function ProspectusPage() {
                 ULU Online School is a fully virtual Cambridge learning institution designed to
                 provide structured, affordable, and internationally competitive education.
               </p>
-              <p>
-                Vision: To become Africa&apos;s leading online Cambridge school.
-              </p>
+              <p>Vision: To become Africa&apos;s leading online Cambridge school.</p>
               <p>
                 Mission: To provide accessible, high-quality international education through
                 technology.
@@ -99,7 +98,8 @@ export default function ProspectusPage() {
 
           <div className="prestige-surface p-6">
             <p className="text-sm text-muted-foreground">
-              Need a branded PDF version? Request the full professional prospectus from the ULU team.
+              Need a branded PDF version? Request the full professional prospectus from the ULU
+              team.
             </p>
             <div className="mt-4">
               <Button asChild>

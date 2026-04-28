@@ -16,9 +16,7 @@ export default function PrivacyPolicyPage() {
       />
       <section className="section-shell">
         <div className="container max-w-4xl space-y-4 text-sm text-muted-foreground">
-          <p className="text-foreground">
-            Effective date: April 21, 2026
-          </p>
+          <p className="text-foreground">Effective date: April 21, 2026</p>
           <h2 className="text-xl font-semibold text-foreground">1. Data We Collect</h2>
           <p>
             We collect data submitted through Enrolment and Contact forms, including parent name,

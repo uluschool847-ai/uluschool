@@ -4,10 +4,10 @@ import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 
 import {
+  type TwoFactorSetupState,
   beginTwoFactorSetupAction,
   confirmTwoFactorSetupAction,
   disableTwoFactorAction,
-  type TwoFactorSetupState,
 } from "@/app/(admin)/admin/security/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,7 +37,11 @@ export function TwoFactorSettings({ enabled }: { enabled: boolean }) {
         <form action={beginSetup} className="space-y-2">
           <SubmitButton label="Generate 2FA Secret" pendingLabel="Generating..." />
           {setupState.message ? (
-            <p className={setupState.success ? "text-sm text-emerald-600" : "text-sm text-destructive"}>
+            <p
+              className={
+                setupState.success ? "text-sm text-emerald-600" : "text-sm text-destructive"
+              }
+            >
               {setupState.message}
             </p>
           ) : null}
@@ -55,14 +59,24 @@ export function TwoFactorSettings({ enabled }: { enabled: boolean }) {
           <p className="break-all text-xs text-muted-foreground">{setupState.otpAuthUrl}</p>
 
           <form action={confirmSetup} className="flex flex-wrap items-end gap-2">
-            <label className="grid gap-1 text-sm">
-              Confirm code
-              <Input name="code" inputMode="numeric" maxLength={6} placeholder="123456" />
-            </label>
+            <div className="grid gap-1 text-sm">
+              <label htmlFor="two-factor-confirm-code">Confirm code</label>
+              <Input
+                id="two-factor-confirm-code"
+                name="code"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="123456"
+              />
+            </div>
             <SubmitButton label="Enable 2FA" pendingLabel="Enabling..." />
           </form>
           {confirmState.message ? (
-            <p className={confirmState.success ? "text-sm text-emerald-600" : "text-sm text-destructive"}>
+            <p
+              className={
+                confirmState.success ? "text-sm text-emerald-600" : "text-sm text-destructive"
+              }
+            >
               {confirmState.message}
             </p>
           ) : null}
@@ -86,7 +100,11 @@ export function TwoFactorSettings({ enabled }: { enabled: boolean }) {
         <form action={disableSetup} className="space-y-2">
           <SubmitButton label="Disable 2FA" pendingLabel="Disabling..." />
           {disableState.message ? (
-            <p className={disableState.success ? "text-sm text-emerald-600" : "text-sm text-destructive"}>
+            <p
+              className={
+                disableState.success ? "text-sm text-emerald-600" : "text-sm text-destructive"
+              }
+            >
               {disableState.message}
             </p>
           ) : null}

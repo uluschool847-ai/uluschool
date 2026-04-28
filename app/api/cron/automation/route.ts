@@ -1,16 +1,17 @@
-import { NextResponse } from "next/server";
 import { generateTasksForStaleEnquiries } from "@/lib/repositories/automation-repository";
+import { NextResponse } from "next/server";
 
-// To protect this endpoint, we check for a specific Authorization Bearer token 
-// that matches a secret environment variable known only to our Cron provider (e.g., Vercel Cron).
+function isAuthorized(authHeader: string | null) {
+  const token = process.env.CRON_SECRET;
+  if (!token) return false;
+  if (!authHeader) return false;
+  return authHeader === `Bearer ${token}`;
+}
+
+// This endpoint is always token-protected, including local development.
 export async function GET(request: Request) {
-  const authHeader = request.headers.get("authorization");
-  
-  // In production, enforce CRON_SECRET checking
-  if (process.env.NODE_ENV === "production") {
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!isAuthorized(request.headers.get("authorization"))) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -20,8 +21,9 @@ export async function GET(request: Request) {
       tasksCreated: tasks.length,
       message: `Generated ${tasks.length} manager tasks for stale enquiries.`,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error("Cron Automation Error:", error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: errorMessage }, { status: 500 });
   }
 }

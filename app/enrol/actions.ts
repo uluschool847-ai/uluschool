@@ -3,7 +3,11 @@
 import { getAttributionFromRequest } from "@/lib/analytics/attribution";
 import { createEnquiry } from "@/lib/repositories/enquiry-repository";
 import { checkRateLimit } from "@/lib/security/rate-limit";
-import { getRequestIdentifier, honeypotTriggered, submittedTooFast } from "@/lib/security/spam-guard";
+import {
+  getRequestIdentifier,
+  honeypotTriggered,
+  submittedTooFast,
+} from "@/lib/security/spam-guard";
 import { verifyTurnstileToken } from "@/lib/security/turnstile";
 import { sendEnquiryEmail } from "@/lib/services/email";
 import { type EnrolmentFormState, enrolmentSchema } from "@/lib/validations/enrolment";
@@ -27,10 +31,14 @@ export async function submitEnrolment(
     };
   }
 
-  if (honeypotTriggered(formData.get("companyWebsite")) || submittedTooFast(formData.get("startedAt"))) {
+  if (
+    honeypotTriggered(formData.get("companyWebsite")) ||
+    submittedTooFast(formData.get("startedAt"))
+  ) {
     return {
       success: true,
-      message: "Thank you. Your enquiry has been submitted successfully. We will contact you shortly.",
+      message:
+        "Thank you. Your enquiry has been submitted successfully. We will contact you shortly.",
     };
   }
 

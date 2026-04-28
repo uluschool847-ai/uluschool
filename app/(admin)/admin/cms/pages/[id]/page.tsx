@@ -1,15 +1,15 @@
 import { UserRole } from "@prisma/client";
-import { Metadata } from "next";
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { requireRole } from "@/lib/auth/session";
-import { getPage } from "@/lib/repositories/cms-repository";
 import { savePageAction } from "@/app/(admin)/admin/cms/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { requireRole } from "@/lib/auth/session";
+import { getPage } from "@/lib/repositories/cms-repository";
 
 export const metadata: Metadata = {
   title: "Edit Page - CMS",
@@ -24,7 +24,7 @@ type EditPageProps = {
 
 export default async function EditCMSPage({ params, searchParams }: EditPageProps) {
   await requireRole([UserRole.ADMIN]);
-  
+
   const { id } = await params;
   const isNew = id === "new";
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
@@ -32,7 +32,7 @@ export default async function EditCMSPage({ params, searchParams }: EditPageProp
   const invalidJsonError = errorCode === "invalid-json";
   const invalidSlugError = errorCode === "invalid-slug";
   const duplicateSlugError = errorCode === "slug-taken";
-  
+
   let page = null;
   if (!isNew) {
     page = await getPage(id);
@@ -81,27 +81,31 @@ export default async function EditCMSPage({ params, searchParams }: EditPageProp
           ) : null}
           <form action={savePageAction} className="space-y-6">
             {!isNew && <input type="hidden" name="id" value={page?.id} />}
-            
+
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <label htmlFor="title" className="text-sm font-medium">Title</label>
-                <Input 
-                  id="title" 
-                  name="title" 
-                  required 
-                  defaultValue={page?.title || ""} 
-                  placeholder="e.g. Pricing Plans" 
+                <label htmlFor="title" className="text-sm font-medium">
+                  Title
+                </label>
+                <Input
+                  id="title"
+                  name="title"
+                  required
+                  defaultValue={page?.title || ""}
+                  placeholder="e.g. Pricing Plans"
                 />
               </div>
               <div className="space-y-2">
-                <label htmlFor="slug" className="text-sm font-medium">Slug (URL)</label>
-                <Input 
-                  id="slug" 
-                  name="slug" 
-                  required 
-                  defaultValue={page?.slug || ""} 
-                  placeholder="e.g. pricing" 
-                  pattern="[a-z0-9-]+" 
+                <label htmlFor="slug" className="text-sm font-medium">
+                  Slug (URL)
+                </label>
+                <Input
+                  id="slug"
+                  name="slug"
+                  required
+                  defaultValue={page?.slug || ""}
+                  placeholder="e.g. pricing"
+                  pattern="[a-z0-9-]+"
                   title="Only lowercase letters, numbers, and hyphens"
                 />
                 <p className="text-xs text-muted-foreground">
@@ -112,26 +116,28 @@ export default async function EditCMSPage({ params, searchParams }: EditPageProp
             </div>
 
             <div className="space-y-2">
-              <label htmlFor="content" className="text-sm font-medium">Structured Content (JSON)</label>
+              <label htmlFor="content" className="text-sm font-medium">
+                Structured Content (JSON)
+              </label>
               <p className="text-xs text-muted-foreground">
                 Define the content blocks as JSON. The frontend will render them accordingly.
               </p>
-              <Textarea 
-                id="content" 
-                name="content" 
-                required 
-                className="font-mono text-sm min-h-[300px]" 
-                defaultValue={page ? JSON.stringify(page.content, null, 2) : "{\n  \"blocks\": []\n}"} 
+              <Textarea
+                id="content"
+                name="content"
+                required
+                className="font-mono text-sm min-h-[300px]"
+                defaultValue={page ? JSON.stringify(page.content, null, 2) : '{\n  "blocks": []\n}'}
               />
             </div>
 
             <div className="flex items-center gap-2">
-              <input 
-                type="checkbox" 
-                id="isPublished" 
-                name="isPublished" 
-                value="true" 
-                defaultChecked={page?.isPublished} 
+              <input
+                type="checkbox"
+                id="isPublished"
+                name="isPublished"
+                value="true"
+                defaultChecked={page?.isPublished}
                 className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
               />
               <label htmlFor="isPublished" className="text-sm font-medium">
@@ -143,9 +149,7 @@ export default async function EditCMSPage({ params, searchParams }: EditPageProp
               <Button asChild variant="outline">
                 <Link href="/admin/cms/pages">Cancel</Link>
               </Button>
-              <Button type="submit">
-                {isNew ? "Create Page" : "Save Changes"}
-              </Button>
+              <Button type="submit">{isNew ? "Create Page" : "Save Changes"}</Button>
             </div>
           </form>
         </CardContent>

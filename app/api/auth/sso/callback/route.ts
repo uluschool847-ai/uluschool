@@ -38,7 +38,10 @@ export async function GET(request: Request) {
 
   const user = await findUserByEmail(email);
   if (!user || !user.isActive || user.role !== UserRole.ADMIN) {
-    return NextResponse.json({ ok: false, error: "Admin user is not allowed for SSO" }, { status: 403 });
+    return NextResponse.json(
+      { ok: false, error: "Admin user is not allowed for SSO" },
+      { status: 403 },
+    );
   }
 
   await createSession({

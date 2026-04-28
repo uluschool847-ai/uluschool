@@ -1,8 +1,8 @@
 "use server";
 
+import { Prisma, UserRole } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { Prisma, UserRole } from "@prisma/client";
 
 import { requireRole } from "@/lib/auth/session";
 import {
@@ -17,31 +17,58 @@ import {
   updatePage,
 } from "@/lib/repositories/cms-repository";
 
+import { z } from "zod";
+
+const pageSchema = z.object({
+  id: z.string().optional().nullable(),
+  slug: z.string().trim().toLowerCase().regex(/^[a-z0-9-]+$/, "Invalid slug format"),
+  title: z.string().min(1, "Title is required"),
+  contentStr: z.string().optional().nullable(),
+  isPublished: z.boolean().default(false),
+});
+
+const blogPostSchema = z.object({
+  id: z.string().optional().nullable(),
+  slug: z.string().trim().toLowerCase().regex(/^[a-z0-9-]+$/, "Invalid slug format"),
+  title: z.string().min(1, "Title is required"),
+  content: z.string().min(1, "Content is required"),
+  isPublished: z.boolean().default(false),
+});
+
+const faqItemSchema = z.object({
+  id: z.string().optional().nullable(),
+  category: z.string().min(1, "Category is required"),
+  question: z.string().min(1, "Question is required"),
+  answer: z.string().min(1, "Answer is required"),
+  displayOrder: z.coerce.number().int().default(0),
+});
+
 // --- Page Actions ---
 
 export async function savePageAction(formData: FormData) {
   await requireRole([UserRole.ADMIN]);
-  
-  const id = formData.get("id") as string | null;
-  const rawSlug = String(formData.get("slug") || "");
-  const slug = rawSlug.trim().toLowerCase();
-  const title = formData.get("title") as string;
-  const contentStr = formData.get("content") as string;
-  const isPublished = formData.get("isPublished") === "true";
-  const returnPath = id ? `/admin/cms/pages/${id}` : "/admin/cms/pages/new";
 
-  if (!/^[a-z0-9-]+$/.test(slug)) {
-    redirect(`${returnPath}?error=invalid-slug`);
+  const rawInput = {
+    id: formData.get("id")?.toString() || null,
+    slug: formData.get("slug")?.toString() || "",
+    title: formData.get("title")?.toString() || "",
+    contentStr: formData.get("content")?.toString() || "",
+    isPublished: formData.get("isPublished") === "true",
+  };
+
+  const parsed = pageSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { success: false, errors: parsed.error.flatten().fieldErrors };
   }
-  
-  let content = {};
-  const normalizedContent = contentStr?.trim();
 
-  if (normalizedContent) {
+  const { id, slug, title, contentStr, isPublished } = parsed.data;
+
+  let content = {};
+  if (contentStr) {
     try {
-      content = JSON.parse(normalizedContent);
+      content = JSON.parse(contentStr.trim());
     } catch {
-      redirect(`${returnPath}?error=invalid-json`);
+      return { success: false, errors: { content: ["Invalid JSON format"] } };
     }
   }
 
@@ -53,7 +80,7 @@ export async function savePageAction(formData: FormData) {
     }
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      redirect(`${returnPath}?error=slug-taken`);
+      return { success: false, errors: { slug: ["Slug is already taken"] } };
     }
     throw error;
   }
@@ -77,21 +104,41 @@ export async function deletePageAction(formData: FormData) {
 
 export async function saveBlogPostAction(formData: FormData) {
   const session = await requireRole([UserRole.ADMIN]);
-  
-  const id = formData.get("id") as string | null;
-  const slug = formData.get("slug") as string;
-  const title = formData.get("title") as string;
-  const content = formData.get("content") as string;
-  const isPublishedStr = formData.get("isPublished") as string;
-  const isPublished = isPublishedStr === "true";
-  
+
+  const rawInput = {
+    id: formData.get("id")?.toString() || null,
+    slug: formData.get("slug")?.toString() || "",
+    title: formData.get("title")?.toString() || "",
+    content: formData.get("content")?.toString() || "",
+    isPublished: formData.get("isPublished") === "true",
+  };
+
+  const parsed = blogPostSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { success: false, errors: parsed.error.flatten().fieldErrors };
+  }
+
+  const { id, slug, title, content, isPublished } = parsed.data;
   const publishedAt = isPublished ? new Date() : null;
 
-  if (id) {
-    await updateBlogPost(id, { slug, title, content, isPublished, publishedAt });
-  } else {
-    // New blog post uses the current admin as the author
-    await createBlogPost({ slug, title, content, authorId: session.uid, isPublished, publishedAt: publishedAt || undefined });
+  try {
+    if (id) {
+      await updateBlogPost(id, { slug, title, content, isPublished, publishedAt });
+    } else {
+      await createBlogPost({
+        slug,
+        title,
+        content,
+        authorId: session.uid,
+        isPublished,
+        publishedAt: publishedAt || undefined,
+      });
+    }
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return { success: false, errors: { slug: ["Slug is already taken"] } };
+    }
+    throw error;
   }
 
   revalidatePath("/admin/cms/blog");
@@ -111,12 +158,21 @@ export async function deleteBlogPostAction(formData: FormData) {
 
 export async function saveFaqItemAction(formData: FormData) {
   await requireRole([UserRole.ADMIN]);
-  
-  const id = formData.get("id") as string | null;
-  const category = formData.get("category") as string;
-  const question = formData.get("question") as string;
-  const answer = formData.get("answer") as string;
-  const displayOrder = parseInt((formData.get("displayOrder") as string) || "0", 10);
+
+  const rawInput = {
+    id: formData.get("id")?.toString() || null,
+    category: formData.get("category")?.toString() || "",
+    question: formData.get("question")?.toString() || "",
+    answer: formData.get("answer")?.toString() || "",
+    displayOrder: formData.get("displayOrder")?.toString() || "0",
+  };
+
+  const parsed = faqItemSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { success: false, errors: parsed.error.flatten().fieldErrors };
+  }
+
+  const { id, category, question, answer, displayOrder } = parsed.data;
 
   if (id) {
     await updateFaqItem(id, { category, question, answer, displayOrder });

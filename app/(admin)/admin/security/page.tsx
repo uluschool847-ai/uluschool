@@ -2,11 +2,11 @@ import { UserRole } from "@prisma/client";
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { requireRole } from "@/lib/auth/session";
-import { findAdminUserForTwoFactor } from "@/lib/repositories/user-repository";
 import { TwoFactorSettings } from "@/components/admin/two-factor-settings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireRole } from "@/lib/auth/session";
+import { findAdminUserForTwoFactor } from "@/lib/repositories/user-repository";
 
 export const metadata: Metadata = {
   title: "Admin Security",
@@ -51,7 +51,9 @@ export default async function AdminSecurityPage() {
           {admin ? (
             <TwoFactorSettings enabled={admin.twoFactorEnabled} />
           ) : (
-            <p className="text-sm text-destructive">Unable to load admin account security settings.</p>
+            <p className="text-sm text-destructive">
+              Unable to load admin account security settings.
+            </p>
           )}
         </CardContent>
       </Card>

@@ -1,9 +1,17 @@
-import { Metadata } from "next";
+import type { Metadata } from "next";
 
 export const siteConfig = {
   name: "mathSchool",
   description: "Advanced online mathematics education for ambitious students.",
   url: process.env.NEXT_PUBLIC_APP_URL || "https://mathschool.example.com",
+};
+
+type StructuredDataPayload = {
+  name?: string;
+  description?: string;
+  title?: string;
+  publishedAt?: Date;
+  authorName?: string;
 };
 
 export function constructMetadata({
@@ -47,15 +55,18 @@ export function constructMetadata({
   };
 }
 
-export function generateStructuredData(type: "Organization" | "Course" | "Article", data: any) {
+export function generateStructuredData(
+  type: "Organization" | "Course" | "Article",
+  data: StructuredDataPayload,
+) {
   if (type === "Organization") {
     return {
       "@context": "https://schema.org",
       "@type": "EducationalOrganization",
-      "name": siteConfig.name,
-      "description": siteConfig.description,
-      "url": siteConfig.url,
-      "logo": `${siteConfig.url}/logo.png`,
+      name: siteConfig.name,
+      description: siteConfig.description,
+      url: siteConfig.url,
+      logo: `${siteConfig.url}/logo.png`,
     };
   }
 
@@ -63,13 +74,13 @@ export function generateStructuredData(type: "Organization" | "Course" | "Articl
     return {
       "@context": "https://schema.org",
       "@type": "Course",
-      "name": data.name,
-      "description": data.description,
-      "provider": {
+      name: data.name,
+      description: data.description,
+      provider: {
         "@type": "EducationalOrganization",
-        "name": siteConfig.name,
-        "sameAs": siteConfig.url
-      }
+        name: siteConfig.name,
+        sameAs: siteConfig.url,
+      },
     };
   }
 
@@ -77,12 +88,12 @@ export function generateStructuredData(type: "Organization" | "Course" | "Articl
     return {
       "@context": "https://schema.org",
       "@type": "Article",
-      "headline": data.title,
-      "datePublished": data.publishedAt?.toISOString(),
-      "author": {
+      headline: data.title,
+      datePublished: data.publishedAt?.toISOString(),
+      author: {
         "@type": "Person",
-        "name": data.authorName
-      }
+        name: data.authorName,
+      },
     };
   }
 }

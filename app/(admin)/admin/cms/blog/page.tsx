@@ -1,12 +1,12 @@
 import { UserRole } from "@prisma/client";
-import { Metadata } from "next";
+import type { Metadata } from "next";
 import Link from "next/link";
 
-import { requireRole } from "@/lib/auth/session";
-import { listBlogPosts } from "@/lib/repositories/cms-repository";
 import { deleteBlogPostAction } from "@/app/(admin)/admin/cms/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireRole } from "@/lib/auth/session";
+import { listBlogPosts } from "@/lib/repositories/cms-repository";
 
 export const metadata: Metadata = {
   title: "Manage Blog - CMS",
@@ -42,7 +42,9 @@ export default async function CMSBlogList() {
         </CardHeader>
         <CardContent>
           {posts.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No blog posts found. Create one to get started.</p>
+            <p className="text-sm text-muted-foreground">
+              No blog posts found. Create one to get started.
+            </p>
           ) : (
             <div className="rounded-md border">
               <table className="w-full text-sm text-left">
@@ -63,11 +65,15 @@ export default async function CMSBlogList() {
                       <td className="px-4 py-3 text-muted-foreground">/{post.slug}</td>
                       <td className="px-4 py-3">{post.author.fullName}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${post.isPublished ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-800"}`}>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${post.isPublished ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-800"}`}
+                        >
                           {post.isPublished ? "Published" : "Draft"}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{formatDate(post.createdAt)}</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {formatDate(post.createdAt)}
+                      </td>
                       <td className="px-4 py-3 text-right space-x-2">
                         <Button asChild variant="outline" size="sm">
                           <Link href={`/admin/cms/blog/${post.id}`}>Edit</Link>

@@ -24,23 +24,27 @@ export default function TeachersPage() {
             Each teacher profile includes qualification, teaching experience, and subjects taught.
           </div>
           <div className="flex flex-wrap justify-center gap-8">
-          {teachers.map((teacher) => (
-            <Card key={teacher.name} className="w-full max-w-[300px] overflow-hidden">
-              {/* @ts-ignore */}
-              {teacher.image ? (
-                <img src={teacher.image} alt={teacher.name} className="aspect-[4/5] w-full object-cover object-center" />
-              ) : null}
-              <CardHeader>
-                <CardTitle className="text-xl">{teacher.name}</CardTitle>
-                <p className="text-sm font-medium text-primary">{teacher.title}</p>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm text-muted-foreground">
-                <p>Qualification & Experience: {teacher.credentials}</p>
-                <p>Subjects Taught: {teacher.focus}</p>
-                <p>Mode: Live interactive online instruction</p>
-              </CardContent>
-            </Card>
-          ))}
+            {teachers.map((teacher) => (
+              <Card key={teacher.name} className="w-full max-w-[300px] overflow-hidden">
+                {/* @ts-ignore */}
+                {teacher.image ? (
+                  <img
+                    src={teacher.image}
+                    alt={teacher.name}
+                    className="aspect-[4/5] w-full object-cover object-center"
+                  />
+                ) : null}
+                <CardHeader>
+                  <CardTitle className="text-xl">{teacher.name}</CardTitle>
+                  <p className="text-sm font-medium text-primary">{teacher.title}</p>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm text-muted-foreground">
+                  <p>Qualification & Experience: {teacher.credentials}</p>
+                  <p>Subjects Taught: {teacher.focus}</p>
+                  <p>Mode: Live interactive online instruction</p>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         </div>
       </section>

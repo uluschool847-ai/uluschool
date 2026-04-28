@@ -33,5 +33,5 @@ export default async function PortalPage() {
   }
 
   // Fallback
-  redirect("/student-portal");
+  redirect("/portal/login");
 }

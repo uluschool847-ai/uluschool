@@ -1,10 +1,10 @@
 import { UserRole } from "@prisma/client";
 import type { Metadata } from "next";
 
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/session";
 import { listScheduleForUser } from "@/lib/repositories/schedule-repository";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = {
   title: "Portal Schedule",
@@ -86,7 +86,8 @@ export default async function PortalSchedulePage({ searchParams }: SchedulePageP
             </Button>
           </form>
           <p>
-            Showing classes for {formatDateLabel(start)} - {formatDateLabel(new Date(end.getTime() - 1))}
+            Showing classes for {formatDateLabel(start)} -{" "}
+            {formatDateLabel(new Date(end.getTime() - 1))}
           </p>
         </CardContent>
       </Card>

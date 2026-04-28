@@ -13,8 +13,8 @@ export function HeroSection() {
           </p>
           <h1 className="max-w-2xl">World-Class Cambridge Education - Fully Online</h1>
           <p className="max-w-2xl text-lg text-muted-foreground">
-            ULU Online School delivers structured, interactive, and exam-focused Cambridge
-            education to students anywhere in the world.
+            ULU Online School delivers structured, interactive, and exam-focused Cambridge education
+            to students anywhere in the world.
           </p>
           <div className="flex flex-wrap gap-3">
             <Button asChild size="lg">
@@ -55,8 +55,8 @@ export function HeroSection() {
             <div className="mt-4 h-52 rounded-md bg-gradient-to-br from-secondary to-background p-4">
               <div className="h-full rounded-md border border-secondary bg-background/75 p-4">
                 <p className="text-sm text-muted-foreground">
-                  Students learn through live classes, recorded lessons, downloadable materials,
-                  and clear progress reporting.
+                  Students learn through live classes, recorded lessons, downloadable materials, and
+                  clear progress reporting.
                 </p>
               </div>
             </div>

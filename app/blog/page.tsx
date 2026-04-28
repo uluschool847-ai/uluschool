@@ -13,7 +13,8 @@ export default function BlogPage() {
   const sections = [
     {
       title: "Cambridge Exam Tips",
-      description: "Revision planning, mock exam strategy, and exam technique for Cambridge learners.",
+      description:
+        "Revision planning, mock exam strategy, and exam technique for Cambridge learners.",
     },
     {
       title: "Study Strategies",
@@ -25,7 +26,8 @@ export default function BlogPage() {
     },
     {
       title: "Online Learning Success Tips",
-      description: "Device setup, learning habits, and participation strategies for online classes.",
+      description:
+        "Device setup, learning habits, and participation strategies for online classes.",
     },
   ];
 

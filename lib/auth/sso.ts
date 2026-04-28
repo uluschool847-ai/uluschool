@@ -5,9 +5,7 @@ function getSsoSecret() {
 }
 
 function makeSignature(email: string, timestamp: string) {
-  return createHmac("sha256", getSsoSecret())
-    .update(`${email}:${timestamp}`)
-    .digest("hex");
+  return createHmac("sha256", getSsoSecret()).update(`${email}:${timestamp}`).digest("hex");
 }
 
 export function verifySsoSignature(input: { email: string; timestamp: string; signature: string }) {

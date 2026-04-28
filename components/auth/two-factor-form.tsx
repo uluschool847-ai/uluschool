@@ -3,12 +3,12 @@
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 
-import { verifyAdminTwoFactor } from "@/app/student-portal/actions";
+import { verify2faAction } from "@/app/portal/login/verify-2fa/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { TwoFactorFormState } from "@/lib/validations/two-factor";
 import { cn } from "@/lib/utils";
+import type { TwoFactorFormState } from "@/lib/validations/two-factor";
 
 const initialState: TwoFactorFormState = {
   success: false,
@@ -24,11 +24,12 @@ function SubmitButton() {
   );
 }
 
-export function TwoFactorForm() {
-  const [state, action] = useActionState(verifyAdminTwoFactor, initialState);
+export function TwoFactorForm({ nextPath }: { nextPath?: string }) {
+  const [state, action] = useActionState(verify2faAction, initialState);
 
   return (
     <form action={action} className="grid gap-4">
+      {nextPath ? <input type="hidden" name="next" value={nextPath} /> : null}
       <div className="grid gap-2">
         <Label htmlFor="code">Authenticator code</Label>
         <Input
@@ -37,7 +38,9 @@ export function TwoFactorForm() {
           inputMode="numeric"
           maxLength={6}
           placeholder="123456"
-          className={cn(state.errors?.code?.length ? "border-rose-300 dark:border-rose-500/60" : "")}
+          className={cn(
+            state.errors?.code?.length ? "border-rose-300 dark:border-rose-500/60" : "",
+          )}
         />
       </div>
 

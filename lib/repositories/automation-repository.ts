@@ -1,7 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { EnquiryStatus, TaskStatus } from "@prisma/client";
 
-export async function createManagerTask(data: { title: string; description: string; dueDate: Date; relatedEnquiryId?: string }) {
+export async function createManagerTask(data: {
+  title: string;
+  description: string;
+  dueDate: Date;
+  relatedEnquiryId?: string;
+}) {
   return prisma.managerTask.create({
     data,
   });
@@ -40,9 +45,9 @@ export async function generateTasksForStaleEnquiries() {
       status: EnquiryStatus.IN_REVIEW,
       updatedAt: { lt: threeDaysAgo },
       managerTasks: {
-        none: { status: TaskStatus.PENDING } // Only if there are no pending tasks already
-      }
-    }
+        none: { status: TaskStatus.PENDING }, // Only if there are no pending tasks already
+      },
+    },
   });
 
   const tasksCreated = [];

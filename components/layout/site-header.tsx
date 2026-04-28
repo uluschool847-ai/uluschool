@@ -112,6 +112,7 @@ export function SiteHeader() {
   const [session, setSession] = useState<HeaderSessionResponse>({ authenticated: false });
   const [sessionLoaded, setSessionLoaded] = useState(false);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is intentionally used as a route-change trigger.
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
@@ -146,6 +147,7 @@ export function SiteHeader() {
     };
   }, [open]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is intentionally used to refresh session on route changes.
   useEffect(() => {
     let active = true;
 
@@ -208,7 +210,11 @@ export function SiteHeader() {
                 <HeaderUserInfo user={session.user} />
                 {isAdmin ? <AdminDashboardLink /> : null}
                 <form action={logoutPortal}>
-                  <Button type="submit" variant="ghost" className="text-foreground/80 hover:text-primary">
+                  <Button
+                    type="submit"
+                    variant="ghost"
+                    className="text-foreground/80 hover:text-primary"
+                  >
                     Log Out
                   </Button>
                 </form>
@@ -216,7 +222,7 @@ export function SiteHeader() {
             ) : (
               <>
                 <Button asChild variant="ghost" className="text-foreground/80 hover:text-primary">
-                  <Link href="/student-portal">Log In</Link>
+                  <Link href="/portal/login">Log In</Link>
                 </Button>
                 <Button asChild>
                   <Link href="/admissions">Enroll Now</Link>
@@ -258,9 +264,9 @@ export function SiteHeader() {
             onClick={() => setOpen(false)}
           />
 
-          <section
+          <dialog
+            open
             id="mobile-nav-panel"
-            role="dialog"
             aria-modal="true"
             aria-label="Mobile navigation menu"
             className={`absolute left-4 right-4 top-4 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-xl border border-secondary bg-background p-4 shadow-xl transition-all duration-200 ease-out ${
@@ -302,7 +308,7 @@ export function SiteHeader() {
               ) : (
                 <>
                   <Button asChild variant="secondary" className="w-full">
-                    <Link href="/student-portal" onClick={() => setOpen(false)}>
+                    <Link href="/portal/login" onClick={() => setOpen(false)}>
                       Log In
                     </Link>
                   </Button>
@@ -314,7 +320,7 @@ export function SiteHeader() {
                 </>
               )}
             </div>
-          </section>
+          </dialog>
         </div>
       ) : null}
     </>

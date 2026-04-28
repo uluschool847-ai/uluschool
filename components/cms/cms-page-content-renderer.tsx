@@ -94,7 +94,10 @@ function renderBlock(block: JsonValue, index: number) {
     const ordered = type === "ordered-list" || entry.ordered === true;
     const Tag = ordered ? "ol" : "ul";
     return (
-      <Tag key={`list-${index}`} className={ordered ? "list-decimal space-y-2 pl-6" : "list-disc space-y-2 pl-6"}>
+      <Tag
+        key={`list-${index}`}
+        className={ordered ? "list-decimal space-y-2 pl-6" : "list-disc space-y-2 pl-6"}
+      >
         {items.map((item) => (
           <li key={`${item}-${index}`} className="text-base text-foreground/90">
             {item}
@@ -108,7 +111,10 @@ function renderBlock(block: JsonValue, index: number) {
     const text = readString(entry, ["text", "quote", "content", "body"]);
     if (!text) return null;
     return (
-      <blockquote key={`quote-${index}`} className="border-l-4 border-accent pl-4 italic text-foreground/90">
+      <blockquote
+        key={`quote-${index}`}
+        className="border-l-4 border-accent pl-4 italic text-foreground/90"
+      >
         {text}
       </blockquote>
     );
@@ -170,7 +176,12 @@ export function getCmsContentSummary(content: unknown) {
   if (Array.isArray(record.blocks)) {
     for (const block of record.blocks) {
       if (block && typeof block === "object" && !Array.isArray(block)) {
-        const text = readString(block as Record<string, JsonValue>, ["text", "content", "body", "description"]);
+        const text = readString(block as Record<string, JsonValue>, [
+          "text",
+          "content",
+          "body",
+          "description",
+        ]);
         if (text) {
           return text;
         }
@@ -198,12 +209,12 @@ export function CmsPageContentRenderer({ content }: { content: unknown }) {
   }
 
   if (Array.isArray(content)) {
-    const rendered = content.map((block, index) => renderBlock(block as JsonValue, index)).filter(Boolean);
+    const rendered = content
+      .map((block, index) => renderBlock(block as JsonValue, index))
+      .filter(Boolean);
     if (rendered.length === 0) {
       return (
-        <p className="text-sm text-muted-foreground">
-          No renderable content blocks were found.
-        </p>
+        <p className="text-sm text-muted-foreground">No renderable content blocks were found.</p>
       );
     }
     return <div className="space-y-5">{rendered}</div>;
@@ -230,9 +241,5 @@ export function CmsPageContentRenderer({ content }: { content: unknown }) {
     );
   }
 
-  return (
-    <p className="text-sm text-muted-foreground">
-      Unsupported content format.
-    </p>
-  );
+  return <p className="text-sm text-muted-foreground">Unsupported content format.</p>;
 }

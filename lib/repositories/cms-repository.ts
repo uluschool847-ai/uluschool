@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 import { prisma } from "@/lib/prisma";
 
 // --- PageContent ---
@@ -46,13 +48,26 @@ export async function getPublishedPageBySlug(slug: string) {
   });
 }
 
-export async function createPage(data: { slug: string; title: string; content: any; isPublished: boolean }) {
+export async function createPage(data: {
+  slug: string;
+  title: string;
+  content: Prisma.InputJsonValue;
+  isPublished: boolean;
+}) {
   return prisma.pageContent.create({
     data,
   });
 }
 
-export async function updatePage(id: string, data: { slug?: string; title?: string; content?: any; isPublished?: boolean }) {
+export async function updatePage(
+  id: string,
+  data: {
+    slug?: string;
+    title?: string;
+    content?: Prisma.InputJsonValue;
+    isPublished?: boolean;
+  },
+) {
   return prisma.pageContent.update({
     where: { id },
     data,
@@ -80,13 +95,29 @@ export async function getBlogPost(id: string) {
   });
 }
 
-export async function createBlogPost(data: { slug: string; title: string; content: string; authorId: string; isPublished: boolean; publishedAt?: Date }) {
+export async function createBlogPost(data: {
+  slug: string;
+  title: string;
+  content: string;
+  authorId: string;
+  isPublished: boolean;
+  publishedAt?: Date;
+}) {
   return prisma.blogPost.create({
     data,
   });
 }
 
-export async function updateBlogPost(id: string, data: { slug?: string; title?: string; content?: string; isPublished?: boolean; publishedAt?: Date | null }) {
+export async function updateBlogPost(
+  id: string,
+  data: {
+    slug?: string;
+    title?: string;
+    content?: string;
+    isPublished?: boolean;
+    publishedAt?: Date | null;
+  },
+) {
   return prisma.blogPost.update({
     where: { id },
     data,
@@ -113,13 +144,21 @@ export async function getFaqItem(id: string) {
   });
 }
 
-export async function createFaqItem(data: { category: string; question: string; answer: string; displayOrder: number }) {
+export async function createFaqItem(data: {
+  category: string;
+  question: string;
+  answer: string;
+  displayOrder: number;
+}) {
   return prisma.faqItem.create({
     data,
   });
 }
 
-export async function updateFaqItem(id: string, data: { category?: string; question?: string; answer?: string; displayOrder?: number }) {
+export async function updateFaqItem(
+  id: string,
+  data: { category?: string; question?: string; answer?: string; displayOrder?: number },
+) {
   return prisma.faqItem.update({
     where: { id },
     data,

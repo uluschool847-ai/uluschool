@@ -3,7 +3,11 @@
 import { getAttributionFromRequest } from "@/lib/analytics/attribution";
 import { createContactLead } from "@/lib/repositories/contact-lead-repository";
 import { checkRateLimit } from "@/lib/security/rate-limit";
-import { getRequestIdentifier, honeypotTriggered, submittedTooFast } from "@/lib/security/spam-guard";
+import {
+  getRequestIdentifier,
+  honeypotTriggered,
+  submittedTooFast,
+} from "@/lib/security/spam-guard";
 import { verifyTurnstileToken } from "@/lib/security/turnstile";
 import { sendContactEmail } from "@/lib/services/email";
 import { type ContactFormState, contactSchema } from "@/lib/validations/contact";
@@ -27,7 +31,10 @@ export async function submitContactEnquiry(
     };
   }
 
-  if (honeypotTriggered(formData.get("companyWebsite")) || submittedTooFast(formData.get("startedAt"))) {
+  if (
+    honeypotTriggered(formData.get("companyWebsite")) ||
+    submittedTooFast(formData.get("startedAt"))
+  ) {
     return {
       success: true,
       message: "Thank you. Your message has been submitted successfully.",

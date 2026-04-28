@@ -3,12 +3,12 @@
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 
-import { loginPortal } from "@/app/student-portal/actions";
+import { loginAction } from "@/app/portal/login/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { LoginFormState } from "@/lib/validations/auth";
 import { cn } from "@/lib/utils";
+import type { LoginFormState } from "@/lib/validations/auth";
 
 const initialLoginState: LoginFormState = {
   success: false,
@@ -29,11 +29,12 @@ function FieldError({ error }: { error?: string }) {
   return <p className="text-sm text-destructive">{error}</p>;
 }
 
-export function PortalLoginForm() {
-  const [state, action] = useActionState(loginPortal, initialLoginState);
+export function PortalLoginForm({ nextPath }: { nextPath?: string }) {
+  const [state, action] = useActionState(loginAction, initialLoginState);
 
   return (
     <form action={action} className="grid gap-4">
+      {nextPath ? <input type="hidden" name="next" value={nextPath} /> : null}
       <div className="grid gap-2">
         <Label htmlFor="portalEmail">Email</Label>
         <Input
@@ -41,7 +42,9 @@ export function PortalLoginForm() {
           name="email"
           type="email"
           placeholder="name@ulu..."
-          className={cn(state.errors?.email?.length ? "border-rose-300 dark:border-rose-500/60" : "")}
+          className={cn(
+            state.errors?.email?.length ? "border-rose-300 dark:border-rose-500/60" : "",
+          )}
           required
         />
         <FieldError error={state.errors?.email?.[0]} />
@@ -53,7 +56,9 @@ export function PortalLoginForm() {
           name="password"
           type="password"
           placeholder="Password"
-          className={cn(state.errors?.password?.length ? "border-rose-300 dark:border-rose-500/60" : "")}
+          className={cn(
+            state.errors?.password?.length ? "border-rose-300 dark:border-rose-500/60" : "",
+          )}
           required
         />
         <FieldError error={state.errors?.password?.[0]} />

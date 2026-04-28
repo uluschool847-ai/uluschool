@@ -3,12 +3,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { gradeHomeworkAction } from "@/app/portal/actions";
-import { requireRole } from "@/lib/auth/session";
-import { getTeacherDashboardData } from "@/lib/repositories/portal-repository";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { requireRole } from "@/lib/auth/session";
+import { getTeacherDashboardData } from "@/lib/repositories/portal-repository";
 
 export const metadata: Metadata = {
   title: "Teacher Portal - mathSchool",
@@ -102,7 +102,11 @@ export default async function TeacherPortalDashboard() {
       </div>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard title="My Classes" value={dashboard.metrics.myClasses} hint="Assigned class sessions" />
+        <MetricCard
+          title="My Classes"
+          value={dashboard.metrics.myClasses}
+          hint="Assigned class sessions"
+        />
         <MetricCard
           title="Active Assignments"
           value={dashboard.metrics.activeAssignments}
@@ -148,11 +152,14 @@ export default async function TeacherPortalDashboard() {
                       </p>
                       <p className="text-xs text-muted-foreground">Students: {item.studentCount}</p>
                       <p className="text-xs text-muted-foreground">
-                        Next slot: {formatDate(item.startAt)} {formatTime(item.startAt)} - {formatTime(item.endAt)}
+                        Next slot: {formatDate(item.startAt)} {formatTime(item.startAt)} -{" "}
+                        {formatTime(item.endAt)}
                       </p>
                     </div>
                     <Button asChild variant="secondary" size="sm">
-                      <Link href={`/portal/schedule?month=${formatMonth(item.startAt)}`}>View Class</Link>
+                      <Link href={`/portal/schedule?month=${formatMonth(item.startAt)}`}>
+                        View Class
+                      </Link>
                     </Button>
                   </div>
                 </article>
@@ -182,7 +189,8 @@ export default async function TeacherPortalDashboard() {
                 <article key={lesson.id} className="rounded-lg border border-secondary p-4">
                   <p className="font-medium">{lesson.title}</p>
                   <p className="text-xs text-muted-foreground">
-                    {formatDate(lesson.startAt)} {formatTime(lesson.startAt)} - {formatTime(lesson.endAt)}
+                    {formatDate(lesson.startAt)} {formatTime(lesson.startAt)} -{" "}
+                    {formatTime(lesson.endAt)}
                   </p>
                   <p className="text-xs text-muted-foreground">Students: {lesson.studentCount}</p>
                   <div className="mt-3">
@@ -207,7 +215,12 @@ export default async function TeacherPortalDashboard() {
               <CardDescription>Active assignments and grading workload.</CardDescription>
             </div>
             <div className="flex gap-2">
-              <Button size="sm" variant="secondary" disabled title="Assignment creation will be added next">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled
+                title="Assignment creation will be added next"
+              >
                 Create Assignment
               </Button>
               <Button asChild size="sm" variant="secondary">
@@ -232,7 +245,9 @@ export default async function TeacherPortalDashboard() {
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
                         <p className="font-medium">{assignment.title}</p>
-                        <p className="text-xs text-muted-foreground">{assignment.scheduledClassTitle}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {assignment.scheduledClassTitle}
+                        </p>
                       </div>
                       <Badge variant={daysUntilDue <= 2 ? "default" : "secondary"}>
                         {daysUntilDue <= 0 ? "Due today" : `${daysUntilDue} day(s) left`}
@@ -289,7 +304,10 @@ export default async function TeacherPortalDashboard() {
                     </Button>
                   </div>
 
-                  <form action={gradeHomeworkAction} className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                  <form
+                    action={gradeHomeworkAction}
+                    className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]"
+                  >
                     <input type="hidden" name="submissionId" value={submission.id} />
                     <Input name="grade" placeholder="Grade (e.g. A, 82%)" required />
                     <Input name="feedback" placeholder="Feedback (optional)" />
