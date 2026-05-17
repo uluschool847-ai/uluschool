@@ -2,7 +2,7 @@
 
 import Script from "next/script";
 
-const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
 
 export function TurnstileWidget() {
   if (!turnstileSiteKey) {

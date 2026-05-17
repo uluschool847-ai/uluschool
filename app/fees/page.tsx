@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 export const metadata: Metadata = {
   title: "Fees",
   description:
-    "Sample tuition structure for ULU Online School with additional costs, discounts, and payment methods.",
+    "Tuition structure for ULU Online School with payment terms, additional costs, and family support options.",
 };
 
 export default function FeesPage() {
@@ -31,7 +31,7 @@ export default function FeesPage() {
     <>
       <PageHero
         title="Fees"
-        description="Tuition structure (sample model) for ULU Online School programmes."
+        description="Transparent tuition guidance for Cambridge online learning, including payment timing, enrolment costs, and support options for families."
       />
       <section className="section-shell">
         <div className="container grid gap-5 md:grid-cols-3">
@@ -42,7 +42,10 @@ export default function FeesPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-2xl font-semibold text-primary">{plan.price}</p>
-                <p className="mt-2 text-sm text-muted-foreground">Sample monthly tuition model.</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Monthly tuition covers scheduled live teaching, lesson recordings, progress
+                  updates, and routine academic support for this level.
+                </p>
               </CardContent>
             </Card>
           ))}
@@ -95,8 +98,8 @@ export default function FeesPage() {
         <div className="container mt-8">
           <div className="prestige-surface p-6">
             <p className="text-sm text-muted-foreground">
-              Fees may vary by subject load, level, and support requirements. Contact admissions for
-              a confirmed fee plan.
+              Fees are confirmed after admissions review so the school can match subject load,
+              timetable needs, and any extra learner support before issuing the final plan.
             </p>
             <div className="mt-4 flex flex-wrap gap-3">
               <Button asChild>

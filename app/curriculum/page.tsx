@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { PageHero } from "@/components/sections/page-hero";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getCatalogueData } from "@/lib/repositories/catalogue-repository";
 import { constructMetadata, generateStructuredData } from "@/lib/seo";
 
 export const metadata: Metadata = constructMetadata({
@@ -11,12 +12,13 @@ export const metadata: Metadata = constructMetadata({
     "Explore ULU's Cambridge curriculum pathways across Primary, Lower Secondary, and IGCSE.",
 });
 
-export default function CurriculumPage() {
+export default async function CurriculumPage() {
   const jsonLd = generateStructuredData("Course", {
     name: "Cambridge Curriculum",
     description:
       "Explore ULU's Cambridge curriculum pathways across Primary, Lower Secondary, and IGCSE.",
   });
+  const { subjects, levels } = await getCatalogueData();
   const termDates = [
     {
       term: "Term 1",
@@ -32,62 +34,6 @@ export default function CurriculumPage() {
       term: "Term 3",
       duration: "April \u2013 June (11 weeks)",
       activities: "Learning + Final assessments",
-    },
-  ];
-
-  const programmes = [
-    {
-      title: "Primary (Years 1-6)",
-      subjects: [
-        "English",
-        "Mathematics",
-        "Science",
-        "Global Perspectives",
-        "ICT (optional)",
-        "Kiswahili",
-      ],
-      focus: [
-        "Strong academic foundation",
-        "Reading and writing fluency",
-        "Problem-solving skills",
-      ],
-      assessment: ["Weekly quizzes", "Monthly progress tests", "Term exams"],
-    },
-    {
-      title: "Lower Secondary (Years 7-9)",
-      subjects: [
-        "English",
-        "Mathematics",
-        "Biology",
-        "Chemistry",
-        "Physics",
-        "Geography",
-        "ICT",
-        "Global Perspectives",
-        "Kiswahili",
-      ],
-      focus: ["Analytical thinking", "Exam preparation skills", "Subject specialization readiness"],
-      assessment: ["Weekly quizzes", "Monthly tests", "Term examinations"],
-    },
-    {
-      title: "IGCSE (Years 10-11)",
-      subjects: [
-        "Mathematics",
-        "English Language",
-        "Biology",
-        "Chemistry",
-        "Physics",
-        "Business Studies",
-        "ICT",
-        "Geography",
-        "Kiswahili",
-      ],
-      focus: ["Full subject preparation aligned with Cambridge standards"],
-      assessment: [
-        "Coursework (where required)",
-        "Mock examinations",
-        "Final Cambridge examinations",
-      ],
     },
   ];
 
@@ -135,40 +81,39 @@ export default function CurriculumPage() {
         </div>
 
         <div className="container grid gap-5">
-          {programmes.map((programme) => (
-            <Card key={programme.title}>
+          {levels.map((level) => (
+            <Card key={level.id}>
               <CardHeader>
-                <CardTitle>{programme.title}</CardTitle>
+                <CardTitle>{level.name}</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-5 lg:grid-cols-3">
                 <div>
                   <p className="text-sm font-medium text-primary">Subjects</p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {programme.subjects.map((subject) => (
+                    {subjects.map((subject) => (
                       <Badge
-                        key={subject}
+                        key={`${level.id}-${subject.id}`}
                         variant="outline"
                         className="border-primary/20 text-primary"
                       >
-                        {subject}
+                        {subject.name}
                       </Badge>
                     ))}
                   </div>
                 </div>
                 <div>
                   <p className="text-sm font-medium text-primary">Focus</p>
-                  <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                    {programme.focus.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    Cambridge-aligned teaching with structured subject support and steady academic
+                    progression.
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm font-medium text-primary">Assessment</p>
                   <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                    {programme.assessment.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
+                    <li>Weekly quizzes</li>
+                    <li>Term assessments</li>
+                    <li>Progress reporting</li>
                   </ul>
                 </div>
               </CardContent>

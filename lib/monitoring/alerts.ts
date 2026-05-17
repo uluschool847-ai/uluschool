@@ -6,7 +6,7 @@ export async function sendOpsAlert(input: {
   severity?: AlertSeverity;
   context?: Record<string, string | number | boolean | null | undefined>;
 }) {
-  const webhookUrl = process.env.ALERT_WEBHOOK_URL;
+  const webhookUrl = process.env.ALERT_WEBHOOK_URL ?? "";
   if (!webhookUrl) {
     return { sent: false as const, reason: "ALERT_WEBHOOK_NOT_CONFIGURED" as const };
   }

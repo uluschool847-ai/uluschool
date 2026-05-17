@@ -1,16 +1,22 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import { verifyPassword } from "@/lib/auth/password";
 import {
-  createSession,
   createAdminPendingTwoFactor,
+  createSession,
   getPortalRedirectPath,
 } from "@/lib/auth/session";
-import { findUserByEmail } from "@/lib/repositories/user-repository";
 import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
+import { logAuthEvent } from "@/lib/repositories/admin-audit-repository";
+import { findUserByEmail } from "@/lib/repositories/user-repository";
+import {
+  checkLoginRateLimit,
+  recordFailedLogin,
+  recordSuccessfulLogin,
+} from "@/lib/security/rate-limit";
+import { type LoginFormState, loginSchema } from "@/lib/validations/auth";
 import { UserRole } from "@prisma/client";
-import { loginSchema, type LoginFormState } from "@/lib/validations/auth";
+import { redirect } from "next/navigation";
 
 export async function loginAction(
   prevState: LoginFormState,
@@ -19,6 +25,7 @@ export async function loginAction(
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
   const nextPath = formData.get("next") as string | null;
+  const identifier = email.trim().toLowerCase();
 
   const parsed = loginSchema.safeParse({ email, password });
   if (!parsed.success) {
@@ -29,26 +36,98 @@ export async function loginAction(
     };
   }
 
+  const rateLimit = checkLoginRateLimit(identifier);
+  if (!rateLimit.allowed) {
+    return {
+      success: false,
+      message: `Too many attempts. Try again in ${Math.max(1, Math.ceil((rateLimit.retryAfterSeconds ?? 0) / 60))} minutes.`,
+      retryAfter: rateLimit.retryAfterSeconds,
+    };
+  }
+
   const user = await findUserByEmail(parsed.data.email);
   if (!user || !user.isActive) {
-    return { success: false, message: "Invalid email or password." };
+    recordFailedLogin(identifier);
+    const failedAttemptState = checkLoginRateLimit(identifier);
+    await logAuthEvent({
+      eventType: failedAttemptState.allowed ? "LOGIN_FAILED" : "ACCOUNT_LOCKED",
+      identifier,
+      timestamp: new Date(),
+    });
+    if (!failedAttemptState.allowed) {
+      return {
+        success: false,
+        message: `Too many attempts. Try again in ${Math.max(1, Math.ceil((failedAttemptState.retryAfterSeconds ?? 0) / 60))} minutes.`,
+        retryAfter: failedAttemptState.retryAfterSeconds,
+      };
+    }
+    return {
+      success: false,
+      message: `Invalid email or password. ${failedAttemptState.remainingAttempts} attempts remaining.`,
+    };
   }
 
   const isPasswordValid = await verifyPassword(parsed.data.password, user.passwordHash);
   if (!isPasswordValid) {
-    return { success: false, message: "Invalid email or password." };
+    recordFailedLogin(identifier);
+    const failedAttemptState = checkLoginRateLimit(identifier);
+    await logAuthEvent({
+      eventType: failedAttemptState.allowed ? "LOGIN_FAILED" : "ACCOUNT_LOCKED",
+      userId: user.id,
+      identifier,
+      timestamp: new Date(),
+    });
+    if (!failedAttemptState.allowed) {
+      return {
+        success: false,
+        message: `Too many attempts. Try again in ${Math.max(1, Math.ceil((failedAttemptState.retryAfterSeconds ?? 0) / 60))} minutes.`,
+        retryAfter: failedAttemptState.retryAfterSeconds,
+      };
+    }
+    return {
+      success: false,
+      message: `Invalid email or password. ${failedAttemptState.remainingAttempts} attempts remaining.`,
+    };
   }
 
+  recordSuccessfulLogin(identifier);
+  await logAuthEvent({
+    eventType: "LOGIN_SUCCESS",
+    userId: user.id,
+    identifier,
+    timestamp: new Date(),
+  });
+
   if (user.role === UserRole.ADMIN) {
-    const require2FA = process.env.ADMIN_REQUIRE_2FA !== "false";
+    const require2FA = (process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false";
     if (require2FA) {
-      if (process.env.NODE_ENV !== "production") {
+      if (user.twoFactorEnabled) {
         await createAdminAuditLog({
-          adminId: user.id,
+          adminUserId: user.id,
+          action: "ADMIN_LOGIN_PENDING_2FA",
+          targetType: "AUTH",
+          meta: {
+            ipAddress: "127.0.0.1",
+            userAgent: "unknown",
+          },
+        });
+
+        await createAdminPendingTwoFactor({ uid: user.id, email: user.email });
+
+        const nextQuery = nextPath ? `?next=${encodeURIComponent(nextPath)}` : "";
+        redirect(`/portal/login/verify-2fa${nextQuery}`);
+      }
+
+      if ((process.env.NODE_ENV ?? "development") !== "production") {
+        await createAdminAuditLog({
+          adminUserId: user.id,
           action: "ADMIN_LOGIN_2FA_REQUIRED_DEV_BYPASS",
-          ipAddress: "127.0.0.1",
-          userAgent: "dev-bypass",
-          details: { note: "Bypassed 2FA UI for dev." },
+          targetType: "AUTH",
+          meta: {
+            ipAddress: "127.0.0.1",
+            userAgent: "dev-bypass",
+            details: { note: "Bypassed 2FA UI for dev." },
+          },
         });
 
         await createSession({
@@ -64,25 +143,21 @@ export async function loginAction(
         redirect(`/admin/security?setup2fa=required${nextQuery}`);
       }
 
-      await createAdminAuditLog({
-        adminId: user.id,
-        action: "ADMIN_LOGIN_PENDING_2FA",
-        ipAddress: "127.0.0.1",
-        userAgent: "unknown",
-      });
-
-      await createAdminPendingTwoFactor({ uid: user.id, email: user.email });
-
-      const nextQuery = nextPath ? `?next=${encodeURIComponent(nextPath)}` : "";
-      redirect(`/portal/login/verify-2fa${nextQuery}`);
+      return {
+        success: false,
+        message: "Admin 2FA is required. Contact an administrator to finish setup.",
+      };
     }
 
     // 2FA Disabled
     await createAdminAuditLog({
-      adminId: user.id,
+      adminUserId: user.id,
       action: "ADMIN_LOGIN_PASSWORD_ONLY",
-      ipAddress: "127.0.0.1",
-      userAgent: "unknown",
+      targetType: "AUTH",
+      meta: {
+        ipAddress: "127.0.0.1",
+        userAgent: "unknown",
+      },
     });
 
     await createSession({

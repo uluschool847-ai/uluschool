@@ -1,9 +1,10 @@
-import { levels } from "@/lib/content";
-
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getCatalogueData } from "@/lib/repositories/catalogue-repository";
 
-export function SubjectsLevelsSection() {
+export async function SubjectsLevelsSection() {
+  const { subjects, levels } = await getCatalogueData();
+
   return (
     <section className="section-shell bg-secondary/25 dark:bg-card/30">
       <div className="container">
@@ -14,24 +15,24 @@ export function SubjectsLevelsSection() {
 
         <div className="mt-8 grid gap-4 lg:grid-cols-3">
           {levels.map((level) => (
-            <Card key={level.key}>
+            <Card key={level.id}>
               <CardHeader>
-                <CardTitle className="text-xl">{level.label}</CardTitle>
+                <CardTitle className="text-xl">{level.name}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex flex-wrap gap-2" aria-label={`${level.label} subjects`}>
-                  {level.subjects.map((subject) => (
+                <div className="flex flex-wrap gap-2" aria-label={`${level.name} subjects`}>
+                  {subjects.map((subject) => (
                     <Badge
-                      key={subject}
+                      key={`${level.id}-${subject.id}`}
                       variant="outline"
                       className="border-primary/20 text-primary"
                     >
-                      {subject}
+                      {subject.name}
                     </Badge>
                   ))}
                 </div>
                 <ul className="space-y-2 text-sm text-muted-foreground">
-                  {level.formats.map((format) => (
+                  {["Weekly quizzes", "Progress checks", "Assessment support"].map((format) => (
                     <li key={format} className="rounded-md border border-secondary px-3 py-2">
                       {format}
                     </li>

@@ -13,7 +13,7 @@ export default async function PortalLayout({ children }: { children: React.React
         <header className="rounded-xl border border-secondary bg-card p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold">Portal</h1>
+              <p className="text-2xl font-semibold">Portal</p>
             </div>
             <div className="flex flex-wrap gap-2">
               {session ? (

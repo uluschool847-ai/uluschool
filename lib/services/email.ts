@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 
+import { validateLiveLessonUrl } from "@/lib/lessons/live-lesson-url";
 import type { ContactInput } from "@/lib/validations/contact";
 import type { EnrolmentInput } from "@/lib/validations/enrolment";
 
@@ -8,10 +9,10 @@ type EmailDeliveryResult =
   | { delivered: false; reason: "SMTP_NOT_CONFIGURED" | "SEND_FAILED"; attempts: number };
 
 function getSmtpConfig() {
-  const host = process.env.SMTP_HOST;
-  const port = process.env.SMTP_PORT;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+  const host = process.env.SMTP_HOST ?? "";
+  const port = process.env.SMTP_PORT ?? "";
+  const user = process.env.SMTP_USER ?? "";
+  const pass = process.env.SMTP_PASS ?? "";
 
   const isPlaceholderDefault =
     host === "smtp.example.com" && user === "username" && pass === "password";
@@ -24,7 +25,7 @@ function getSmtpConfig() {
     return {
       host,
       port: Number(port),
-      secure: process.env.SMTP_SECURE === "true",
+      secure: (process.env.SMTP_SECURE ?? "false") === "true",
       auth: {
         user,
         pass,
@@ -33,8 +34,8 @@ function getSmtpConfig() {
   }
 
   // Backward-compatible fallback for EMAIL_USER/EMAIL_PASS.
-  const emailUser = process.env.EMAIL_USER;
-  const emailPass = process.env.EMAIL_PASS;
+  const emailUser = process.env.EMAIL_USER ?? "";
+  const emailPass = process.env.EMAIL_PASS ?? "";
   if (!emailUser || !emailPass) {
     return null;
   }
@@ -51,11 +52,11 @@ function getSmtpConfig() {
 }
 
 function getFromAddress() {
-  return process.env.SMTP_FROM || "ULU Online School <no-reply@uluglobalacademy.com>";
+  return process.env.SMTP_FROM ?? "ULU Online School <no-reply@uluglobalacademy.com>";
 }
 
 function getToAddress() {
-  return process.env.SCHOOL_INBOX_EMAIL || "info@uluglobalacademy.com";
+  return process.env.SCHOOL_INBOX_EMAIL ?? "info@uluglobalacademy.com";
 }
 
 function buildEnrolmentMessage(payload: EnrolmentInput) {
@@ -122,7 +123,7 @@ async function sendWithRetry(message: {
 }): Promise<EmailDeliveryResult> {
   const smtp = getSmtpConfig();
   if (!smtp) {
-    if (process.env.NODE_ENV !== "production") {
+    if ((process.env.NODE_ENV ?? "development") !== "production") {
       console.info("[email] SMTP is not configured. Skipping delivery in local/dev mode.");
     }
     return { delivered: false, reason: "SMTP_NOT_CONFIGURED", attempts: 0 };
@@ -180,6 +181,14 @@ export async function sendClassReminderEmail(input: {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(input.endAt);
+  const linkValidation = validateLiveLessonUrl(input.liveLessonUrl, "MANUAL_URL", {
+    required: false,
+  });
+  const safeUrl = linkValidation.ok ? linkValidation.url : null;
+  const liveLessonLine = safeUrl ? `Join link: ${safeUrl}` : input.liveLessonUrl;
+  const liveLessonHtml = safeUrl
+    ? `<p><a href="${safeUrl}">Join Live Lesson</a></p>`
+    : `<p>${input.liveLessonUrl}</p>`;
 
   return sendWithRetry({
     subject: `Class reminder: ${input.classTitle}`,
@@ -190,7 +199,7 @@ export async function sendClassReminderEmail(input: {
       `This is a reminder for your upcoming class: ${input.classTitle}`,
       `Start: ${formattedStart}`,
       `End: ${formattedEnd}`,
-      `Join link: ${input.liveLessonUrl}`,
+      liveLessonLine,
       "",
       "ULU Online School",
     ].join("\n"),
@@ -200,7 +209,7 @@ export async function sendClassReminderEmail(input: {
       <p>This is a reminder for your upcoming class: <strong>${input.classTitle}</strong></p>
       <p><strong>Start:</strong> ${formattedStart}</p>
       <p><strong>End:</strong> ${formattedEnd}</p>
-      <p><a href="${input.liveLessonUrl}">Join Live Lesson</a></p>
+      ${liveLessonHtml}
       <p>ULU Online School</p>
     `,
   });

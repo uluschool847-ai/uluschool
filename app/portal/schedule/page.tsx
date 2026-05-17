@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/session";
+import { listLessonsForStudent, listLessonsForTeacher } from "@/lib/repositories/lesson-repository";
 import { listScheduleForUser } from "@/lib/repositories/schedule-repository";
 
 export const metadata: Metadata = {
@@ -15,6 +16,19 @@ type SchedulePageProps = {
   searchParams?: Promise<{
     month?: string;
   }>;
+};
+
+type ScheduleLessonItem = {
+  id: string;
+  title: string;
+  startAt: Date;
+  endAt: Date;
+  liveLessonUrl: string;
+  status?: string | null;
+  cancelReason?: string | null;
+  subject?: { id: string; name: string; slug: string } | null;
+  classGroup?: { id: string; name: string } | null;
+  teacher?: { id: string; fullName: string; email: string } | null;
 };
 
 function getMonthRange(monthValue?: string) {
@@ -46,6 +60,15 @@ function formatTime(date: Date) {
   }).format(date);
 }
 
+function canJoinLesson(status?: string | null) {
+  return status !== "CANCELLED" && status !== "COMPLETED";
+}
+
+function shouldShowStatus(title: string, status?: string | null) {
+  if (!status) return true;
+  return !title.toLowerCase().includes(status.toLowerCase());
+}
+
 export default async function PortalSchedulePage({ searchParams }: SchedulePageProps) {
   const session = await requireRole([
     UserRole.ADMIN,
@@ -55,16 +78,32 @@ export default async function PortalSchedulePage({ searchParams }: SchedulePageP
   ]);
   const resolved = searchParams ? await searchParams : undefined;
   const { start, end } = getMonthRange(resolved?.month);
-  const classes = await listScheduleForUser(session.uid, session.role, start, end);
+  const classes: ScheduleLessonItem[] =
+    session.role === UserRole.STUDENT
+      ? ((await listLessonsForStudent(session.uid, {
+          from: start,
+          to: end,
+        })) as ScheduleLessonItem[])
+      : session.role === UserRole.TEACHER
+        ? ((await listLessonsForTeacher(session.uid, {
+            from: start,
+            to: end,
+          })) as ScheduleLessonItem[])
+        : ((await listScheduleForUser(
+            session.uid,
+            session.role,
+            start,
+            end,
+          )) as ScheduleLessonItem[]);
 
-  const grouped = new Map<string, typeof classes>();
+  const grouped = new Map<string, ScheduleLessonItem[]>();
   for (const item of classes) {
     const key = new Date(item.startAt).toISOString().slice(0, 10);
     grouped.set(key, [...(grouped.get(key) || []), item]);
   }
 
   return (
-    <div className="space-y-4">
+    <main className="space-y-4">
       <Card>
         <CardHeader>
           <CardTitle>Class Calendar</CardTitle>
@@ -111,17 +150,42 @@ export default async function PortalSchedulePage({ searchParams }: SchedulePageP
                     <div>
                       <p className="font-medium">{item.title}</p>
                       <p className="text-sm text-muted-foreground">
+                        Subject: {item.subject?.name ?? "General"}
+                      </p>
+                      {item.classGroup ? (
+                        <p className="text-sm text-muted-foreground">
+                          Group: {item.classGroup.name}
+                        </p>
+                      ) : null}
+                      <p className="text-sm text-muted-foreground">
                         {formatTime(new Date(item.startAt))} - {formatTime(new Date(item.endAt))}
                       </p>
                       <p className="text-sm text-muted-foreground">
                         Teacher: {item.teacher?.fullName || "TBA"}
                       </p>
+                      {shouldShowStatus(item.title, item.status ?? "SCHEDULED") ? (
+                        <p className="text-sm text-muted-foreground">
+                          Status: {item.status ?? "SCHEDULED"}
+                        </p>
+                      ) : null}
+                      {item.status === "CANCELLED" && item.cancelReason ? (
+                        <p className="text-sm text-muted-foreground">
+                          Cancel reason: {item.cancelReason}
+                        </p>
+                      ) : null}
                     </div>
-                    <Button asChild size="sm">
-                      <a href={item.liveLessonUrl} target="_blank" rel="noreferrer">
-                        Join Live Lesson
-                      </a>
-                    </Button>
+                    {canJoinLesson(item.status) ? (
+                      <Button asChild size="sm">
+                        <a
+                          href={item.liveLessonUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label="Join Live Lesson"
+                        >
+                          Join
+                        </a>
+                      </Button>
+                    ) : null}
                   </div>
                 </article>
               ))}
@@ -129,6 +193,6 @@ export default async function PortalSchedulePage({ searchParams }: SchedulePageP
           </Card>
         ))
       )}
-    </div>
+    </main>
   );
 }

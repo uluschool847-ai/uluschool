@@ -1,8 +1,9 @@
-import { levels } from "@/lib/content";
-
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getLevels } from "@/lib/repositories/catalogue-repository";
 
-export function CurriculumOverviewSection() {
+export async function CurriculumOverviewSection() {
+  const levels = await getLevels();
+
   return (
     <section className="bg-slate-50 py-16 dark:bg-slate-900/40">
       <div className="container">
@@ -13,12 +14,14 @@ export function CurriculumOverviewSection() {
         </p>
         <div className="mt-8 grid gap-4 md:grid-cols-3">
           {levels.map((level) => (
-            <Card key={level.key}>
+            <Card key={level.id}>
               <CardHeader>
-                <CardTitle className="text-lg">{level.label}</CardTitle>
+                <CardTitle className="text-lg">{level.name}</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground">{level.description}</p>
+                <p className="text-sm text-muted-foreground">
+                  Cambridge-aligned progression for {level.name}.
+                </p>
               </CardContent>
             </Card>
           ))}

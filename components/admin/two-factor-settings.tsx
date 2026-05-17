@@ -26,14 +26,15 @@ export function TwoFactorSettings({ enabled }: { enabled: boolean }) {
   const [setupState, beginSetup] = useActionState(beginTwoFactorSetupAction, initialState);
   const [confirmState, confirmSetup] = useActionState(confirmTwoFactorSetupAction, initialState);
   const [disableState, disableSetup] = useActionState(disableTwoFactorAction, initialState);
+  const currentEnabled = enabled ? !disableState.success : confirmState.success;
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Current status: <strong>{enabled ? "enabled" : "disabled"}</strong>
+        Current status: <strong>{currentEnabled ? "enabled" : "disabled"}</strong>
       </p>
 
-      {!enabled ? (
+      {!currentEnabled ? (
         <form action={beginSetup} className="space-y-2">
           <SubmitButton label="Generate 2FA Secret" pendingLabel="Generating..." />
           {setupState.message ? (
@@ -48,7 +49,7 @@ export function TwoFactorSettings({ enabled }: { enabled: boolean }) {
         </form>
       ) : null}
 
-      {!enabled && setupState.setupSecret ? (
+      {!currentEnabled && setupState.setupSecret ? (
         <div className="space-y-3 rounded-lg border border-secondary p-4">
           <p className="text-sm">
             <strong>Manual secret:</strong> <code>{setupState.setupSecret}</code>
@@ -80,35 +81,42 @@ export function TwoFactorSettings({ enabled }: { enabled: boolean }) {
               {confirmState.message}
             </p>
           ) : null}
-
-          {confirmState.backupCodes?.length ? (
-            <div className="rounded-md border border-secondary p-3">
-              <p className="mb-2 text-sm font-medium">Backup codes (save now):</p>
-              <ul className="grid gap-1 text-xs text-muted-foreground md:grid-cols-2">
-                {confirmState.backupCodes.map((code) => (
-                  <li key={code}>
-                    <code>{code}</code>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
         </div>
       ) : null}
 
-      {enabled ? (
-        <form action={disableSetup} className="space-y-2">
+      {currentEnabled && confirmState.message ? (
+        <p
+          className={confirmState.success ? "text-sm text-emerald-600" : "text-sm text-destructive"}
+        >
+          {confirmState.message}
+        </p>
+      ) : null}
+
+      {confirmState.backupCodes?.length ? (
+        <div className="rounded-md border border-secondary p-3">
+          <p className="mb-2 text-sm font-medium">Backup codes (save now):</p>
+          <ul className="grid gap-1 text-xs text-muted-foreground md:grid-cols-2">
+            {confirmState.backupCodes.map((code) => (
+              <li key={code}>
+                <code>{code}</code>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {currentEnabled ? (
+        <form action={disableSetup}>
           <SubmitButton label="Disable 2FA" pendingLabel="Disabling..." />
-          {disableState.message ? (
-            <p
-              className={
-                disableState.success ? "text-sm text-emerald-600" : "text-sm text-destructive"
-              }
-            >
-              {disableState.message}
-            </p>
-          ) : null}
         </form>
+      ) : null}
+
+      {disableState.message ? (
+        <p
+          className={disableState.success ? "text-sm text-emerald-600" : "text-sm text-destructive"}
+        >
+          {disableState.message}
+        </p>
       ) : null}
     </div>
   );

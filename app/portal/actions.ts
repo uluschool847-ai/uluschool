@@ -4,13 +4,16 @@ import { UserRole } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 
 import { requireRole } from "@/lib/auth/session";
-import { gradeHomework, submitHomework } from "@/lib/repositories/portal-repository";
+import { prisma } from "@/lib/prisma";
+import { gradeHomework, submitOrResubmitStudentWork } from "@/lib/repositories/portal-repository";
+import * as portalRepository from "@/lib/repositories/portal-repository";
 
 import { z } from "zod";
 
 const submitHomeworkSchema = z.object({
   homeworkId: z.string().min(1, "Homework ID is required"),
   contentUrl: z.string().url("Valid Content URL is required").min(1, "Content URL is required"),
+  studentId: z.string().min(1).optional(),
 });
 
 const gradeHomeworkSchema = z.object({
@@ -25,6 +28,7 @@ export async function submitHomeworkAction(formData: FormData) {
   const rawInput = {
     homeworkId: formData.get("homeworkId")?.toString() || "",
     contentUrl: formData.get("contentUrl")?.toString() || "",
+    studentId: formData.get("studentId")?.toString() || undefined,
   };
 
   const parsed = submitHomeworkSchema.safeParse(rawInput);
@@ -32,15 +36,27 @@ export async function submitHomeworkAction(formData: FormData) {
     return { success: false, errors: parsed.error.flatten().fieldErrors };
   }
 
-  const { homeworkId, contentUrl } = parsed.data;
+  const { homeworkId, contentUrl, studentId } = parsed.data;
 
-  await submitHomework(session.uid, homeworkId, contentUrl);
+  if (studentId && studentId !== session.uid) {
+    return {
+      success: false,
+      error: "Forbidden: You can only submit homework for your own account.",
+      errors: { auth: ["Forbidden: You can only submit homework for your own account."] },
+    };
+  }
+
+  await submitOrResubmitStudentWork({
+    studentId: session.uid,
+    assignmentId: homeworkId,
+    contentUrl,
+  });
   revalidatePath("/portal/student");
   return { success: true };
 }
 
 export async function gradeHomeworkAction(formData: FormData) {
-  await requireRole([UserRole.TEACHER]);
+  const session = await requireRole([UserRole.TEACHER]);
 
   const rawInput = {
     submissionId: formData.get("submissionId")?.toString() || "",
@@ -55,8 +71,39 @@ export async function gradeHomeworkAction(formData: FormData) {
 
   const { submissionId, grade, feedback } = parsed.data;
 
-  // Assume gradeHomework accepts grade as string to match old signature, or handles number
-  await gradeHomework(submissionId, grade.toString(), feedback || "");
+  const repoWithChecks = portalRepository as unknown as {
+    checkTeacherAssignment?: (teacherId: string, submissionId: string) => Promise<boolean>;
+  };
+
+  let canGrade = false;
+  if (typeof repoWithChecks.checkTeacherAssignment === "function") {
+    canGrade = await repoWithChecks.checkTeacherAssignment(session.uid, submissionId);
+  } else {
+    const submission = await prisma.submission.findUnique({
+      where: { id: submissionId },
+      select: {
+        assignment: {
+          select: {
+            teacherId: true,
+            scheduledClass: {
+              select: { teacherId: true },
+            },
+          },
+        },
+      },
+    });
+    canGrade = submission?.assignment?.scheduledClass?.teacherId === session.uid;
+  }
+
+  if (!canGrade) {
+    return {
+      success: false,
+      error: "Forbidden: You can only grade submissions from your own classes.",
+      errors: { auth: ["Forbidden: You can only grade submissions from your own classes."] },
+    };
+  }
+
+  await gradeHomework(submissionId, grade, feedback || "");
   revalidatePath("/portal/teacher");
   return { success: true };
 }

@@ -11,4 +11,5 @@ export type LoginFormState = {
   success: boolean;
   message: string;
   errors?: Partial<Record<keyof LoginInput, string[]>>;
+  retryAfter?: number;
 };

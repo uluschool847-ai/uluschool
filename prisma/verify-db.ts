@@ -12,7 +12,7 @@ async function verifyDatabase() {
 
     if (subjectCount === 0 || levelCount === 0) {
       throw new Error(
-        `Missing lookup data. Found ${subjectCount} Subjects and ${levelCount} Levels.`
+        `Missing lookup data. Found ${subjectCount} Subjects and ${levelCount} Levels.`,
       );
     }
 
@@ -27,7 +27,7 @@ async function verifyDatabase() {
 
     console.log("✅ Database verification successful!");
     console.log(
-      `   State: ${adminCount} Admin(s), ${subjectCount} Subject(s), ${levelCount} Level(s).`
+      `   State: ${adminCount} Admin(s), ${subjectCount} Subject(s), ${levelCount} Level(s).`,
     );
     process.exit(0);
   } catch (error) {

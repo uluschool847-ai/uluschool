@@ -2,27 +2,26 @@ import { EnquiryStatus } from "@prisma/client";
 
 export const enquiryStatuses = [
   EnquiryStatus.NEW,
-  EnquiryStatus.IN_REVIEW,
-  EnquiryStatus.ACCEPTED,
+  EnquiryStatus.IN_PROGRESS,
+  EnquiryStatus.CONVERTED,
   EnquiryStatus.REJECTED,
 ] as const;
 
 export function getStatusLabel(status: EnquiryStatus) {
   switch (status) {
     case EnquiryStatus.NEW:
-      return "new";
-    case EnquiryStatus.IN_REVIEW:
-      return "in_review";
-    case EnquiryStatus.ACCEPTED:
-      return "accepted";
+      return "New";
+    case EnquiryStatus.IN_PROGRESS:
+      return "In Progress";
+    case EnquiryStatus.CONVERTED:
+      return "Converted";
     case EnquiryStatus.REJECTED:
-      return "rejected";
+      return "Rejected";
   }
 }
 
 export function parseStatus(value: string | null | undefined) {
   if (!value) return null;
-  const normalized = value.trim().toUpperCase();
-  const alias = normalized === "IN_REVIEW" ? "IN_REVIEW" : normalized;
-  return enquiryStatuses.find((status) => status === alias) ?? null;
+  const normalized = value.trim().toUpperCase().replace(/\s+/g, "_");
+  return enquiryStatuses.find((status) => status === normalized) ?? null;
 }

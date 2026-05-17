@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock dependencies
 vi.mock("@/lib/monitoring/alerts", () => ({
@@ -20,7 +20,7 @@ describe("Strict Schema Validation - API Routes", () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "authorization": "Bearer TEST_TOKEN", // Assume token is valid for the test
+          authorization: "Bearer TEST_TOKEN", // Assume token is valid for the test
         },
         body: JSON.stringify({
           // missing 'message' and 'severity' which should be required
@@ -45,7 +45,7 @@ describe("Strict Schema Validation - API Routes", () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "authorization": "Bearer TEST_TOKEN",
+          authorization: "Bearer TEST_TOKEN",
         },
         body: "invalid-json-string{",
       });

@@ -9,16 +9,22 @@ const verifyPasswordMock = vi.hoisted(() => vi.fn());
 const findUserByEmailMock = vi.hoisted(() => vi.fn());
 const createSessionMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
+const logAuthEventMock = vi.hoisted(() => vi.fn());
 const createAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const clearSessionMock = vi.hoisted(() => vi.fn());
 const getSessionMock = vi.hoisted(() => vi.fn());
 const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
+const revalidatePathMock = vi.hoisted(() => vi.fn());
 const getPortalRedirectPathMock = vi.hoisted(() =>
   vi.fn((role: string) => (role === "ADMIN" ? "/admin" : "/portal/login")),
 );
 
 vi.mock("next/navigation", () => ({
   redirect: redirectMock,
+}));
+
+vi.mock("next/cache", () => ({
+  revalidatePath: revalidatePathMock,
 }));
 
 vi.mock("@/lib/auth/password", () => ({
@@ -43,6 +49,7 @@ vi.mock("@/lib/auth/session", () => ({
 
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   createAdminAuditLog: createAdminAuditLogMock,
+  logAuthEvent: logAuthEventMock,
 }));
 
 vi.mock("@/lib/auth/two-factor", () => ({
@@ -76,6 +83,7 @@ describe("app/student-portal/actions.ts 2FA env defaults", () => {
     verifyPasswordMock.mockResolvedValue(true);
     createSessionMock.mockResolvedValue(undefined);
     createAdminAuditLogMock.mockResolvedValue(undefined);
+    logAuthEventMock.mockResolvedValue(undefined);
   });
 
   it("enforces ADMIN_REQUIRE_2FA by default and uses non-production safe bypass path", async () => {
@@ -107,5 +115,14 @@ describe("app/student-portal/actions.ts 2FA env defaults", () => {
         action: "ADMIN_LOGIN_PASSWORD_ONLY",
       }),
     );
+  });
+
+  it("clears the session and invalidates cached protected UI on logout", async () => {
+    const { logoutPortal } = await import("../../../app/student-portal/actions");
+
+    await expect(logoutPortal()).rejects.toThrow("REDIRECT:/");
+
+    expect(clearSessionMock).toHaveBeenCalledTimes(1);
+    expect(revalidatePathMock).toHaveBeenCalledWith("/", "layout");
   });
 });

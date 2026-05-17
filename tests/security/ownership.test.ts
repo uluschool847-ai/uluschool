@@ -1,10 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { UserRole } from "@prisma/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock next/cache and next/navigation
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/navigation", () => ({
-  redirect: vi.fn((url) => { throw new Error(`REDIRECT:${url}`) }),
+  redirect: vi.fn((url) => {
+    throw new Error(`REDIRECT:${url}`);
+  }),
 }));
 
 // Setup a mock for our session to easily switch active users during tests
@@ -36,8 +38,14 @@ vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   createAdminAuditLog: vi.fn(),
 }));
 
-import { submitHomeworkAction, gradeHomeworkAction } from "@/app/portal/actions";
 import { updateEnquiryAction } from "@/app/(admin)/admin/actions";
+import { gradeHomeworkAction, submitHomeworkAction } from "@/app/portal/actions";
+
+type GuardedActionResult = {
+  success: boolean;
+  error?: string;
+  message?: string;
+};
 
 describe("Strict Authorization and IDOR Prevention", () => {
   beforeEach(() => {
@@ -49,22 +57,23 @@ describe("Strict Authorization and IDOR Prevention", () => {
     it("rejects a STUDENT attempting to submit homework using a studentId belonging to another user", async () => {
       // Authenticate as Student A
       mockSession = { uid: "student-A-id", role: UserRole.STUDENT, email: "studentA@ulu.com" };
-      
+
       const formData = new FormData();
       formData.set("homeworkId", "homework-1");
       formData.set("contentUrl", "https://example.com/homework.pdf");
       // Maliciously trying to submit for Student B
-      formData.set("studentId", "student-B-id"); 
+      formData.set("studentId", "student-B-id");
 
       // In a strict IDOR check, the action must notice the mismatch or explicitly validate ownership of the homeworkId
       // and return a structured 403 / Forbidden error, not just blindly accept it.
-      let result: any;
+      let result: GuardedActionResult;
       try {
-        result = await submitHomeworkAction(formData);
-      } catch (error: any) {
+        result = (await submitHomeworkAction(formData)) as GuardedActionResult;
+      } catch (error: unknown) {
         // If it throws an unhandled error instead of a structured validation/auth error, we consider that a failure
         // in our strict error-handling paradigm.
-        result = { success: false, message: error.message };
+        const message = error instanceof Error ? error.message : "Unknown error";
+        result = { success: false, message };
       }
 
       // We expect the action to explicitly reject this cross-user attempt
@@ -83,11 +92,12 @@ describe("Strict Authorization and IDOR Prevention", () => {
       formData.set("submissionId", "sub-1");
       formData.set("grade", "95");
 
-      let result: any;
+      let result: GuardedActionResult;
       try {
-        result = await gradeHomeworkAction(formData);
-      } catch (error: any) {
-        result = { success: false, message: error.message };
+        result = (await gradeHomeworkAction(formData)) as GuardedActionResult;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        result = { success: false, message };
       }
 
       // Should be rejected because the role is not TEACHER
@@ -104,11 +114,12 @@ describe("Strict Authorization and IDOR Prevention", () => {
       formData.set("submissionId", "sub-belonging-to-teacher-B-class");
       formData.set("grade", "95");
 
-      let result: any;
+      let result: GuardedActionResult;
       try {
-        result = await gradeHomeworkAction(formData);
-      } catch (error: any) {
-        result = { success: false, message: error.message };
+        result = (await gradeHomeworkAction(formData)) as GuardedActionResult;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        result = { success: false, message };
       }
 
       // Expected to fail because Teacher A does not own the context for this submission
@@ -125,13 +136,14 @@ describe("Strict Authorization and IDOR Prevention", () => {
 
       const formData = new FormData();
       formData.set("id", "enq-1");
-      formData.set("status", "ACCEPTED");
+      formData.set("status", "CONVERTED");
 
-      let result: any;
+      let result: GuardedActionResult;
       try {
-        result = await updateEnquiryAction(formData);
-      } catch (error: any) {
-        result = { success: false, message: error.message };
+        result = (await updateEnquiryAction(formData)) as GuardedActionResult;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        result = { success: false, message };
       }
 
       // Should be rejected because role is not ADMIN
@@ -151,13 +163,13 @@ describe("Strict Authorization and IDOR Prevention", () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "authorization": "Bearer TEST_TOKEN",
+          authorization: "Bearer TEST_TOKEN",
         },
         body: JSON.stringify({
           userId: "user-B-id", // Maliciously targeting someone else's alert context
           message: "Test",
-          severity: "info"
-        })
+          severity: "info",
+        }),
       });
 
       const module = await import("@/app/api/alerts/test/route");
@@ -165,10 +177,10 @@ describe("Strict Authorization and IDOR Prevention", () => {
 
       process.env.ALERT_TEST_TOKEN = "TEST_TOKEN";
       const response = await apiRoute(request);
-      
+
       // We expect a hard 403 Forbidden for IDOR attempts, but currently it just returns 200 OK
       expect(response.status).toBe(403);
-      
+
       const json = await response.json();
       expect(json.ok).toBe(false);
       expect(json.error).toMatch(/Forbidden|Ownership/i);

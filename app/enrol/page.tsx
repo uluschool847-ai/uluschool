@@ -2,13 +2,16 @@ import type { Metadata } from "next";
 
 import { EnrolForm } from "@/components/enrol/enrol-form";
 import { PageHero } from "@/components/sections/page-hero";
+import { getCatalogueData } from "@/lib/repositories/catalogue-repository";
 
 export const metadata: Metadata = {
   title: "Enrol",
   description: "Book a free trial class and submit an enrolment enquiry for ULU Online School.",
 };
 
-export default function EnrolPage() {
+export default async function EnrolPage() {
+  const { subjects, levels } = await getCatalogueData();
+
   return (
     <>
       <PageHero
@@ -17,7 +20,7 @@ export default function EnrolPage() {
       />
       <section className="section-shell">
         <div className="container grid gap-8 lg:grid-cols-[2fr_1fr]">
-          <EnrolForm />
+          <EnrolForm subjects={subjects} levels={levels} />
           <aside className="prestige-surface h-fit space-y-4 p-6">
             <h2>What Happens Next</h2>
             <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">

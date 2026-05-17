@@ -1,9 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock environment and external dependencies
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("next/navigation", () => ({ 
-  redirect: vi.fn((url) => { throw new Error(`REDIRECT:${url}`) }) 
+vi.mock("next/navigation", () => ({
+  redirect: vi.fn((url) => {
+    throw new Error(`REDIRECT:${url}`);
+  }),
 }));
 
 vi.mock("@/lib/auth/session", () => ({
@@ -66,11 +68,20 @@ vi.mock("@/lib/services/email", () => ({
 }));
 
 // Import actions after mocks
-import { updateEnquiryAction, updateContactLeadAction } from "@/app/(admin)/admin/actions";
-import { saveFaqItemAction, savePageAction, saveBlogPostAction } from "@/app/(admin)/admin/cms/actions";
-import { submitHomeworkAction, gradeHomeworkAction } from "@/app/portal/actions";
-import { submitEnrolment } from "@/app/enrol/actions";
+import { updateContactLeadAction, updateEnquiryAction } from "@/app/(admin)/admin/actions";
+import {
+  saveBlogPostAction,
+  saveFaqItemAction,
+  savePageAction,
+} from "@/app/(admin)/admin/cms/actions";
 import { submitContactEnquiry } from "@/app/contact/actions";
+import { submitEnrolment } from "@/app/enrol/actions";
+import { gradeHomeworkAction, submitHomeworkAction } from "@/app/portal/actions";
+
+type AdminActionResult = {
+  success: boolean;
+  errors?: Record<string, unknown>;
+};
 
 describe("Strict Schema Validation - Server Actions", () => {
   beforeEach(() => {
@@ -81,8 +92,8 @@ describe("Strict Schema Validation - Server Actions", () => {
     it("updateEnquiryAction safely rejects empty payloads with structured errors, avoiding silent failures", async () => {
       const formData = new FormData();
       // Emulating empty submission
-      const result = await updateEnquiryAction(formData) as any;
-      
+      const result = (await updateEnquiryAction(formData)) as AdminActionResult;
+
       expect(result).toBeDefined();
       expect(result.success).toBe(false);
       expect(result.errors).toBeDefined();
@@ -94,9 +105,9 @@ describe("Strict Schema Validation - Server Actions", () => {
       const formData = new FormData();
       formData.set("id", "lead-1");
       formData.set("status", "NOT_A_VALID_STATUS");
-      
-      const result = await updateContactLeadAction(formData) as any;
-      
+
+      const result = (await updateContactLeadAction(formData)) as AdminActionResult;
+
       expect(result).toBeDefined();
       expect(result.success).toBe(false);
       expect(result.errors).toBeDefined();
@@ -107,9 +118,9 @@ describe("Strict Schema Validation - Server Actions", () => {
       const formData = new FormData();
       formData.set("category", "General"); // Missing question and answer
       // displayOrder is missing, should default to 0 or fail depending on schema
-      
-      const result = await saveFaqItemAction(formData) as any;
-      
+
+      const result = (await saveFaqItemAction(formData)) as AdminActionResult;
+
       expect(result).toBeDefined();
       expect(result.success).toBe(false);
       expect(result.errors).toBeDefined();
@@ -122,9 +133,9 @@ describe("Strict Schema Validation - Server Actions", () => {
       formData.set("slug", "test-page");
       formData.set("title", "Test Page");
       formData.set("content", "{ malformed_json: true "); // Invalid JSON
-      
-      const result = await savePageAction(formData) as any;
-      
+
+      const result = (await savePageAction(formData)) as AdminActionResult;
+
       expect(result).toBeDefined();
       expect(result.success).toBe(false);
       expect(result.errors).toBeDefined();
@@ -136,9 +147,9 @@ describe("Strict Schema Validation - Server Actions", () => {
     it("submitHomeworkAction handles missing required fields cleanly rather than throwing an exception", async () => {
       const formData = new FormData();
       // Missing homeworkId and contentUrl
-      
-      const result = await submitHomeworkAction(formData) as any;
-      
+
+      const result = (await submitHomeworkAction(formData)) as AdminActionResult;
+
       expect(result).toBeDefined();
       expect(result.success).toBe(false);
       expect(result.errors).toBeDefined();
@@ -150,9 +161,9 @@ describe("Strict Schema Validation - Server Actions", () => {
       const formData = new FormData();
       formData.set("submissionId", "sub-1");
       formData.set("grade", "A+"); // Suppose the schema expects a numeric grade out of 100
-      
-      const result = await gradeHomeworkAction(formData) as any;
-      
+
+      const result = (await gradeHomeworkAction(formData)) as AdminActionResult;
+
       expect(result).toBeDefined();
       expect(result.success).toBe(false);
       expect(result.errors).toBeDefined();
@@ -165,9 +176,9 @@ describe("Strict Schema Validation - Server Actions", () => {
       const formData = new FormData();
       formData.set("studentName", "John Doe");
       formData.set("email", "not-an-email-address"); // Invalid email
-      
+
       const result = await submitEnrolment({ success: false, message: "" }, formData);
-      
+
       expect(result.success).toBe(false);
       expect(result.errors).toBeDefined();
       expect(result.errors).toHaveProperty("email");
@@ -176,9 +187,9 @@ describe("Strict Schema Validation - Server Actions", () => {
     it("submitContactEnquiry returns structured errors when required fields are missing", async () => {
       const formData = new FormData();
       // Missing name, email, message
-      
+
       const result = await submitContactEnquiry({ success: false, message: "" }, formData);
-      
+
       expect(result.success).toBe(false);
       expect(result.errors).toBeDefined();
       expect(result.errors).toHaveProperty("fullName");

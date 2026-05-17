@@ -1,7 +1,7 @@
 import { UserRole } from "@prisma/client";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { savePageAction } from "@/app/(admin)/admin/cms/actions";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,8 @@ export default async function EditCMSPage({ params, searchParams }: EditPageProp
   const invalidJsonError = errorCode === "invalid-json";
   const invalidSlugError = errorCode === "invalid-slug";
   const duplicateSlugError = errorCode === "slug-taken";
+  const reservedSlugError = errorCode === "reserved-slug";
+  const validationError = errorCode === "validation";
 
   let page = null;
   if (!isNew) {
@@ -79,7 +81,42 @@ export default async function EditCMSPage({ params, searchParams }: EditPageProp
               This slug is already in use. Choose a different slug.
             </p>
           ) : null}
-          <form action={savePageAction} className="space-y-6">
+          {reservedSlugError ? (
+            <p className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              This slug belongs to a static route and cannot be managed in CMS.
+            </p>
+          ) : null}
+          {validationError ? (
+            <p className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              Please check the highlighted fields and submit again.
+            </p>
+          ) : null}
+          <form
+            action={async (formData) => {
+              "use server";
+
+              const result = await savePageAction(formData);
+
+              if (result?.success === false) {
+                const errors = result.errors as Record<string, string[] | undefined>;
+                const slugErrors = errors.slug ?? [];
+                const contentErrors = errors.content ?? [];
+                const error =
+                  contentErrors.length > 0
+                    ? "invalid-json"
+                    : slugErrors.some((message) => message.toLowerCase().includes("reserved"))
+                      ? "reserved-slug"
+                      : slugErrors.some((message) => message.toLowerCase().includes("taken"))
+                        ? "slug-taken"
+                        : slugErrors.length > 0
+                          ? "invalid-slug"
+                          : "validation";
+
+                redirect(`/admin/cms/pages/${id}?error=${error}`);
+              }
+            }}
+            className="space-y-6"
+          >
             {!isNew && <input type="hidden" name="id" value={page?.id} />}
 
             <div className="grid gap-4 md:grid-cols-2">

@@ -1,6 +1,5 @@
 "use server";
 
-import { redirect } from "next/navigation";
 import {
   clearAdminPendingTwoFactor,
   createSession,
@@ -13,7 +12,8 @@ import {
   consumeAdminBackupCode,
   findAdminUserForTwoFactor,
 } from "@/lib/repositories/user-repository";
-import { twoFactorVerifySchema, type TwoFactorFormState } from "@/lib/validations/two-factor";
+import { type TwoFactorFormState, twoFactorVerifySchema } from "@/lib/validations/two-factor";
+import { redirect } from "next/navigation";
 
 export async function verify2faAction(
   prevState: TwoFactorFormState,
@@ -46,27 +46,40 @@ export async function verify2faAction(
   const isUsingBackupCode = Boolean(parsed.data.backupCode);
 
   if (isUsingBackupCode) {
-    const isValidBackup = await consumeBackupCode(
-      user.id,
-      parsed.data.backupCode!,
-      consumeAdminBackupCode,
-    );
+    const backupCodeValue = parsed.data.backupCode;
+    if (!backupCodeValue) {
+      return { success: false, message: "Backup code is required." };
+    }
+
+    const backupCodeResult = await consumeBackupCode({
+      providedCode: backupCodeValue,
+      hashedCodes: user.twoFactorBackupCodes,
+    });
+    const isValidBackup = backupCodeResult.valid;
 
     if (!isValidBackup) {
       await createAdminAuditLog({
-        adminId: user.id,
+        adminUserId: user.id,
         action: "ADMIN_LOGIN_2FA_BACKUP_FAILED",
-        ipAddress: "127.0.0.1",
-        userAgent: "unknown",
+        targetType: "AUTH",
+        meta: {
+          ipAddress: "127.0.0.1",
+          userAgent: "unknown",
+        },
       });
       return { success: false, message: "Invalid or already used backup code." };
     }
 
+    await consumeAdminBackupCode(user.id, backupCodeResult.remaining);
+
     await createAdminAuditLog({
-      adminId: user.id,
+      adminUserId: user.id,
       action: "ADMIN_LOGIN_2FA_BACKUP_SUCCESS",
-      ipAddress: "127.0.0.1",
-      userAgent: "unknown",
+      targetType: "AUTH",
+      meta: {
+        ipAddress: "127.0.0.1",
+        userAgent: "unknown",
+      },
     });
   } else {
     // Standard TOTP
@@ -74,22 +87,33 @@ export async function verify2faAction(
       return { success: false, message: "2FA is not properly configured." };
     }
 
-    const isValidTotp = verifyTotpCode(user.twoFactorSecret, parsed.data.code!);
+    const codeValue = parsed.data.code;
+    if (!codeValue) {
+      return { success: false, message: "Authenticator code is required." };
+    }
+
+    const isValidTotp = verifyTotpCode(codeValue, user.twoFactorSecret);
     if (!isValidTotp) {
       await createAdminAuditLog({
-        adminId: user.id,
+        adminUserId: user.id,
         action: "ADMIN_LOGIN_2FA_TOTP_FAILED",
-        ipAddress: "127.0.0.1",
-        userAgent: "unknown",
+        targetType: "AUTH",
+        meta: {
+          ipAddress: "127.0.0.1",
+          userAgent: "unknown",
+        },
       });
       return { success: false, message: "Invalid authenticator code." };
     }
 
     await createAdminAuditLog({
-      adminId: user.id,
+      adminUserId: user.id,
       action: "ADMIN_LOGIN_2FA_TOTP_SUCCESS",
-      ipAddress: "127.0.0.1",
-      userAgent: "unknown",
+      targetType: "AUTH",
+      meta: {
+        ipAddress: "127.0.0.1",
+        userAgent: "unknown",
+      },
     });
   }
 

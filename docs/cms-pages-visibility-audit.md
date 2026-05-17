@@ -42,6 +42,17 @@ Final behavior
 - CMS pages do not auto-override static routes like /about, /fees, /contact, etc.
   - Static pages remain unchanged.
   - CMS pages are intentionally namespaced under /pages to avoid route conflicts.
+- Static routes always take precedence over CMS pages.
+- Reserved slugs blocked from CMS page ownership:
+  - `blog`
+  - `teachers`
+  - `admin`
+  - `login`
+  - `results`
+  - `faq`
+  - `api`
+  - `pages`
+  - `dashboard`
 - Navigation policy:
   - Not auto-inserted into main header nav.
   - Discoverable via /pages index and footer "Published Pages" link.

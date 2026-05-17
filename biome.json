@@ -13,6 +13,6 @@
     }
   },
   "files": {
-    "ignore": ["node_modules", ".next", "prisma/migrations"]
+    "ignore": ["node_modules", ".next", "prisma/migrations", "test-results", "playwright-report"]
   }
 }

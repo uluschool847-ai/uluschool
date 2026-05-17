@@ -53,6 +53,25 @@ export async function findUserByEmail(email: string) {
   );
 }
 
+export async function findUserById(userId: string) {
+  return withPrismaRetry(() =>
+    prisma.appUser.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        isActive: true,
+        learningStatus: true,
+        phoneWhatsapp: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+  );
+}
+
 export async function getUsersByIds(ids: string[]) {
   if (ids.length === 0) {
     return [];
@@ -99,6 +118,7 @@ export async function findAdminUserForTwoFactor(userId: string) {
         id: true,
         email: true,
         fullName: true,
+        role: true,
         twoFactorEnabled: true,
         twoFactorSecret: true,
         twoFactorBackupCodes: true,
@@ -159,4 +179,38 @@ export async function consumeAdminBackupCode(userId: string, remainingCodeHashes
       },
     }),
   );
+}
+
+export async function getChildren(parentId: string) {
+  return withPrismaRetry(async () => {
+    const parent = await prisma.appUser.findUnique({
+      where: { id: parentId },
+      include: { children: true },
+    });
+    return parent?.children || [];
+  });
+}
+
+export async function getStudentProfile(studentId: string) {
+  return withPrismaRetry(async () => {
+    const student = await prisma.appUser.findUnique({
+      where: { id: studentId },
+      include: {
+        enrolledClasses: true,
+        submissions: {
+          include: { assignment: true },
+          orderBy: { submittedAt: "desc" },
+          take: 5,
+        },
+      },
+    });
+
+    if (!student) throw new Error("Student not found");
+
+    return {
+      student: { id: student.id, role: student.role, name: student.fullName },
+      enrolledClasses: student.enrolledClasses,
+      recentSubmissions: student.submissions,
+    };
+  });
 }

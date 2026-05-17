@@ -1,7 +1,7 @@
 import { UserRole } from "@prisma/client";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { saveBlogPostAction } from "@/app/(admin)/admin/cms/actions";
 import { Button } from "@/components/ui/button";
@@ -17,13 +17,21 @@ export const metadata: Metadata = {
 
 type EditBlogPostProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{
+    error?: string;
+  }>;
 };
 
-export default async function EditCMSBlogPost({ params }: EditBlogPostProps) {
+export default async function EditCMSBlogPost({ params, searchParams }: EditBlogPostProps) {
   await requireRole([UserRole.ADMIN]);
 
   const { id } = await params;
   const isNew = id === "new";
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const errorCode = resolvedSearchParams?.error;
+  const invalidSlugError = errorCode === "invalid-slug";
+  const duplicateSlugError = errorCode === "slug-taken";
+  const validationError = errorCode === "validation";
 
   let post = null;
   if (!isNew) {
@@ -49,7 +57,40 @@ export default async function EditCMSBlogPost({ params }: EditBlogPostProps) {
           <CardTitle>Post Details</CardTitle>
         </CardHeader>
         <CardContent>
-          <form action={saveBlogPostAction} className="space-y-6">
+          {invalidSlugError ? (
+            <p className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              Invalid slug. Use only lowercase letters, numbers, and hyphens.
+            </p>
+          ) : null}
+          {duplicateSlugError ? (
+            <p className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              This slug is already in use. Choose a different slug.
+            </p>
+          ) : null}
+          {validationError ? (
+            <p className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              Please complete the required fields and submit again.
+            </p>
+          ) : null}
+          <form
+            action={async (formData) => {
+              "use server";
+
+              const result = await saveBlogPostAction(formData);
+
+              if (result?.success === false) {
+                const slugErrors = result.errors.slug ?? [];
+                const error = slugErrors.some((message) => message.toLowerCase().includes("taken"))
+                  ? "slug-taken"
+                  : slugErrors.length > 0
+                    ? "invalid-slug"
+                    : "validation";
+
+                redirect(`/admin/cms/blog/${id}?error=${error}`);
+              }
+            }}
+            className="space-y-6"
+          >
             {!isNew && <input type="hidden" name="id" value={post?.id} />}
 
             <div className="grid gap-4 md:grid-cols-2">

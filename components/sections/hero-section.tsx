@@ -38,18 +38,16 @@ export function HeroSection() {
         <article className="prestige-surface relative overflow-hidden p-5">
           <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-accent/20" />
           <div className="relative rounded-lg border border-secondary bg-background p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">
-              Live Class Dashboard
-            </p>
-            <div className="mt-4 rounded-md border border-secondary bg-secondary/35 p-4">
-              <p className="text-sm font-medium text-primary">IGCSE Science - Live Session</p>
+            <div className="rounded-md border border-secondary bg-secondary/35 p-4">
+              <p className="text-sm font-medium text-primary">Structured Online Learning</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Interactive teaching, assignments, and continuous assessment tracking.
+                Students join scheduled live lessons, access class resources, and receive clear
+                academic guidance from their teachers.
               </p>
               <div className="mt-4 grid grid-cols-3 gap-2">
-                <div className="h-10 rounded bg-background" />
-                <div className="h-10 rounded bg-background" />
-                <div className="h-10 rounded bg-background" />
+                <div className="h-10 rounded bg-background" aria-hidden="true" />
+                <div className="h-10 rounded bg-background" aria-hidden="true" />
+                <div className="h-10 rounded bg-background" aria-hidden="true" />
               </div>
             </div>
             <div className="mt-4 h-52 rounded-md bg-gradient-to-br from-secondary to-background p-4">

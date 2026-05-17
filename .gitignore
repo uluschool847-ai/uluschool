@@ -2,6 +2,11 @@ node_modules
 .next
 out
 coverage
+test-results
+.e2e-debug
+*.log
+*.tsbuildinfo
+public/uploads
 .env
 .env.local
 .env.development.local

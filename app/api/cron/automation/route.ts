@@ -2,7 +2,7 @@ import { generateTasksForStaleEnquiries } from "@/lib/repositories/automation-re
 import { NextResponse } from "next/server";
 
 function isAuthorized(authHeader: string | null) {
-  const token = process.env.CRON_SECRET;
+  const token = process.env.CRON_SECRET ?? "";
   if (!token) return false;
   if (!authHeader) return false;
   return authHeader === `Bearer ${token}`;

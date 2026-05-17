@@ -1,6 +1,10 @@
 import { ReminderChannel, type ReminderDeliveryStatus } from "@prisma/client";
 
 import {
+  REMINDER_MEETING_LINK_PLACEHOLDER,
+  validateLiveLessonUrl,
+} from "@/lib/lessons/live-lesson-url";
+import {
   createReminderLog,
   listUpcomingClassesForReminders,
 } from "@/lib/repositories/schedule-repository";
@@ -14,7 +18,7 @@ async function sendWhatsAppReminder(input: {
   startAt: Date;
   liveLessonUrl: string;
 }) {
-  const webhook = process.env.WHATSAPP_WEBHOOK_URL;
+  const webhook = process.env.WHATSAPP_WEBHOOK_URL ?? "";
   if (!webhook || !input.phone) {
     return {
       delivered: false,
@@ -56,18 +60,43 @@ function alreadySent(
     recipientUserId: string;
     channel: ReminderChannel;
     status: ReminderDeliveryStatus;
+    reminderWindowStart?: Date | null;
+    reminderWindowEnd?: Date | null;
   }>,
   userId: string,
   channel: ReminderChannel,
+  reminderWindowStart: Date,
+  reminderWindowEnd: Date,
 ) {
   return recentLogs.some(
-    (log) => log.recipientUserId === userId && log.channel === channel && log.status === "SENT",
+    (log) =>
+      log.recipientUserId === userId &&
+      log.channel === channel &&
+      log.status === "SENT" &&
+      log.reminderWindowStart?.getTime() === reminderWindowStart.getTime() &&
+      log.reminderWindowEnd?.getTime() === reminderWindowEnd.getTime(),
   );
 }
 
+function reminderLiveLessonUrl(input: {
+  liveLessonUrl?: string | null;
+  meetingProvider?: string | null;
+}) {
+  const validation = validateLiveLessonUrl(
+    input.liveLessonUrl,
+    input.meetingProvider ?? "MANUAL_URL",
+    {
+      required: false,
+    },
+  );
+
+  return validation.ok && validation.url ? validation.url : REMINDER_MEETING_LINK_PLACEHOLDER;
+}
+
 export async function processDueReminders() {
-  const windowStart = new Date();
-  const windowEnd = new Date(Date.now() + 1000 * 60 * 70);
+  const now = new Date();
+  const windowStart = now;
+  const windowEnd = new Date(Date.now() + 1000 * 60 * 60 * 24);
 
   const classes = await listUpcomingClassesForReminders(windowStart, windowEnd);
   let sent = 0;
@@ -75,29 +104,74 @@ export async function processDueReminders() {
   let skipped = 0;
 
   for (const scheduledClass of classes) {
-    const recipientIds = new Set<string>(scheduledClass.participantUserIds);
+    if (
+      !["SCHEDULED", "LIVE", "RESCHEDULED"].includes(
+        "status" in scheduledClass ? String(scheduledClass.status) : "SCHEDULED",
+      )
+    ) {
+      skipped += 1;
+      continue;
+    }
+
+    const reminderWindowStart = new Date(
+      scheduledClass.startAt.getTime() - scheduledClass.reminderMinutesBefore * 60_000,
+    );
+    const reminderWindowEnd = scheduledClass.startAt;
+    if (now < reminderWindowStart || now > reminderWindowEnd) {
+      skipped += 1;
+      continue;
+    }
+
+    const recipientIds = new Set<string>(scheduledClass.students.map((student) => student.id));
     if (scheduledClass.teacherId) {
       recipientIds.add(scheduledClass.teacherId);
     }
+    if (scheduledClass.classGroup?.teacherId) {
+      recipientIds.add(scheduledClass.classGroup.teacherId);
+    }
+    for (const student of scheduledClass.classGroup?.students ?? []) {
+      recipientIds.add(student.id);
+    }
 
     const recipients = await getUsersByIds(Array.from(recipientIds));
+    const liveLessonUrl = reminderLiveLessonUrl(scheduledClass);
     for (const recipient of recipients) {
       if (
-        alreadySent(scheduledClass.reminders, recipient.id, ReminderChannel.EMAIL) &&
-        alreadySent(scheduledClass.reminders, recipient.id, ReminderChannel.WHATSAPP)
+        alreadySent(
+          scheduledClass.reminders,
+          recipient.id,
+          ReminderChannel.EMAIL,
+          reminderWindowStart,
+          reminderWindowEnd,
+        ) &&
+        alreadySent(
+          scheduledClass.reminders,
+          recipient.id,
+          ReminderChannel.WHATSAPP,
+          reminderWindowStart,
+          reminderWindowEnd,
+        )
       ) {
         skipped += 2;
         continue;
       }
 
-      if (!alreadySent(scheduledClass.reminders, recipient.id, ReminderChannel.EMAIL)) {
+      if (
+        !alreadySent(
+          scheduledClass.reminders,
+          recipient.id,
+          ReminderChannel.EMAIL,
+          reminderWindowStart,
+          reminderWindowEnd,
+        )
+      ) {
         const emailResult = await sendClassReminderEmail({
           recipientEmail: recipient.email,
           recipientName: recipient.fullName,
           classTitle: scheduledClass.title,
           startAt: scheduledClass.startAt,
           endAt: scheduledClass.endAt,
-          liveLessonUrl: scheduledClass.liveLessonUrl,
+          liveLessonUrl,
         });
 
         await createReminderLog({
@@ -107,6 +181,8 @@ export async function processDueReminders() {
           channel: "EMAIL",
           status: emailResult.delivered ? "SENT" : "FAILED",
           details: emailResult.delivered ? "Email sent." : emailResult.reason,
+          reminderWindowStart,
+          reminderWindowEnd,
         });
 
         if (emailResult.delivered) {
@@ -116,13 +192,21 @@ export async function processDueReminders() {
         }
       }
 
-      if (!alreadySent(scheduledClass.reminders, recipient.id, ReminderChannel.WHATSAPP)) {
+      if (
+        !alreadySent(
+          scheduledClass.reminders,
+          recipient.id,
+          ReminderChannel.WHATSAPP,
+          reminderWindowStart,
+          reminderWindowEnd,
+        )
+      ) {
         const whatsappResult = await sendWhatsAppReminder({
           phone: recipient.phoneWhatsapp,
           recipientName: recipient.fullName,
           classTitle: scheduledClass.title,
           startAt: scheduledClass.startAt,
-          liveLessonUrl: scheduledClass.liveLessonUrl,
+          liveLessonUrl,
         });
 
         await createReminderLog({
@@ -132,6 +216,8 @@ export async function processDueReminders() {
           channel: "WHATSAPP",
           status: whatsappResult.delivered ? "SENT" : "SKIPPED",
           details: whatsappResult.delivered ? "WhatsApp reminder sent." : whatsappResult.reason,
+          reminderWindowStart,
+          reminderWindowEnd,
         });
 
         if (whatsappResult.delivered) {

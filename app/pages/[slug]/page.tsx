@@ -7,6 +7,7 @@ import {
 } from "@/components/cms/cms-page-content-renderer";
 import { PageHero } from "@/components/sections/page-hero";
 import { Card, CardContent } from "@/components/ui/card";
+import { isReservedSlug } from "@/lib/cms/page-guard";
 import { getPublishedPageBySlug } from "@/lib/repositories/cms-repository";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,14 @@ type CmsPageProps = {
 
 export async function generateMetadata({ params }: CmsPageProps): Promise<Metadata> {
   const { slug } = await params;
+
+  if (isReservedSlug(slug)) {
+    return {
+      title: "Page Not Found",
+      robots: { index: false, follow: false },
+    };
+  }
+
   const page = await getPublishedPageBySlug(slug);
 
   if (!page) {
@@ -43,8 +52,14 @@ export default async function PublicCmsPage({ params }: CmsPageProps) {
   const { slug } = await params;
   const page = await getPublishedPageBySlug(slug);
 
+  if (isReservedSlug(slug)) {
+    notFound();
+    return null;
+  }
+
   if (!page) {
     notFound();
+    return null;
   }
 
   const summary = getCmsContentSummary(page.content) || "Published content from the ULU CMS.";

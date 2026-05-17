@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 
-import { levels } from "@/lib/content";
+import type { CatalogueLevel, CatalogueSubject } from "@/lib/repositories/catalogue-repository";
 import type { EnrolmentFormState, EnrolmentInput } from "@/lib/validations/enrolment";
 
 import { submitEnrolment } from "@/app/enrol/actions";
@@ -21,21 +21,12 @@ const initialState: EnrolmentFormState = {
 };
 
 const steps = ["Parent Info", "Student Details", "Schedule Trial"];
-const subjectOptions = [
-  "Mathematics",
-  "English",
-  "Science",
-  "Biology",
-  "Chemistry",
-  "Physics",
-  "English Language",
-  "Business Studies",
-  "ICT",
-  "Geography",
-  "Kiswahili",
-];
 
 type FieldKey = keyof EnrolmentInput;
+type EnrolFormProps = {
+  subjects?: CatalogueSubject[];
+  levels?: CatalogueLevel[];
+};
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -52,10 +43,10 @@ function SubmitButton() {
   );
 }
 
-function FieldError({ errors }: { errors?: string[] }) {
+function FieldError({ errors, id }: { errors?: string[]; id: string }) {
   if (!errors?.length) return null;
   return (
-    <p className="mt-1 text-sm text-destructive" role="alert">
+    <p id={id} className="mt-1 text-sm text-destructive" role="alert">
       {errors[0]}
     </p>
   );
@@ -75,12 +66,67 @@ function useFieldTone(state: EnrolmentFormState) {
   };
 }
 
-export function EnrolForm() {
+function formatSubmittedAt(value?: string) {
+  if (!value) return null;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function SuccessMessage({ state }: { state: EnrolmentFormState }) {
+  return (
+    <Card className="overflow-hidden border-emerald-200 bg-emerald-50">
+      <CardHeader className="border-b border-emerald-200">
+        <CardTitle className="text-emerald-900">Thank you! We've received your request.</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4 p-6 md:p-8">
+        <p className="text-sm text-emerald-800">
+          Your enrolment request is now in our admissions review queue.
+        </p>
+        {state.referenceId ? (
+          <p className="text-sm font-semibold text-emerald-900">
+            Reference ID: {state.referenceId}
+          </p>
+        ) : null}
+        {state.submittedAt ? (
+          <p className="text-sm text-emerald-800">
+            Submitted at: {formatSubmittedAt(state.submittedAt)}
+          </p>
+        ) : null}
+        <div className="rounded-lg bg-white/70 p-4 text-sm text-emerald-900">
+          <p className="font-semibold">Next Steps</p>
+          <p className="mt-1">
+            {state.nextSteps ??
+              "Our manager will contact you within 24 hours to confirm the details."}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function EnrolForm({ subjects, levels }: EnrolFormProps) {
   const [state, formAction] = useActionState(submitEnrolment, initialState);
   const [step, setStep] = useState(1);
   const [curriculumLevel, setCurriculumLevel] = useState("");
+  const [clientValidationMessage, setClientValidationMessage] = useState("");
   const startedAtRef = useRef(Date.now());
+  const formRef = useRef<HTMLFormElement>(null);
   const fieldTone = useFieldTone(state);
+  const showGenericValidationState =
+    !state.success && state.message === "Please enter valid details in the highlighted fields.";
+
+  const subjectOptions = subjects ?? [];
+  const levelOptions = levels ?? [];
 
   useEffect(() => {
     if (!state.errors) return;
@@ -105,6 +151,61 @@ export function EnrolForm() {
 
     setStep(3);
   }, [state.errors]);
+
+  if (!subjects || !levels) {
+    return (
+      <Card className="overflow-hidden">
+        <CardHeader className="border-b border-secondary bg-secondary/30">
+          <CardTitle>Enrolment Form</CardTitle>
+        </CardHeader>
+        <CardContent className="p-6 md:p-8 text-sm text-muted-foreground">
+          Loading catalogue...
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (state.success) {
+    return <SuccessMessage state={state} />;
+  }
+
+  function validateStepBeforeAdvance(currentStep: number) {
+    const form = formRef.current;
+    if (!form) {
+      return true;
+    }
+
+    const stepSection = form.querySelector<HTMLElement>(`[data-step="${currentStep}"]`);
+    if (!stepSection) {
+      return true;
+    }
+
+    const requiredControls = Array.from(
+      stepSection.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+        "input[required], select[required], textarea[required]",
+      ),
+    );
+
+    const hasInvalidRequiredControl = requiredControls.some((control) => {
+      return !control.value.trim();
+    });
+
+    if (currentStep === 2) {
+      const selectedSubjects = form.querySelectorAll('input[name="subjects"]:checked').length;
+      if (!curriculumLevel || selectedSubjects === 0) {
+        setClientValidationMessage("Please enter valid details in the highlighted fields.");
+        return false;
+      }
+    }
+
+    if (hasInvalidRequiredControl) {
+      setClientValidationMessage("Please enter valid details in the highlighted fields.");
+      return false;
+    }
+
+    setClientValidationMessage("");
+    return true;
+  }
 
   return (
     <Card className="overflow-hidden">
@@ -133,7 +234,7 @@ export function EnrolForm() {
           </div>
         </div>
 
-        <form action={formAction} className="grid gap-6">
+        <form ref={formRef} action={formAction} className="grid gap-6" noValidate>
           <input
             type="text"
             name="companyWebsite"
@@ -144,7 +245,11 @@ export function EnrolForm() {
           />
           <input type="hidden" name="startedAt" value={startedAtRef.current} />
 
-          <section className={cn(step === 1 ? "grid gap-5" : "hidden")} aria-hidden={step !== 1}>
+          <section
+            data-step="1"
+            className={cn(step === 1 ? "grid gap-5" : "hidden")}
+            aria-hidden={step !== 1}
+          >
             <div className="floating-field">
               <Input
                 id="parentGuardianName"
@@ -152,9 +257,20 @@ export function EnrolForm() {
                 placeholder=" "
                 className={cn("peer h-14 pt-6", fieldTone("parentGuardianName"))}
                 aria-required="true"
+                required
+                aria-describedby={
+                  state.errors?.parentGuardianName?.length
+                    ? "enrol-parent-guardian-name-error"
+                    : undefined
+                }
               />
-              <Label htmlFor="parentGuardianName">Parent/Guardian Name</Label>
-              <FieldError errors={state.errors?.parentGuardianName} />
+              <Label htmlFor="parentGuardianName">
+                Parent/Guardian Name <span aria-hidden="true">*</span>
+              </Label>
+              <FieldError
+                id="enrol-parent-guardian-name-error"
+                errors={!showGenericValidationState ? state.errors?.parentGuardianName : undefined}
+              />
             </div>
 
             <div className="floating-field">
@@ -165,9 +281,16 @@ export function EnrolForm() {
                 placeholder=" "
                 className={cn("peer h-14 pt-6", fieldTone("email"))}
                 aria-required="true"
+                required
+                aria-describedby={state.errors?.email?.length ? "enrol-email-error" : undefined}
               />
-              <Label htmlFor="email">Email Address</Label>
-              <FieldError errors={state.errors?.email} />
+              <Label htmlFor="email">
+                Email Address <span aria-hidden="true">*</span>
+              </Label>
+              <FieldError
+                id="enrol-email-error"
+                errors={!showGenericValidationState ? state.errors?.email : undefined}
+              />
             </div>
 
             <div className="floating-field">
@@ -177,13 +300,26 @@ export function EnrolForm() {
                 placeholder=" "
                 className={cn("peer h-14 pt-6", fieldTone("phoneWhatsapp"))}
                 aria-required="true"
+                required
+                aria-describedby={
+                  state.errors?.phoneWhatsapp?.length ? "enrol-phone-whatsapp-error" : undefined
+                }
               />
-              <Label htmlFor="phoneWhatsapp">Phone / WhatsApp</Label>
-              <FieldError errors={state.errors?.phoneWhatsapp} />
+              <Label htmlFor="phoneWhatsapp">
+                Phone / WhatsApp <span aria-hidden="true">*</span>
+              </Label>
+              <FieldError
+                id="enrol-phone-whatsapp-error"
+                errors={!showGenericValidationState ? state.errors?.phoneWhatsapp : undefined}
+              />
             </div>
           </section>
 
-          <section className={cn(step === 2 ? "grid gap-5" : "hidden")} aria-hidden={step !== 2}>
+          <section
+            data-step="2"
+            className={cn(step === 2 ? "grid gap-5" : "hidden")}
+            aria-hidden={step !== 2}
+          >
             <div className="floating-field">
               <Input
                 id="studentName"
@@ -191,9 +327,18 @@ export function EnrolForm() {
                 placeholder=" "
                 className={cn("peer h-14 pt-6", fieldTone("studentName"))}
                 aria-required="true"
+                required
+                aria-describedby={
+                  state.errors?.studentName?.length ? "enrol-student-name-error" : undefined
+                }
               />
-              <Label htmlFor="studentName">Student Name</Label>
-              <FieldError errors={state.errors?.studentName} />
+              <Label htmlFor="studentName">
+                Student Name <span aria-hidden="true">*</span>
+              </Label>
+              <FieldError
+                id="enrol-student-name-error"
+                errors={!showGenericValidationState ? state.errors?.studentName : undefined}
+              />
             </div>
 
             <div className="floating-field">
@@ -203,9 +348,18 @@ export function EnrolForm() {
                 placeholder=" "
                 className={cn("peer h-14 pt-6", fieldTone("ageYearLevel"))}
                 aria-required="true"
+                required
+                aria-describedby={
+                  state.errors?.ageYearLevel?.length ? "enrol-age-year-level-error" : undefined
+                }
               />
-              <Label htmlFor="ageYearLevel">Age / Year Level</Label>
-              <FieldError errors={state.errors?.ageYearLevel} />
+              <Label htmlFor="ageYearLevel">
+                Age / Year Level <span aria-hidden="true">*</span>
+              </Label>
+              <FieldError
+                id="enrol-age-year-level-error"
+                errors={!showGenericValidationState ? state.errors?.ageYearLevel : undefined}
+              />
             </div>
 
             <div className="floating-field">
@@ -217,27 +371,41 @@ export function EnrolForm() {
                   fieldTone("curriculumLevel"),
                 )}
                 value={curriculumLevel}
-                onChange={(event) => setCurriculumLevel(event.target.value)}
+                onChange={(event) => {
+                  setCurriculumLevel(event.target.value);
+                  setClientValidationMessage("");
+                }}
                 data-has-value={curriculumLevel ? "true" : "false"}
                 aria-label="Curriculum level"
+                required
+                aria-describedby={
+                  state.errors?.curriculumLevel?.length ? "enrol-curriculum-level-error" : undefined
+                }
               >
                 <option value="">Select level</option>
-                {levels.map((level) => (
-                  <option key={level.key} value={level.key}>
-                    {level.label}
+                {levelOptions.map((level) => (
+                  <option key={level.id} value={level.slug}>
+                    {level.name}
                   </option>
                 ))}
               </select>
-              <Label htmlFor="curriculumLevel">Curriculum Level</Label>
-              <FieldError errors={state.errors?.curriculumLevel} />
+              <Label htmlFor="curriculumLevel">
+                Curriculum Level <span aria-hidden="true">*</span>
+              </Label>
+              <FieldError
+                id="enrol-curriculum-level-error"
+                errors={!showGenericValidationState ? state.errors?.curriculumLevel : undefined}
+              />
             </div>
 
             <fieldset className="grid gap-2">
-              <legend className="text-sm font-medium text-primary">Subject(s)</legend>
+              <legend className="text-sm font-medium text-primary">
+                Subject(s) <span aria-hidden="true">*</span>
+              </legend>
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {subjectOptions.map((subject) => (
                   <label
-                    key={subject}
+                    key={subject.id}
                     className={cn(
                       "flex items-center gap-2 rounded-md border bg-background px-3 py-3 text-sm",
                       state.errors?.subjects?.length
@@ -250,19 +418,26 @@ export function EnrolForm() {
                     <input
                       type="checkbox"
                       name="subjects"
-                      value={subject}
+                      value={subject.name}
                       className="h-4 w-4 rounded border-secondary"
-                      aria-label={subject}
+                      aria-label={subject.name}
                     />
-                    <span>{subject}</span>
+                    <span>{subject.name}</span>
                   </label>
                 ))}
               </div>
-              <FieldError errors={state.errors?.subjects} />
+              <FieldError
+                id="enrol-subjects-error"
+                errors={!showGenericValidationState ? state.errors?.subjects : undefined}
+              />
             </fieldset>
           </section>
 
-          <section className={cn(step === 3 ? "grid gap-5" : "hidden")} aria-hidden={step !== 3}>
+          <section
+            data-step="3"
+            className={cn(step === 3 ? "grid gap-5" : "hidden")}
+            aria-hidden={step !== 3}
+          >
             <div className="floating-field">
               <Input
                 id="preferredSchedule"
@@ -270,9 +445,20 @@ export function EnrolForm() {
                 placeholder=" "
                 className={cn("peer h-14 pt-6", fieldTone("preferredSchedule"))}
                 aria-required="true"
+                required
+                aria-describedby={
+                  state.errors?.preferredSchedule?.length
+                    ? "enrol-preferred-schedule-error"
+                    : undefined
+                }
               />
-              <Label htmlFor="preferredSchedule">Preferred Schedule</Label>
-              <FieldError errors={state.errors?.preferredSchedule} />
+              <Label htmlFor="preferredSchedule">
+                Preferred Schedule <span aria-hidden="true">*</span>
+              </Label>
+              <FieldError
+                id="enrol-preferred-schedule-error"
+                errors={!showGenericValidationState ? state.errors?.preferredSchedule : undefined}
+              />
             </div>
 
             <div className="floating-field">
@@ -281,11 +467,17 @@ export function EnrolForm() {
                 name="additionalNotes"
                 placeholder=" "
                 className={cn("peer min-h-[130px] pt-7", fieldTone("additionalNotes"))}
+                aria-describedby={
+                  state.errors?.additionalNotes?.length ? "enrol-additional-notes-error" : undefined
+                }
               />
               <Label htmlFor="additionalNotes" className="top-6">
                 Additional Notes
               </Label>
-              <FieldError errors={state.errors?.additionalNotes} />
+              <FieldError
+                id="enrol-additional-notes-error"
+                errors={state.errors?.additionalNotes}
+              />
             </div>
           </section>
 
@@ -304,7 +496,11 @@ export function EnrolForm() {
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={() => setStep((value) => value + 1)}
+                  onClick={() => {
+                    if (validateStepBeforeAdvance(step)) {
+                      setStep((value) => value + 1);
+                    }
+                  }}
                 >
                   Next Step
                 </Button>
@@ -316,8 +512,15 @@ export function EnrolForm() {
 
           {step === 3 ? <TurnstileWidget /> : null}
 
+          {clientValidationMessage ? (
+            <output role="alert" className="text-sm text-destructive" aria-live="polite">
+              {clientValidationMessage}
+            </output>
+          ) : null}
+
           {state.message ? (
             <output
+              role={state.success ? undefined : "alert"}
               className={state.success ? "text-sm text-emerald-600" : "text-sm text-destructive"}
               aria-live="polite"
             >

@@ -4,7 +4,7 @@ import { Menu, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { logoutPortal } from "@/app/student-portal/actions";
 import { mainNavItems, mobileNavItems } from "@/lib/content";
@@ -89,6 +89,48 @@ function AdminDashboardLink({
   );
 }
 
+function PortalLink({
+  role,
+  className = "",
+  onClick,
+}: {
+  role: string;
+  className?: string;
+  onClick?: () => void;
+}) {
+  if (role === "ADMIN") {
+    return <AdminDashboardLink className={className} onClick={onClick} />;
+  }
+
+  if (role === "TEACHER") {
+    return (
+      <Button asChild variant="secondary" size="sm" className={className}>
+        <Link href="/portal/teacher" onClick={onClick}>
+          Teacher Portal
+        </Link>
+      </Button>
+    );
+  }
+
+  if (role === "STUDENT") {
+    return (
+      <Button asChild variant="secondary" size="sm" className={className}>
+        <Link href="/portal/student" onClick={onClick}>
+          Student Portal
+        </Link>
+      </Button>
+    );
+  }
+
+  return (
+    <Button asChild variant="secondary" size="sm" className={className}>
+      <Link href="/portal" onClick={onClick}>
+        My Portal
+      </Link>
+    </Button>
+  );
+}
+
 function UluLogo() {
   return (
     <Link href="/" className="flex items-center gap-3" aria-label="ULU Online School Home">
@@ -111,11 +153,29 @@ export function SiteHeader() {
   const [renderMobileMenu, setRenderMobileMenu] = useState(false);
   const [session, setSession] = useState<HeaderSessionResponse>({ authenticated: false });
   const [sessionLoaded, setSessionLoaded] = useState(false);
+  const mobileMenuRef = useRef<HTMLDialogElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  const focusMenuButton = useCallback(() => {
+    window.setTimeout(() => {
+      menuButtonRef.current?.focus();
+    }, 0);
+  }, []);
+
+  const closeMobileMenu = useCallback(
+    (returnFocus = false) => {
+      setOpen(false);
+      if (returnFocus) {
+        focusMenuButton();
+      }
+    },
+    [focusMenuButton],
+  );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is intentionally used as a route-change trigger.
   useEffect(() => {
-    setOpen(false);
-  }, [pathname]);
+    closeMobileMenu();
+  }, [closeMobileMenu, pathname]);
 
   useEffect(() => {
     if (open) {
@@ -137,13 +197,55 @@ export function SiteHeader() {
 
     function handleEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setOpen(false);
+        closeMobileMenu(true);
       }
     }
 
     window.addEventListener("keydown", handleEscape);
     return () => {
       window.removeEventListener("keydown", handleEscape);
+    };
+  }, [closeMobileMenu, open]);
+
+  useEffect(() => {
+    function handleResize() {
+      if (window.innerWidth >= 1024) {
+        closeMobileMenu();
+      }
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [closeMobileMenu]);
+
+  useEffect(() => {
+    if (!open || !mobileMenuRef.current) return;
+
+    const focusable = mobileMenuRef.current.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    first?.focus();
+
+    function handleTrap(event: KeyboardEvent) {
+      if (event.key !== "Tab" || !first || !last) return;
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    mobileMenuRef.current.addEventListener("keydown", handleTrap);
+    return () => {
+      mobileMenuRef.current?.removeEventListener("keydown", handleTrap);
     };
   }, [open]);
 
@@ -189,6 +291,12 @@ export function SiteHeader() {
   return (
     <>
       <header className="sticky top-0 z-40 border-b border-secondary bg-background/95 backdrop-blur-xl">
+        <a
+          href="#main-content"
+          className="sr-only absolute left-4 top-4 z-50 rounded-md bg-background px-4 py-2 text-sm font-medium text-primary shadow-sm focus:not-sr-only"
+        >
+          Skip to main content
+        </a>
         <div className="container flex min-h-20 items-center justify-between gap-4">
           <UluLogo />
 
@@ -208,7 +316,7 @@ export function SiteHeader() {
             {sessionLoaded && isAuthenticated ? (
               <>
                 <HeaderUserInfo user={session.user} />
-                {isAdmin ? <AdminDashboardLink /> : null}
+                <PortalLink role={session.user.role} />
                 <form action={logoutPortal}>
                   <Button
                     type="submit"
@@ -225,7 +333,7 @@ export function SiteHeader() {
                   <Link href="/portal/login">Log In</Link>
                 </Button>
                 <Button asChild>
-                  <Link href="/admissions">Enroll Now</Link>
+                  <Link href="/admissions">Sign Up</Link>
                 </Button>
               </>
             )}
@@ -235,6 +343,7 @@ export function SiteHeader() {
           <div className="flex items-center gap-2 md:hidden">
             <ThemeToggle />
             <Button
+              ref={menuButtonRef}
               variant="secondary"
               size="icon"
               onClick={() => setOpen((value) => !value)}
@@ -261,10 +370,11 @@ export function SiteHeader() {
               open ? "opacity-100" : "opacity-0"
             }`}
             aria-label="Close mobile menu"
-            onClick={() => setOpen(false)}
+            onClick={() => closeMobileMenu(true)}
           />
 
           <dialog
+            ref={mobileMenuRef}
             open
             id="mobile-nav-panel"
             aria-modal="true"
@@ -279,7 +389,7 @@ export function SiteHeader() {
                   key={item.href}
                   href={item.href}
                   className="rounded-md border border-secondary px-4 py-4 text-lg font-medium text-primary"
-                  onClick={() => setOpen(false)}
+                  onClick={() => closeMobileMenu(true)}
                 >
                   {item.label}
                 </Link>
@@ -290,16 +400,12 @@ export function SiteHeader() {
               {sessionLoaded && isAuthenticated ? (
                 <>
                   <HeaderUserInfo user={session.user} />
-                  {isAdmin ? (
-                    <AdminDashboardLink className="w-full" onClick={() => setOpen(false)} />
-                  ) : (
-                    <Button asChild variant="secondary" className="w-full">
-                      <Link href="/portal" onClick={() => setOpen(false)}>
-                        My Portal
-                      </Link>
-                    </Button>
-                  )}
-                  <form action={logoutPortal} onSubmit={() => setOpen(false)}>
+                  <PortalLink
+                    role={session.user.role}
+                    className="w-full"
+                    onClick={() => closeMobileMenu(true)}
+                  />
+                  <form action={logoutPortal} onSubmit={() => closeMobileMenu(true)}>
                     <Button type="submit" variant="secondary" className="w-full">
                       Log Out
                     </Button>
@@ -308,13 +414,13 @@ export function SiteHeader() {
               ) : (
                 <>
                   <Button asChild variant="secondary" className="w-full">
-                    <Link href="/portal/login" onClick={() => setOpen(false)}>
+                    <Link href="/portal/login" onClick={() => closeMobileMenu(true)}>
                       Log In
                     </Link>
                   </Button>
                   <Button asChild className="w-full">
-                    <Link href="/admissions" onClick={() => setOpen(false)}>
-                      Enroll Now
+                    <Link href="/admissions" onClick={() => closeMobileMenu(true)}>
+                      Sign Up
                     </Link>
                   </Button>
                 </>

@@ -8,10 +8,10 @@ datasource db {
 }
 
 enum EnquiryStatus {
-  NEW       @map("new")
-  IN_REVIEW @map("in_review")
-  ACCEPTED  @map("accepted")
-  REJECTED  @map("rejected")
+  NEW         @map("new")
+  IN_PROGRESS @map("in_progress")
+  CONVERTED   @map("converted")
+  REJECTED    @map("rejected")
 }
 
 enum UserRole {
@@ -19,6 +19,37 @@ enum UserRole {
   TEACHER
   PARENT
   STUDENT
+}
+
+enum StudentLearningStatus {
+  TRIAL
+  ACTIVE
+  PAUSED
+  INACTIVE
+}
+
+enum ClassGroupStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum LessonStatus {
+  SCHEDULED
+  LIVE
+  COMPLETED
+  CANCELLED
+  RESCHEDULED
+}
+
+enum MeetingProvider {
+  GOOGLE_MEET
+  MANUAL_URL
+}
+
+enum AvailabilitySlotStatus {
+  ACTIVE
+  INACTIVE
 }
 
 enum ReminderChannel {
@@ -50,8 +81,15 @@ enum PaymentStatus {
   PENDING
 }
 
+enum PerformanceLevel {
+  EXCELLENT
+  GOOD
+  STRUGGLING
+}
+
 model Enquiry {
   id                 String        @id @default(cuid())
+  referenceId        String?       @unique
   studentName        String
   ageYearLevel       String
   subjects           String[]
@@ -73,6 +111,8 @@ model Enquiry {
   updatedAt          DateTime      @updatedAt
 
   managerTasks ManagerTask[]
+  notes        EnquiryNote[]
+  timeline     EnquiryTimelineEvent[]
 
   @@index([status, createdAt])
   @@index([curriculumLevelId])
@@ -81,6 +121,7 @@ model Enquiry {
 
 model ContactLead {
   id            String        @id @default(cuid())
+  referenceId   String?       @unique
   fullName      String
   email         String
   phoneWhatsapp String?
@@ -94,9 +135,63 @@ model ContactLead {
   referrer      String?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
+  notes         ContactLeadNote[]
+  timeline      ContactLeadTimelineEvent[]
 
   @@index([status, createdAt])
   @@index([utmSource, createdAt])
+}
+
+model EnquiryNote {
+  id        String   @id @default(cuid())
+  entityId  String
+  enquiry   Enquiry  @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  authorId  String
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([entityId, createdAt])
+  @@index([authorId, createdAt])
+}
+
+model EnquiryTimelineEvent {
+  id        String   @id @default(cuid())
+  entityId  String
+  enquiry   Enquiry  @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  type      String
+  message   String
+  actorId   String
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([entityId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model ContactLeadNote {
+  id        String      @id @default(cuid())
+  leadId    String
+  lead      ContactLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  authorId  String
+  content   String
+  createdAt DateTime    @default(now())
+
+  @@index([leadId, createdAt])
+  @@index([authorId, createdAt])
+}
+
+model ContactLeadTimelineEvent {
+  id        String      @id @default(cuid())
+  leadId    String
+  lead      ContactLead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type      String
+  message   String
+  actorId   String
+  meta      Json?
+  createdAt DateTime    @default(now())
+
+  @@index([leadId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model AppUser {
@@ -107,6 +202,7 @@ model AppUser {
   passwordHash         String
   phoneWhatsapp        String?
   isActive             Boolean  @default(true)
+  learningStatus       StudentLearningStatus?
   twoFactorEnabled     Boolean  @default(false)
   twoFactorSecret      String?
   twoFactorBackupCodes String[] @default([])
@@ -114,14 +210,26 @@ model AppUser {
   updatedAt            DateTime @updatedAt
 
   scheduledAsTeacher ScheduledClass[] @relation("TeacherScheduledClasses")
+  classGroupsAsTeacher ClassGroup[]   @relation("TeacherClassGroups")
+  availabilityRules TeacherAvailabilityRule[]
+  unavailablePeriods TeacherUnavailablePeriod[]
   adminAuditLogs     AdminAuditLog[]
+
+  // Educational Model Relations
+  children           AppUser[]          @relation("ParentChildren")
+  parents            AppUser[]          @relation("ParentChildren")
+  enrolledClasses    ScheduledClass[]   @relation("ClassEnrollments")
+  enrolledClassGroups ClassGroup[]      @relation("ClassGroupEnrollments")
 
   // CMS Relations
   blogPosts BlogPost[]
 
   // Dashboard Relations
-  homeworkSubmissions HomeworkSubmission[]
-  studentProgresses   StudentProgress[]
+  submissions          Submission[]
+  studentProgresses    StudentProgress[] @relation("StudentProgressStudent")
+  teacherProgresses    StudentProgress[] @relation("StudentProgressTeacher")
+  courseMaterials      CourseMaterial[]
+  cabinetTeacher       Teacher?         @relation("TeacherCabinetAccess")
 
   // Automation Relations
   assignedTasks ManagerTask[]
@@ -132,53 +240,133 @@ model AppUser {
 }
 
 model ScheduledClass {
-  id                    String   @id @default(cuid())
+  id                    String       @id @default(cuid())
   title                 String
   description           String?
   startAt               DateTime
   endAt                 DateTime
-  liveLessonUrl         String
+  timezone              String?
+  status                LessonStatus @default(SCHEDULED)
+  liveLessonUrl         String?
+  meetingProvider       MeetingProvider @default(GOOGLE_MEET)
+  googleCalendarEventId String?
+  googleMeetSpaceName   String?
+  meetingCreatedAt      DateTime?
+  meetingUpdatedAt      DateTime?
   teacherId             String?
-  teacher               AppUser? @relation("TeacherScheduledClasses", fields: [teacherId], references: [id], onDelete: SetNull)
-  participantUserIds    String[]
-  reminderMinutesBefore Int      @default(60)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  teacher               AppUser?     @relation("TeacherScheduledClasses", fields: [teacherId], references: [id], onDelete: SetNull)
+  subjectId             String?
+  subject               Subject?     @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  classGroupId          String?
+  classGroup            ClassGroup?  @relation(fields: [classGroupId], references: [id], onDelete: SetNull)
+  students              AppUser[]    @relation("ClassEnrollments")
+  reminderMinutesBefore Int          @default(60)
+  cancelledAt           DateTime?
+  cancelReason          String?
+  completedAt           DateTime?
+  rescheduledFromId     String?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
 
-  reminders ReminderLog[]
-  homeworks Homework[]
+  reminders       ReminderLog[]
+  assignments     Assignment[]
+  courseMaterials CourseMaterial[]
 
   @@index([startAt])
   @@index([teacherId, startAt])
+  @@index([subjectId])
+  @@index([status, startAt])
+  @@index([classGroupId, startAt])
+}
+
+model TeacherAvailabilityRule {
+  id        String                 @id @default(cuid())
+  teacherId String
+  teacher   AppUser                @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  weekday   Int
+  startTime String
+  endTime   String
+  timezone  String                 @default("Europe/Kiev")
+  status    AvailabilitySlotStatus @default(ACTIVE)
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+
+  @@index([teacherId, weekday, status])
+}
+
+model TeacherUnavailablePeriod {
+  id        String   @id @default(cuid())
+  teacherId String
+  teacher   AppUser  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  startAt   DateTime
+  endAt     DateTime
+  reason    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([teacherId, startAt, endAt])
+}
+
+model ClassGroup {
+  id          String           @id @default(cuid())
+  name        String
+  description String?
+  subjectId   String?
+  subject     Subject?         @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  levelId     String?
+  level       Level?           @relation(fields: [levelId], references: [id], onDelete: SetNull)
+  teacherId   String?
+  teacher     AppUser?         @relation("TeacherClassGroups", fields: [teacherId], references: [id], onDelete: SetNull)
+  status      ClassGroupStatus @default(ACTIVE)
+  capacity    Int?
+  startDate   DateTime?
+  endDate     DateTime?
+  students    AppUser[]        @relation("ClassGroupEnrollments")
+  lessons     ScheduledClass[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([status, name])
+  @@index([teacherId])
+  @@index([subjectId])
+  @@index([levelId])
 }
 
 model ReminderLog {
-  id               String                 @id @default(cuid())
-  scheduledClassId String
-  scheduledClass   ScheduledClass         @relation(fields: [scheduledClassId], references: [id], onDelete: Cascade)
-  recipientUserId  String
-  recipientEmail   String
-  channel          ReminderChannel
-  status           ReminderDeliveryStatus @default(SENT)
-  details          String?
-  createdAt        DateTime               @default(now())
+  id                  String                 @id @default(cuid())
+  scheduledClassId    String
+  scheduledClass      ScheduledClass         @relation(fields: [scheduledClassId], references: [id], onDelete: Cascade)
+  recipientUserId     String
+  recipientEmail      String
+  channel             ReminderChannel
+  status              ReminderDeliveryStatus @default(SENT)
+  details             String?
+  reminderWindowStart DateTime?
+  reminderWindowEnd   DateTime?
+  createdAt           DateTime               @default(now())
 
+  @@unique([scheduledClassId, recipientUserId, channel, reminderWindowStart, reminderWindowEnd])
   @@index([scheduledClassId, recipientUserId, channel, createdAt])
   @@index([status, createdAt])
 }
 
 model AdminAuditLog {
-  id          String   @id @default(cuid())
-  adminUserId String
-  adminUser   AppUser  @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
-  action      String
-  targetType  String
-  targetId    String?
-  before      Json?
-  after       Json?
-  meta        Json?
-  createdAt   DateTime @default(now())
+  id            String   @id @default(cuid())
+  adminUserId   String?
+  adminUser     AppUser? @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+  actorId       String
+  actorEmail    String?
+  actorFullName String?
+  actorRole     String?
+  action        String
+  targetType    String
+  targetId      String?
+  before        Json?
+  after         Json?
+  meta          Json?
+  createdAt     DateTime @default(now())
 
+  @@index([actorId, createdAt])
   @@index([adminUserId, createdAt])
   @@index([action, createdAt])
 }
@@ -188,6 +376,10 @@ model Teacher {
   fullName        String
   title           String
   bio             String
+  photoUrl        String?
+  cabinetUserId   String?          @unique
+  cabinetUser     AppUser?         @relation("TeacherCabinetAccess", fields: [cabinetUserId], references: [id], onDelete: SetNull)
+  displayOrder    Int              @default(0)
   yearsExperience Int?
   isVetted        Boolean          @default(true)
   isActive        Boolean          @default(true)
@@ -218,13 +410,18 @@ model Subject {
   slug        String   @unique
   name        String
   description String
+  isActive    Boolean  @default(true)
+  priority    Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   levelSubjects   LevelSubject[]
   teacherSubjects TeacherSubject[]
-  courseMaterials CourseMaterial[]
   studentProgress StudentProgress[]
+  scheduledClasses ScheduledClass[]
+  classGroups      ClassGroup[]
+
+  @@index([isActive, priority, name])
 }
 
 model Level {
@@ -236,6 +433,7 @@ model Level {
   updatedAt     DateTime       @updatedAt
   enquiries     Enquiry[]
   levelSubjects LevelSubject[]
+  classGroups   ClassGroup[]
 }
 
 model LevelSubject {
@@ -293,11 +491,13 @@ model FaqItem {
   category     String
   question     String
   answer       String
+  status       String   @default("published")
   displayOrder Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   @@index([category, displayOrder])
+  @@index([status, displayOrder, createdAt])
 }
 
 // ==========================================
@@ -305,60 +505,89 @@ model FaqItem {
 // ==========================================
 
 model CourseMaterial {
-  id        String   @id @default(cuid())
-  title     String
-  fileUrl   String
-  type      String
-  subjectId String
-  subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id               String         @id @default(uuid())
+  title            String
+  description      String?
+  fileUrl          String
+  scheduledClassId String
+  scheduledClass   ScheduledClass @relation(fields: [scheduledClassId], references: [id], onDelete: Cascade)
+  teacherId        String
+  teacher          AppUser        @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  attachments      Attachment[]
 
-  @@index([subjectId])
+  @@index([scheduledClassId])
+  @@index([teacherId])
 }
 
-model Homework {
+model Assignment {
   id               String               @id @default(cuid())
   title            String
   description      String
   dueDate          DateTime
   scheduledClassId String
+  subjectId        String?
+  teacherId        String
+  archivedAt       DateTime?
   scheduledClass   ScheduledClass       @relation(fields: [scheduledClassId], references: [id], onDelete: Cascade)
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
-  submissions      HomeworkSubmission[]
+  submissions      Submission[]
 
   @@index([scheduledClassId])
+  @@index([teacherId, scheduledClassId, archivedAt])
   @@index([dueDate])
 }
 
-model HomeworkSubmission {
-  id          String   @id @default(cuid())
-  studentId   String
-  student     AppUser  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  homeworkId  String
-  homework    Homework @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
-  contentUrl  String
-  grade       String?
-  feedback    String?
-  submittedAt DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+model Submission {
+  id           String     @id @default(cuid())
+  studentId    String
+  student      AppUser    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  assignmentId String
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  contentUrl   String
+  grade        Float?
+  feedback     String?
+  submittedAt  DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  attachments  Attachment[]
 
-  @@unique([studentId, homeworkId])
-  @@index([homeworkId])
+  @@unique([studentId, assignmentId])
+  @@index([assignmentId])
+}
+
+model Attachment {
+  id               String          @id @default(cuid())
+  filename         String
+  storageKey       String
+  mimeType         String
+  size             Int
+  submissionId     String?
+  submission       Submission?     @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  courseMaterialId String?
+  courseMaterial   CourseMaterial? @relation(fields: [courseMaterialId], references: [id], onDelete: Cascade)
+  createdAt        DateTime        @default(now())
+
+  @@index([submissionId])
+  @@index([courseMaterialId])
+  @@index([storageKey])
 }
 
 model StudentProgress {
   id           String   @id @default(cuid())
   studentId    String
-  student      AppUser  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  student      AppUser  @relation("StudentProgressStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  teacherId    String
+  teacher      AppUser  @relation("StudentProgressTeacher", fields: [teacherId], references: [id], onDelete: Cascade)
   subjectId    String
   subject      Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  gradeLevel   String
+  gradeLevel   PerformanceLevel
   teacherNotes String
   recordedAt   DateTime @default(now())
 
   @@index([studentId, subjectId])
+  @@index([teacherId, studentId, subjectId])
 }
 
 // ==========================================

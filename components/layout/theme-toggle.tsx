@@ -15,11 +15,7 @@ export function ThemeToggle() {
   }, []);
 
   if (!mounted) {
-    return (
-      <Button variant="outline" size="icon" aria-label="Toggle theme" disabled>
-        <Sun className="h-4 w-4" />
-      </Button>
-    );
+    return null;
   }
 
   const isDark = resolvedTheme === "dark";

@@ -1,6 +1,7 @@
 "use server";
 
 import { getAttributionFromRequest } from "@/lib/analytics/attribution";
+import { generateSubmissionReferenceId } from "@/lib/reference-id";
 import { createEnquiry } from "@/lib/repositories/enquiry-repository";
 import { checkRateLimit } from "@/lib/security/rate-limit";
 import {
@@ -16,6 +17,7 @@ export async function submitEnrolment(
   _prevState: EnrolmentFormState,
   formData: FormData,
 ): Promise<EnrolmentFormState> {
+  const now = new Date();
   const requestIdentifier = await getRequestIdentifier();
   const rateLimit = checkRateLimit({
     bucket: "enrol-form",
@@ -74,7 +76,7 @@ export async function submitEnrolment(
   if (!parsed.success) {
     return {
       success: false,
-      message: "Please review the form and fix the highlighted fields.",
+      message: "Please enter valid details in the highlighted fields.",
       errors: parsed.error.flatten().fieldErrors,
     };
   }
@@ -82,9 +84,15 @@ export async function submitEnrolment(
   try {
     const data = parsed.data;
     const attribution = await getAttributionFromRequest();
+    const referenceId = generateSubmissionReferenceId({
+      prefix: "MS",
+      year: now.getFullYear(),
+      recordType: "enrolment",
+    });
 
-    await createEnquiry(data, attribution);
+    const enquiry = await createEnquiry({ ...data, referenceId }, attribution);
     const emailResult = await sendEnquiryEmail(data);
+    const nextSteps = "We will contact you within 24 hours to arrange the trial class.";
 
     if (!emailResult.delivered) {
       console.warn("Enrolment saved but email delivery failed", emailResult.reason);
@@ -95,6 +103,10 @@ export async function submitEnrolment(
       message: emailResult.delivered
         ? "Thank you. Your enquiry has been submitted successfully. We will contact you shortly."
         : "Thank you. Your enquiry has been submitted. Our team will follow up soon.",
+      referenceId,
+      submittedAt: (enquiry.createdAt ?? now).toISOString(),
+      adminPath: `/admin/enquiries/${enquiry.id}`,
+      nextSteps,
     };
   } catch (error) {
     console.error("Enrolment submission failed", error);

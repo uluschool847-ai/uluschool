@@ -7,8 +7,8 @@ export async function verifyTurnstileToken(
   token: FormDataEntryValue | null,
   remoteIp?: string,
 ): Promise<TurnstileResult> {
-  const secret = process.env.TURNSTILE_SECRET_KEY;
-  const enforce = process.env.TURNSTILE_ENFORCE === "true";
+  const secret = process.env.TURNSTILE_SECRET_KEY ?? "";
+  const enforce = (process.env.TURNSTILE_ENFORCE ?? "false") === "true";
 
   if (!secret) {
     return enforce ? { ok: false, reason: "NOT_CONFIGURED" } : { ok: true };

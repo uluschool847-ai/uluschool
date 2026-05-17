@@ -16,9 +16,9 @@ import { z } from "zod";
 
 const updateReviewSchema = z.object({
   id: z.string().min(1, "ID is required"),
-  status: z.nativeEnum(EnquiryStatus, { 
-    required_error: "Status is required", 
-    invalid_type_error: "Invalid status" 
+  status: z.nativeEnum(EnquiryStatus, {
+    required_error: "Status is required",
+    invalid_type_error: "Invalid status",
   }),
   adminNotes: z.string().optional(),
 });

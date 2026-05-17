@@ -1,6 +1,7 @@
 "use server";
 
 import { getAttributionFromRequest } from "@/lib/analytics/attribution";
+import { generateSubmissionReferenceId } from "@/lib/reference-id";
 import { createContactLead } from "@/lib/repositories/contact-lead-repository";
 import { checkRateLimit } from "@/lib/security/rate-limit";
 import {
@@ -16,6 +17,7 @@ export async function submitContactEnquiry(
   _prevState: ContactFormState,
   formData: FormData,
 ): Promise<ContactFormState> {
+  const now = new Date();
   const requestIdentifier = await getRequestIdentifier();
   const rateLimit = checkRateLimit({
     bucket: "contact-form",
@@ -28,6 +30,24 @@ export async function submitContactEnquiry(
     return {
       success: false,
       message: "Too many attempts. Please wait a few minutes and try again.",
+    };
+  }
+
+  const rawInput = {
+    fullName: String(formData.get("fullName") || "").trim(),
+    email: String(formData.get("email") || "").trim(),
+    phoneWhatsapp: String(formData.get("phoneWhatsapp") || "").trim(),
+    studentGrade: String(formData.get("studentGrade") || "").trim(),
+    message: String(formData.get("message") || "").trim(),
+  };
+
+  const parsed = contactSchema.safeParse(rawInput);
+
+  if (!parsed.success) {
+    return {
+      success: false,
+      message: "Please enter valid details in the highlighted fields.",
+      errors: parsed.error.flatten().fieldErrors,
     };
   }
 
@@ -53,29 +73,17 @@ export async function submitContactEnquiry(
     };
   }
 
-  const rawInput = {
-    fullName: String(formData.get("fullName") || "").trim(),
-    email: String(formData.get("email") || "").trim(),
-    phoneWhatsapp: String(formData.get("phoneWhatsapp") || "").trim(),
-    studentGrade: String(formData.get("studentGrade") || "").trim(),
-    message: String(formData.get("message") || "").trim(),
-  };
-
-  const parsed = contactSchema.safeParse(rawInput);
-
-  if (!parsed.success) {
-    return {
-      success: false,
-      message: "Please review the form and fix the highlighted fields.",
-      errors: parsed.error.flatten().fieldErrors,
-    };
-  }
-
   try {
     const data = parsed.data;
     const attribution = await getAttributionFromRequest();
-    await createContactLead(data, attribution);
+    const referenceId = generateSubmissionReferenceId({
+      prefix: "MS",
+      year: now.getFullYear(),
+      recordType: "contact",
+    });
+    const lead = await createContactLead({ ...data, referenceId }, attribution);
     const emailResult = await sendContactEmail(data);
+    const nextSteps = "We will contact you within 24 hours.";
 
     if (!emailResult.delivered) {
       console.warn("Contact lead saved but email delivery failed", emailResult.reason);
@@ -86,6 +94,10 @@ export async function submitContactEnquiry(
       message: emailResult.delivered
         ? "Thank you. Your message has been submitted successfully."
         : "Thank you. Your message has been received. Our team will follow up soon.",
+      referenceId,
+      submittedAt: (lead.createdAt ?? now).toISOString(),
+      adminPath: `/admin/leads/${lead.id}`,
+      nextSteps,
     };
   } catch (error) {
     console.error("Contact submission failed", error);

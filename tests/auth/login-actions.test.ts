@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock redirect to throw an error so we can catch and assert it
 const redirectMock = vi.hoisted(() =>
@@ -17,23 +17,28 @@ vi.mock("@/lib/auth/password", () => ({
 }));
 
 vi.mock("@/lib/repositories/user-repository", () => ({
-  findUserByEmail: vi.fn(() => Promise.resolve({
-    id: "user-1",
-    email: "test@uluglobalacademy.com",
-    role: "STUDENT",
-    isActive: true,
-    passwordHash: "hashed",
-  })),
-  findAdminUserForTwoFactor: vi.fn(() => Promise.resolve({
-    id: "admin-1",
-    role: "ADMIN",
-    twoFactorEnabled: true,
-    twoFactorSecret: "mock-secret",
-  })),
+  findUserByEmail: vi.fn(() =>
+    Promise.resolve({
+      id: "user-1",
+      email: "test@uluglobalacademy.com",
+      role: "STUDENT",
+      isActive: true,
+      passwordHash: "hashed",
+    }),
+  ),
+  findAdminUserForTwoFactor: vi.fn(() =>
+    Promise.resolve({
+      id: "admin-1",
+      role: "ADMIN",
+      twoFactorEnabled: true,
+      twoFactorSecret: "mock-secret",
+    }),
+  ),
 }));
 
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   createAdminAuditLog: vi.fn(() => Promise.resolve()),
+  logAuthEvent: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("@/lib/auth/session", () => ({
@@ -58,7 +63,9 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
   });
 
   it("parses the next parameter and redirects to the exact intended path upon successful login", async () => {
-    let loginAction: any;
+    let loginAction:
+      | ((state: { success: boolean; message: string }, formData: FormData) => Promise<unknown>)
+      | undefined;
     try {
       // Target the new canonical portal architecture path
       const modulePath = "../../../app/portal/login/actions";
@@ -82,12 +89,14 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
 
     // The action should parse 'next' and ultimately call redirect("/portal/student/assignments?view=past")
     await expect(loginAction({ success: false, message: "" }, formData)).rejects.toThrow(
-      "REDIRECT:/portal/student/assignments?view=past"
+      "REDIRECT:/portal/student/assignments?view=past",
     );
   });
 
   it("parses the next parameter and redirects to the exact intended path upon successful 2FA", async () => {
-    let verify2faAction: any;
+    let verify2faAction:
+      | ((state: { success: boolean; message: string }, formData: FormData) => Promise<unknown>)
+      | undefined;
     try {
       const modulePath = "../../../app/portal/login/verify-2fa/actions";
       const module = await import(/* @vite-ignore */ modulePath);
@@ -107,7 +116,7 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
     formData.set("next", "/portal/admin/settings");
 
     await expect(verify2faAction({ success: false, message: "" }, formData)).rejects.toThrow(
-      "REDIRECT:/portal/admin/settings"
+      "REDIRECT:/portal/admin/settings",
     );
   });
 });

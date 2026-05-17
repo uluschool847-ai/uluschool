@@ -9,7 +9,10 @@ export interface CmsProvider {
   getPage(slug: string): Promise<CmsPage | null>;
 }
 
-// Future implementation can target a headless CMS (Sanity, Contentful, Strapi, etc.).
+/**
+ * @deferred Reason: will be wired when the public page renderer switches from
+ * direct Prisma reads to a pluggable headless CMS adapter.
+ */
 export const cmsProvider: CmsProvider = {
   async getPage(_slug: string) {
     return null;

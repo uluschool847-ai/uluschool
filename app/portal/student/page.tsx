@@ -13,21 +13,33 @@ export const metadata: Metadata = {
 };
 
 function formatDate(date: Date) {
-  return new Intl.DateTimeFormat("en-GB", {
+  const parts = new Intl.DateTimeFormat("en-US", {
     year: "numeric",
-    month: "short",
+    month: "long",
     day: "2-digit",
-  }).format(date);
+  }).formatToParts(date);
+
+  const day = parts.find((part) => part.type === "day")?.value ?? "";
+  const month = parts.find((part) => part.type === "month")?.value ?? "";
+  const year = parts.find((part) => part.type === "year")?.value ?? "";
+
+  return `${day} ${month} ${year}`;
 }
 
 export default async function StudentPortalDashboard() {
   const session = await requireRole([UserRole.STUDENT]);
 
   const homeworkList = await listStudentHomework(session.uid);
-  const progressList = await getStudentProgress(session.uid);
+  let progressList: Awaited<ReturnType<typeof getStudentProgress>> = [];
+
+  try {
+    progressList = (await getStudentProgress(session.uid)) ?? [];
+  } catch (error) {
+    console.error("Failed to load student progress:", error);
+  }
 
   return (
-    <div className="space-y-6">
+    <main className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Student Dashboard</h1>
         <p className="text-muted-foreground mt-2">
@@ -38,11 +50,13 @@ export default async function StudentPortalDashboard() {
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>My Assignments</CardTitle>
+            <h2 className="font-heading text-xl font-semibold">My Assignments</h2>
           </CardHeader>
           <CardContent className="space-y-4">
             {homeworkList.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No homework assigned yet.</p>
+              <output>
+                <p className="text-sm text-muted-foreground">No homework assigned yet.</p>
+              </output>
             ) : (
               homeworkList.map((hw) => {
                 const submission = hw.submissions[0];
@@ -76,7 +90,12 @@ export default async function StudentPortalDashboard() {
                         )}
                       </div>
                     ) : (
-                      <form action={submitHomeworkAction} className="flex items-center gap-2 mt-2">
+                      <form
+                        action={async (formData) => {
+                          await submitHomeworkAction(formData);
+                        }}
+                        className="flex items-center gap-2 mt-2"
+                      >
                         <input type="hidden" name="homeworkId" value={hw.id} />
                         <Input
                           name="contentUrl"
@@ -98,11 +117,13 @@ export default async function StudentPortalDashboard() {
 
         <Card>
           <CardHeader>
-            <CardTitle>My Progress</CardTitle>
+            <h2 className="font-heading text-xl font-semibold">My Progress</h2>
           </CardHeader>
           <CardContent>
             {progressList.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No progress reports available yet.</p>
+              <output>
+                <p className="text-sm text-muted-foreground">No progress reports available yet.</p>
+              </output>
             ) : (
               <ul className="space-y-4">
                 {progressList.map((progress) => (
@@ -124,6 +145,6 @@ export default async function StudentPortalDashboard() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </main>
   );
 }

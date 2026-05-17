@@ -21,5 +21,9 @@ export type EnrolmentInput = z.infer<typeof enrolmentSchema>;
 export type EnrolmentFormState = {
   success: boolean;
   message: string;
+  referenceId?: string;
+  submittedAt?: string;
+  adminPath?: string;
+  nextSteps?: string;
   errors?: Partial<Record<keyof EnrolmentInput, string[]>>;
 };

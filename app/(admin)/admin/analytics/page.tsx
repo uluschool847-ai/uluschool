@@ -12,6 +12,24 @@ export const metadata: Metadata = {
   title: "BI Analytics - Admin",
 };
 
+function formatCurrency(amount: number) {
+  const safeAmount = Number.isFinite(amount) ? amount : 0;
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(safeAmount);
+}
+
+function calculateBarWidth(value: number, maxValue: number, minimumWidth = 2) {
+  if (!Number.isFinite(value) || !Number.isFinite(maxValue) || maxValue <= 0) {
+    return minimumWidth;
+  }
+
+  return Math.min(100, Math.max(minimumWidth, (value / maxValue) * 100));
+}
+
 export default async function AnalyticsDashboardPage() {
   await requireRole([UserRole.ADMIN]);
 
@@ -19,6 +37,14 @@ export default async function AnalyticsDashboardPage() {
     getAdminAnalyticsOverview(),
     getAdvancedBIMetrics(),
   ]);
+  const maxTrafficCount = Math.max(
+    ...basicAnalytics.trafficSources.map((source) => source.count),
+    0,
+  );
+  const maxMonthlyRevenue = Math.max(
+    ...advancedMetrics.revenueChartData.map((data) => data.amount),
+    0,
+  );
 
   return (
     <div className="space-y-6">
@@ -34,16 +60,14 @@ export default async function AnalyticsDashboardPage() {
           <CardHeader className="pb-2">
             <CardDescription>Total Revenue</CardDescription>
             <CardTitle className="text-4xl">
-              ${advancedMetrics.totalRevenue.toLocaleString()}
+              {formatCurrency(advancedMetrics.totalRevenue)}
             </CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Average LTV</CardDescription>
-            <CardTitle className="text-4xl">
-              ${advancedMetrics.ltv.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-            </CardTitle>
+            <CardTitle className="text-4xl">{formatCurrency(advancedMetrics.ltv)}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -81,7 +105,7 @@ export default async function AnalyticsDashboardPage() {
                         <div
                           className="h-2 bg-primary rounded-full"
                           style={{
-                            width: `${Math.max(5, (source.count / basicAnalytics.trafficSources[0].count) * 100)}%`,
+                            width: `${calculateBarWidth(source.count, maxTrafficCount, 5)}%`,
                           }}
                         />
                         <span className="text-xs text-muted-foreground w-8">{source.count}</span>
@@ -105,29 +129,24 @@ export default async function AnalyticsDashboardPage() {
             ) : (
               <div className="space-y-4 mt-2">
                 {/* Note: In a production app, use Recharts or Tremor here. Falling back to a simple bar chart. */}
-                {advancedMetrics.revenueChartData.map((data) => {
-                  const maxAmount = Math.max(
-                    ...advancedMetrics.revenueChartData.map((d) => d.amount),
-                  );
-                  return (
-                    <div key={`${data.month}-${data.amount}`} className="flex items-center">
-                      <div className="w-1/4 text-xs font-medium text-muted-foreground">
-                        {data.month}
-                      </div>
-                      <div className="w-3/4">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="h-4 bg-green-500 rounded-sm"
-                            style={{ width: `${Math.max(2, (data.amount / maxAmount) * 100)}%` }}
-                          />
-                          <span className="text-xs font-semibold">
-                            ${data.amount.toLocaleString()}
-                          </span>
-                        </div>
+                {advancedMetrics.revenueChartData.map((data) => (
+                  <div key={`${data.month}-${data.amount}`} className="flex items-center">
+                    <div className="w-1/4 text-xs font-medium text-muted-foreground">
+                      {data.month}
+                    </div>
+                    <div className="w-3/4">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="h-4 bg-green-500 rounded-sm"
+                          style={{
+                            width: `${calculateBarWidth(data.amount, maxMonthlyRevenue)}%`,
+                          }}
+                        />
+                        <span className="text-xs font-semibold">{formatCurrency(data.amount)}</span>
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             )}
           </CardContent>

@@ -4,11 +4,8 @@ import { withSentryConfig } from "@sentry/nextjs";
 const nextConfig = {
   experimental: {
     serverActions: {
-      bodySizeLimit: "1mb",
+      bodySizeLimit: "8mb",
     },
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
   },
 };
 

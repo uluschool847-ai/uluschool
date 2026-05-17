@@ -4,7 +4,7 @@ import { sendOpsAlert } from "@/lib/monitoring/alerts";
 import { processDueReminders } from "@/lib/services/reminders";
 
 function isAuthorized(authHeader: string | null) {
-  const token = process.env.REMINDER_CRON_TOKEN;
+  const token = process.env.REMINDER_CRON_TOKEN ?? "";
   if (!token) return false;
   if (!authHeader) return false;
   return authHeader === `Bearer ${token}`;

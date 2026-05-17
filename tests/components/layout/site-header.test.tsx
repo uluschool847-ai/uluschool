@@ -1,6 +1,9 @@
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SiteHeader } from "../../../components/layout/site-header";
+
+type LinkMockProps = { href: string; children: React.ReactNode } & Record<string, unknown>;
+type ImageMockProps = { alt?: string; priority?: boolean } & Record<string, unknown>;
 
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
@@ -9,13 +12,17 @@ vi.mock("next/navigation", () => ({
 
 // Mock next/image
 vi.mock("next/image", () => ({
-  default: (props: any) => <img {...props} />,
+  default: ({ alt = "mock image", priority: _priority, ...props }: ImageMockProps) => (
+    <div role="img" aria-label={String(alt)} {...props} />
+  ),
 }));
 
 // Mock next/link to render standard <a> tags for testing hrefs
 vi.mock("next/link", () => ({
-  default: ({ href, children, ...props }: any) => (
-    <a href={href} {...props}>{children}</a>
+  default: ({ href, children, ...props }: LinkMockProps) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
   ),
 }));
 
@@ -26,60 +33,60 @@ describe("SiteHeader Navigation", () => {
       Promise.resolve({
         ok: true,
         json: () => Promise.resolve({ authenticated: false }),
-      })
-    ) as any;
+      }),
+    ) as typeof fetch;
   });
 
   it("renders primary public navigation links with correct expected hrefs", () => {
     render(<SiteHeader />);
-    
+
     // Check About link
     // We use getAllByRole because there are usually desktop and mobile variants
     const aboutLinks = screen.getAllByRole("link", { name: /About/i });
     expect(aboutLinks.length).toBeGreaterThan(0);
-    aboutLinks.forEach((link) => {
+    for (const link of aboutLinks) {
       expect(link.getAttribute("href")).toBe("/about");
-    });
+    }
 
     // Check Pricing link (Expected to fail if not implemented or mapped incorrectly)
     const pricingLinks = screen.getAllByRole("link", { name: /Pricing/i });
     expect(pricingLinks.length).toBeGreaterThan(0);
-    pricingLinks.forEach((link) => {
+    for (const link of pricingLinks) {
       // Must exactly be /pricing (NOT /pricing-v2)
       expect(link.getAttribute("href")).toBe("/pricing");
-    });
+    }
 
     // Check Contact link
     const contactLinks = screen.getAllByRole("link", { name: /Contact/i });
     expect(contactLinks.length).toBeGreaterThan(0);
-    contactLinks.forEach((link) => {
+    for (const link of contactLinks) {
       expect(link.getAttribute("href")).toBe("/contact");
-    });
+    }
   });
 
   it("renders CTA and Authentication links pointing to correct portal routes", () => {
     render(<SiteHeader />);
-    
+
     // Check Login CTA
     const loginLinks = screen.getAllByRole("link", { name: /Log In/i });
     expect(loginLinks.length).toBeGreaterThan(0);
-    loginLinks.forEach((link) => {
+    for (const link of loginLinks) {
       expect(link.getAttribute("href")).toBe("/portal/login");
       expect(link.getAttribute("href")).not.toBe("/portal-old"); // Ensure no legacy links
-    });
+    }
 
     // Check Enroll/Sign Up CTA
-    const enrollLinks = screen.getAllByRole("link", { name: /Enroll Now/i });
+    const enrollLinks = screen.getAllByRole("link", { name: /Sign Up/i });
     expect(enrollLinks.length).toBeGreaterThan(0);
-    enrollLinks.forEach((link) => {
+    for (const link of enrollLinks) {
       expect(link.getAttribute("href")).toBe("/admissions");
-    });
+    }
   });
 
   it("ensures no public navigation items have dead ends (empty or placeholder hrefs)", () => {
     render(<SiteHeader />);
     const allLinks = screen.getAllByRole("link");
-    
+
     // Expecting at least some links to exist
     expect(allLinks.length).toBeGreaterThan(0);
 

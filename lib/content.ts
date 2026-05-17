@@ -10,6 +10,74 @@ export const siteConfig = {
   },
 };
 
+const PLACEHOLDER_PATTERNS = [
+  /\blorem ipsum\b/i,
+  /\bsample\b/i,
+  /\bplaceholder\b/i,
+  /\btbd\b/i,
+  /\btodo\b/i,
+  /\btest content\b/i,
+];
+
+const UNSUPPORTED_FEATURE_PATTERNS = [
+  "real-time analytics",
+  "ai-powered",
+  "instant processing",
+  "live dashboard",
+  "automatic grading",
+];
+
+function normalizeText(text: string | null | undefined) {
+  if (typeof text !== "string") {
+    return "";
+  }
+
+  return text.trim();
+}
+
+function isIntentionallyScopedComingSoon(text: string) {
+  return /coming soon:\s*.+\b(q[1-4]\s+\d{4}|\d{4})/i.test(text);
+}
+
+export function isPlaceholder(text: string | null | undefined): boolean {
+  const normalized = normalizeText(text);
+
+  if (!normalized) {
+    return false;
+  }
+
+  if (isIntentionallyScopedComingSoon(normalized)) {
+    return false;
+  }
+
+  if (/\bcoming soon\b/i.test(normalized)) {
+    return true;
+  }
+
+  return PLACEHOLDER_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+export function containsUnsupportedClaim(
+  text: string | null | undefined,
+  supportedFeatures: string[],
+): boolean {
+  const normalized = normalizeText(text).toLowerCase();
+
+  if (!normalized || isIntentionallyScopedComingSoon(normalized)) {
+    return false;
+  }
+
+  const supported = supportedFeatures.map((feature) => feature.toLowerCase());
+
+  return UNSUPPORTED_FEATURE_PATTERNS.some((claim) => {
+    if (!normalized.includes(claim)) {
+      return false;
+    }
+
+    return !supported.some((feature) => claim.includes(feature) || feature.includes(claim));
+  });
+}
+
 export const mainNavItems = [
   { href: "/curriculum", label: "Curriculum" },
   { href: "/admissions", label: "Admissions" },
@@ -144,99 +212,6 @@ export const academicJourney = [
       "Geography",
       "Kiswahili",
     ],
-  },
-];
-
-export const levels = [
-  {
-    key: "primary-years-1-6",
-    label: "Primary (Years 1-6)",
-    description:
-      "Strong foundation in literacy, numeracy, and scientific thinking through guided online learning.",
-    subjects: [
-      "English",
-      "Mathematics",
-      "Science",
-      "Global Perspectives",
-      "ICT (optional)",
-      "Kiswahili",
-    ],
-    formats: ["Weekly quizzes", "Monthly progress tests", "Term exams"],
-  },
-  {
-    key: "lower-secondary-years-7-9",
-    label: "Lower Secondary (Years 7-9)",
-    description:
-      "Skill-based preparation for IGCSE with a focus on analytical thinking and subject readiness.",
-    subjects: [
-      "English",
-      "Mathematics",
-      "Biology",
-      "Chemistry",
-      "Physics",
-      "Geography",
-      "ICT",
-      "Global Perspectives",
-      "Kiswahili",
-    ],
-    formats: ["Weekly quizzes", "Monthly tests", "Term exams"],
-  },
-  {
-    key: "igcse-years-10-11",
-    label: "IGCSE (Years 10-11)",
-    description:
-      "Full subject preparation aligned with Cambridge standards using mock exams and structured revision.",
-    subjects: [
-      "Mathematics",
-      "English Language",
-      "Biology",
-      "Chemistry",
-      "Physics",
-      "Business Studies",
-      "ICT",
-      "Geography",
-      "Kiswahili",
-    ],
-    formats: ["Coursework support (where required)", "Mock examinations", "Final exam preparation"],
-  },
-];
-
-export const teachers = [
-  {
-    name: "Mr. Nick",
-    title: "Math and Science Teacher",
-    credentials: "Lower Secondary specialist",
-    focus: "Math and Science",
-    image: "/nick.jpg",
-  },
-  {
-    name: "Mr. Alphonse",
-    title: "English Teacher",
-    credentials: "High School specialist",
-    focus: "English Language",
-    image: "/alphonse.jpg",
-  },
-  {
-    name: "Ms. Cholette",
-    title: "Primary Teacher",
-    credentials: "Lower Primary specialist",
-    focus: "Lower Primary Education",
-    image: "/cholette.jpg",
-  },
-];
-
-export const testimonials = [
-  {
-    label: "Parent Testimonial",
-    quote: "ULU has transformed our child’s learning experience.",
-  },
-  {
-    label: "Parent Testimonial",
-    quote: "The teachers are structured and professional.",
-  },
-  {
-    label: "Family Feedback",
-    quote: "We appreciate the live classes, recorded lessons, and regular progress reports.",
   },
 ];
 

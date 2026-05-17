@@ -23,5 +23,5 @@ export function verifySsoSignature(input: { email: string; timestamp: string; si
 }
 
 export function isSsoEnabled() {
-  return process.env.ADMIN_SSO_ENABLED === "true";
+  return (process.env.ADMIN_SSO_ENABLED ?? "false") === "true";
 }

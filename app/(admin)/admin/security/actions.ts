@@ -37,104 +37,134 @@ const setupCodeSchema = z.object({
 export async function beginTwoFactorSetupAction(
   _prevState: TwoFactorSetupState,
 ): Promise<TwoFactorSetupState> {
-  const session = await requireRole([UserRole.ADMIN]);
-  const admin = await findAdminUserForTwoFactor(session.uid);
-  if (!admin) {
-    return { success: false, message: "Admin user not found." };
-  }
+  try {
+    const session = await requireRole([UserRole.ADMIN]);
+    const admin = await findAdminUserForTwoFactor(session.uid);
+    if (!admin) {
+      return { success: false, message: "Admin user not found." };
+    }
 
-  if (admin.twoFactorEnabled) {
+    if (admin.twoFactorEnabled) {
+      return {
+        success: false,
+        message: "2FA is already enabled for this account.",
+      };
+    }
+
+    const secret = generateTwoFactorSecret();
+    await saveAdminTwoFactorSecret(admin.id, secret);
+
+    return {
+      success: true,
+      message: "2FA secret generated. Add it in your authenticator app and confirm with code.",
+      setupSecret: secret,
+      otpAuthUrl: getTotpUri(admin.email, secret),
+    };
+  } catch (error) {
     return {
       success: false,
-      message: "2FA is already enabled for this account.",
-      setupSecret: admin.twoFactorSecret || undefined,
+      message: error instanceof Error ? error.message : "Could not start 2FA setup.",
     };
   }
-
-  const secret = generateTwoFactorSecret();
-  await saveAdminTwoFactorSecret(admin.id, secret);
-
-  return {
-    success: true,
-    message: "2FA secret generated. Add it in your authenticator app and confirm with code.",
-    setupSecret: secret,
-    otpAuthUrl: getTotpUri(admin.email, secret),
-  };
 }
 
 export async function confirmTwoFactorSetupAction(
   _prevState: TwoFactorSetupState,
   formData: FormData,
 ): Promise<TwoFactorSetupState> {
-  const session = await requireRole([UserRole.ADMIN]);
-  const admin = await findAdminUserForTwoFactor(session.uid);
-  if (!admin || !admin.twoFactorSecret) {
+  try {
+    const session = await requireRole([UserRole.ADMIN]);
+    const admin = await findAdminUserForTwoFactor(session.uid);
+    if (!admin || !admin.twoFactorSecret) {
+      return {
+        success: false,
+        message: "2FA setup secret is missing. Start setup again.",
+      };
+    }
+
+    const parsed = setupCodeSchema.safeParse({
+      code: String(formData.get("code") || "").trim(),
+    });
+
+    if (!parsed.success) {
+      return {
+        success: false,
+        message: "Please enter a valid 6-digit code.",
+      };
+    }
+
+    const valid = verifyTotpCode(parsed.data.code, admin.twoFactorSecret);
+    if (!valid) {
+      return {
+        success: false,
+        message: "Invalid code. Make sure your authenticator app time is in sync.",
+        setupSecret: admin.twoFactorSecret,
+        otpAuthUrl: getTotpUri(admin.email, admin.twoFactorSecret),
+      };
+    }
+
+    const backupCodes = await generateBackupCodes();
+    await enableAdminTwoFactor(admin.id, admin.twoFactorSecret, backupCodes.hashed);
+
+    await createAdminAuditLog({
+      adminUserId: session.uid,
+      action: "ADMIN_2FA_ENABLED",
+      targetType: "AppUser",
+      targetId: admin.id,
+      before: { twoFactorEnabled: false },
+      after: { twoFactorEnabled: true },
+      meta: { actorRole: UserRole.ADMIN },
+    });
+
+    revalidatePath("/admin/security");
+
+    return {
+      success: true,
+      message:
+        "2FA enabled. Save these backup codes in a safe place. Each code can be used only once.",
+      backupCodes: backupCodes.plain,
+    };
+  } catch (error) {
     return {
       success: false,
-      message: "2FA setup secret is missing. Start setup again.",
+      message: error instanceof Error ? error.message : "Could not enable 2FA.",
     };
   }
-
-  const parsed = setupCodeSchema.safeParse({
-    code: String(formData.get("code") || "").trim(),
-  });
-
-  if (!parsed.success) {
-    return {
-      success: false,
-      message: "Please enter a valid 6-digit code.",
-    };
-  }
-
-  const valid = verifyTotpCode(parsed.data.code, admin.twoFactorSecret);
-  if (!valid) {
-    return {
-      success: false,
-      message: "Invalid code. Make sure your authenticator app time is in sync.",
-      setupSecret: admin.twoFactorSecret,
-      otpAuthUrl: getTotpUri(admin.email, admin.twoFactorSecret),
-    };
-  }
-
-  const backupCodes = await generateBackupCodes();
-  await enableAdminTwoFactor(admin.id, admin.twoFactorSecret, backupCodes.hashed);
-
-  await createAdminAuditLog({
-    adminUserId: session.uid,
-    action: "ADMIN_2FA_ENABLED",
-    targetType: "AppUser",
-    targetId: admin.id,
-  });
-
-  revalidatePath("/admin/security");
-
-  return {
-    success: true,
-    message:
-      "2FA enabled. Save these backup codes in a safe place. Each code can be used only once.",
-    backupCodes: backupCodes.plain,
-  };
 }
 
 export async function disableTwoFactorAction(): Promise<TwoFactorSetupState> {
-  const session = await requireRole([UserRole.ADMIN]);
-  const admin = await findAdminUserForTwoFactor(session.uid);
-  if (!admin) {
-    return { success: false, message: "Admin user not found." };
+  try {
+    const session = await requireRole([UserRole.ADMIN]);
+    const admin = await findAdminUserForTwoFactor(session.uid);
+    if (!admin) {
+      return { success: false, message: "Admin user not found." };
+    }
+
+    if (!admin.twoFactorEnabled) {
+      return { success: false, message: "2FA is already disabled for this account." };
+    }
+
+    await disableAdminTwoFactor(admin.id);
+    await createAdminAuditLog({
+      adminUserId: session.uid,
+      action: "ADMIN_2FA_DISABLED",
+      targetType: "AppUser",
+      targetId: admin.id,
+      before: { twoFactorEnabled: true },
+      after: { twoFactorEnabled: false },
+      meta: { actorRole: UserRole.ADMIN },
+    });
+
+    revalidatePath("/admin/security");
+
+    return {
+      success: true,
+      message: "2FA disabled for this admin account.",
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : "Could not disable 2FA.",
+    };
   }
-
-  await disableAdminTwoFactor(admin.id);
-  await createAdminAuditLog({
-    adminUserId: session.uid,
-    action: "ADMIN_2FA_DISABLED",
-    targetType: "AppUser",
-    targetId: admin.id,
-  });
-
-  revalidatePath("/admin/security");
-
-  return {
-    success: true,
-    message: "2FA disabled for this admin account.",
-  };
 }

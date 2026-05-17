@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 
 import { PortalLoginForm } from "@/components/auth/portal-login-form";
 import { PageHero } from "@/components/sections/page-hero";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getAdminPendingTwoFactor, getPortalRedirectPath, getSession } from "@/lib/auth/session";
+import { getAdminPendingTwoFactor } from "@/lib/auth/session";
 
 export const metadata: Metadata = {
   title: "Portal Login",
@@ -20,21 +19,24 @@ export const metadata: Metadata = {
 type PortalLoginPageProps = {
   searchParams?: Promise<{
     next?: string;
+    reason?: string;
   }>;
 };
 
 export default async function PortalLoginPage({ searchParams }: PortalLoginPageProps) {
-  const session = await getSession();
   const pendingAdminTwoFactor = await getAdminPendingTwoFactor();
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const nextPath = resolvedSearchParams?.next?.trim();
-  const ssoLoginUrl = process.env.ADMIN_SSO_LOGIN_URL;
-  const ssoEnabled = process.env.ADMIN_SSO_ENABLED === "true";
+  const reason = resolvedSearchParams?.reason?.trim();
+  const ssoLoginUrl = process.env.ADMIN_SSO_LOGIN_URL ?? "";
+  const ssoEnabled = (process.env.ADMIN_SSO_ENABLED ?? "false") === "true";
   const features = ["Class timetable", "Recorded lessons", "Homework upload", "Results dashboard"];
-
-  if (session) {
-    redirect(getPortalRedirectPath(session.role, nextPath));
-  }
+  const sessionMessage =
+    reason === "expired"
+      ? "Your session has expired. Please log in again."
+      : reason === "invalid"
+        ? "Invalid session. Please log in."
+        : "";
 
   return (
     <>
@@ -66,6 +68,11 @@ export default async function PortalLoginPage({ searchParams }: PortalLoginPageP
                 </div>
               ) : (
                 <div className="space-y-4">
+                  {sessionMessage ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                      {sessionMessage}
+                    </div>
+                  ) : null}
                   <PortalLoginForm nextPath={nextPath} />
                   {ssoEnabled && ssoLoginUrl ? (
                     <div className="border-t border-secondary pt-4">

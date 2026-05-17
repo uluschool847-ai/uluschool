@@ -1,7 +1,7 @@
 import { UserRole } from "@prisma/client";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { saveFaqItemAction } from "@/app/(admin)/admin/cms/actions";
 import { Button } from "@/components/ui/button";
@@ -17,13 +17,18 @@ export const metadata: Metadata = {
 
 type EditFaqProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{
+    error?: string;
+  }>;
 };
 
-export default async function EditCMSFaq({ params }: EditFaqProps) {
+export default async function EditCMSFaq({ params, searchParams }: EditFaqProps) {
   await requireRole([UserRole.ADMIN]);
 
   const { id } = await params;
   const isNew = id === "new";
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const validationError = resolvedSearchParams?.error === "validation";
 
   let faq = null;
   if (!isNew) {
@@ -49,7 +54,23 @@ export default async function EditCMSFaq({ params }: EditFaqProps) {
           <CardTitle>FAQ Details</CardTitle>
         </CardHeader>
         <CardContent>
-          <form action={saveFaqItemAction} className="space-y-6">
+          {validationError ? (
+            <p className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              Please complete the required fields with valid values and submit again.
+            </p>
+          ) : null}
+          <form
+            action={async (formData) => {
+              "use server";
+
+              const result = await saveFaqItemAction(formData);
+
+              if (result?.success === false) {
+                redirect(`/admin/cms/faq/${id}?error=validation`);
+              }
+            }}
+            className="space-y-6"
+          >
             {!isNew && <input type="hidden" name="id" value={faq?.id} />}
 
             <div className="grid gap-4 md:grid-cols-2">
