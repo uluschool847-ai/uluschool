@@ -2,9 +2,12 @@ import { ReminderChannel } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const listUpcomingClassesForRemindersMock = vi.hoisted(() => vi.fn());
+const listMissingAssignmentsForRemindersMock = vi.hoisted(() => vi.fn());
 const createReminderLogMock = vi.hoisted(() => vi.fn());
+const createAssignmentReminderLogMock = vi.hoisted(() => vi.fn());
 const getUsersByIdsMock = vi.hoisted(() => vi.fn());
 const sendClassReminderEmailMock = vi.hoisted(() => vi.fn());
+const sendAssignmentReminderEmailMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/repositories/schedule-repository", () => ({
   createReminderLog: createReminderLogMock,
@@ -15,7 +18,13 @@ vi.mock("@/lib/repositories/user-repository", () => ({
   getUsersByIds: getUsersByIdsMock,
 }));
 
+vi.mock("@/lib/repositories/submission-repository", () => ({
+  createAssignmentReminderLog: createAssignmentReminderLogMock,
+  listMissingAssignmentsForReminders: listMissingAssignmentsForRemindersMock,
+}));
+
 vi.mock("@/lib/services/email", () => ({
+  sendAssignmentReminderEmail: sendAssignmentReminderEmailMock,
   sendClassReminderEmail: sendClassReminderEmailMock,
 }));
 
@@ -77,8 +86,11 @@ describe("reminder live lesson URL content safety", () => {
     vi.setSystemTime(new Date("2026-06-01T09:00:00.000Z"));
     vi.stubEnv("WHATSAPP_WEBHOOK_URL", "https://wa.example.test/send");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+    listMissingAssignmentsForRemindersMock.mockResolvedValue([]);
     sendClassReminderEmailMock.mockResolvedValue({ delivered: true });
+    sendAssignmentReminderEmailMock.mockResolvedValue({ delivered: true });
     createReminderLogMock.mockResolvedValue({});
+    createAssignmentReminderLogMock.mockResolvedValue({});
     getUsersByIdsMock.mockResolvedValue([userFixture()]);
   });
 

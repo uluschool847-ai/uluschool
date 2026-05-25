@@ -33,6 +33,8 @@ type StudentAssignmentsFixture = {
   gradedAssignmentId: string;
   gradedAssignmentTitle: string;
   groupName: string;
+  overdueAssignmentId: string;
+  overdueAssignmentTitle: string;
   studentEmail: string;
   studentId: string;
   studentName: string;
@@ -126,9 +128,24 @@ test.describe("Student assignments portal", () => {
     page,
   }) => {
     await setStudentSession(page);
+    await page.goto(`${BASE_URL}/portal/student`);
+    await expect(page.getByText(/1 overdue assignment/i)).toBeVisible();
+    await expect(page.getByText(/this assignment is overdue/i)).toBeVisible();
+    await expect(page.getByRole("link", { name: fixture.overdueAssignmentTitle })).toHaveAttribute(
+      "href",
+      `/portal/student/assignments/${fixture.overdueAssignmentId}`,
+    );
+
     await page.goto(`${BASE_URL}/portal/student/assignments`);
 
     await expect(page.getByRole("heading", { name: /^assignments$/i })).toBeVisible();
+    await expect(page.getByText(fixture.overdueAssignmentTitle)).toBeVisible();
+    await expect(
+      assignmentCard(page, fixture.overdueAssignmentTitle).getByText(/missing/i),
+    ).toBeVisible();
+    await expect(
+      assignmentCard(page, fixture.overdueAssignmentTitle).getByText(/this assignment is overdue/i),
+    ).toBeVisible();
     await expect(page.getByText(fixture.activeAssignmentTitle)).toBeVisible();
     await expect(page.getByText(fixture.submittedAssignmentTitle)).toBeVisible();
     await expect(page.getByText(fixture.gradedAssignmentTitle)).toBeVisible();
@@ -147,6 +164,24 @@ test.describe("Student assignments portal", () => {
     await page.getByLabel(/status/i).selectOption("graded");
     await page.getByRole("button", { name: /apply|filter|show assignments/i }).click();
     await expect(page.getByText(fixture.gradedAssignmentTitle)).toBeVisible();
+
+    await page.goto(`${BASE_URL}/portal/student/assignments`);
+    await Promise.all([
+      page.waitForURL(/\/portal\/student\/assignments\/[^/?]+$/),
+      assignmentCard(page, fixture.overdueAssignmentTitle)
+        .getByRole("link", { name: /view assignment|open assignment|details/i })
+        .click(),
+    ]);
+
+    await expect(page.getByRole("heading", { name: fixture.overdueAssignmentTitle })).toBeVisible();
+    await expect(page.getByText(/this assignment is overdue/i)).toBeVisible();
+    await page.getByLabel(/work link|submission url|content/i).fill(SUBMITTED_WORK_URL);
+    await page.getByRole("button", { name: /^submit$/i }).click();
+    await expect(page.getByText(/submitted|saved|updated/i)).toBeVisible();
+
+    await page.goto(`${BASE_URL}/portal/student/assignments?status=missing`);
+    await expect(page.getByText(fixture.overdueAssignmentTitle)).toHaveCount(0);
+    await expect(page.getByText(/this assignment is overdue/i)).toHaveCount(0);
 
     await page.goto(`${BASE_URL}/portal/student/assignments`);
     await Promise.all([
@@ -210,6 +245,7 @@ async function createFixtures(): Promise<StudentAssignmentsFixture> {
   const directLessonTitle = `${LESSON_PREFIX} Direct ${suffix}`;
   const foreignGroupName = `${GROUP_PREFIX} Foreign ${suffix}`;
   const activeAssignmentTitle = `${ASSIGNMENT_PREFIX} Active ${suffix}`;
+  const overdueAssignmentTitle = `${ASSIGNMENT_PREFIX} Overdue ${suffix}`;
   const submittedAssignmentTitle = `${ASSIGNMENT_PREFIX} Submitted ${suffix}`;
   const gradedAssignmentTitle = `${ASSIGNMENT_PREFIX} Graded ${suffix}`;
   const archivedAssignmentTitle = `${ASSIGNMENT_PREFIX} Archived ${suffix}`;
@@ -328,6 +364,7 @@ async function createFixtures(): Promise<StudentAssignmentsFixture> {
 
   const [
     activeAssignment,
+    overdueAssignment,
     submittedAssignment,
     gradedAssignment,
     archivedAssignment,
@@ -341,6 +378,16 @@ async function createFixtures(): Promise<StudentAssignmentsFixture> {
         subjectId: subject.id,
         teacherId: teacher.id,
         title: activeAssignmentTitle,
+      },
+    }),
+    prisma.assignment.create({
+      data: {
+        description: "Overdue assignment for student reminder flow.",
+        dueDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+        scheduledClassId: directLesson.id,
+        subjectId: subject.id,
+        teacherId: teacher.id,
+        title: overdueAssignmentTitle,
       },
     }),
     prisma.assignment.create({
@@ -377,7 +424,7 @@ async function createFixtures(): Promise<StudentAssignmentsFixture> {
     prisma.assignment.create({
       data: {
         description: "Foreign student assignment must stay hidden.",
-        dueDate: new Date(futureStart.getTime() + 6 * 24 * 60 * 60 * 1000),
+        dueDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
         scheduledClassId: foreignLesson.id,
         subjectId: subject.id,
         teacherId: teacher.id,
@@ -425,6 +472,8 @@ async function createFixtures(): Promise<StudentAssignmentsFixture> {
     gradedAssignmentId: gradedAssignment.id,
     gradedAssignmentTitle,
     groupName,
+    overdueAssignmentId: overdueAssignment.id,
+    overdueAssignmentTitle,
     studentEmail: student.email,
     studentId: student.id,
     studentName,

@@ -576,10 +576,29 @@ model Assignment {
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
   submissions      Submission[]
+  assignmentReminders AssignmentReminderLog[]
 
   @@index([scheduledClassId])
   @@index([teacherId, scheduledClassId, archivedAt])
   @@index([dueDate])
+}
+
+model AssignmentReminderLog {
+  id                  String                 @id @default(cuid())
+  assignmentId        String
+  assignment          Assignment             @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  recipientUserId     String
+  recipientEmail      String
+  channel             ReminderChannel
+  status              ReminderDeliveryStatus @default(SENT)
+  details             String?
+  reminderWindowStart DateTime?
+  reminderWindowEnd   DateTime?
+  createdAt           DateTime               @default(now())
+
+  @@unique([assignmentId, recipientUserId, channel, reminderWindowStart, reminderWindowEnd])
+  @@index([assignmentId, recipientUserId, channel, createdAt])
+  @@index([status, createdAt])
 }
 
 model Submission {

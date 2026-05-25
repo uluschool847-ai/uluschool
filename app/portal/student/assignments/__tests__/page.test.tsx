@@ -173,6 +173,43 @@ describe("Student assignments list page", () => {
     }
   });
 
+  it("renders overdue reminder copy for Missing assignments", async () => {
+    listAssignmentsForStudentMock.mockResolvedValueOnce([
+      assignment({
+        dueDate: new Date("2020-01-01T10:00:00.000Z"),
+        status: "Missing",
+      }),
+    ]);
+
+    const page = await loadPage();
+    const element = await page.default({ searchParams: { status: "missing" } });
+    render(element);
+
+    const assignmentCard = screen.getByText("Quadratic equations").closest("article");
+    expect(assignmentCard).not.toBeNull();
+    const card = within(assignmentCard as HTMLElement);
+
+    expect(card.getByText("Missing")).toBeDefined();
+    expect(
+      card.getByText(/reminder:\s*this assignment is overdue\. submit it as soon as possible\./i),
+    ).toBeDefined();
+  });
+
+  it("does not render overdue reminder copy for submitted, graded, future, or archived assignments", async () => {
+    listAssignmentsForStudentMock.mockResolvedValueOnce([
+      assignment({ id: "future", status: "Not submitted" }),
+      assignment({ id: "submitted", status: "Submitted" }),
+      assignment({ id: "graded", status: "Graded", grade: 88, feedbackPreview: "Strong method." }),
+      assignment({ id: "archived", status: "Archived" }),
+    ]);
+
+    const page = await loadPage();
+    const element = await page.default({ searchParams: { status: "all" } });
+    render(element);
+
+    expect(screen.queryByText(/this assignment is overdue/i)).toBeNull();
+  });
+
   it("does not show archived assignments in the default active view", async () => {
     listAssignmentsForStudentMock.mockResolvedValueOnce([
       assignment(),

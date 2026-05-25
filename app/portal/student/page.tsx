@@ -131,6 +131,26 @@ export default async function StudentPortalDashboard() {
           {dashboard.assignmentsSummary.pendingCount > 0 ? (
             <div className="space-y-2">
               <p>Pending assignments: {dashboard.assignmentsSummary.pendingCount}</p>
+              {dashboard.assignmentsSummary.overdueCount > 0 ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                  <p>
+                    {dashboard.assignmentsSummary.overdueCount} overdue{" "}
+                    {dashboard.assignmentsSummary.overdueCount === 1 ? "assignment" : "assignments"}
+                  </p>
+                  <p>Reminder: This assignment is overdue. Submit it as soon as possible.</p>
+                  {dashboard.assignmentsSummary.nextOverdue ? (
+                    <p>
+                      Overdue assignment:{" "}
+                      <Link
+                        className="font-medium text-primary"
+                        href={dashboard.assignmentsSummary.nextOverdue.href}
+                      >
+                        {dashboard.assignmentsSummary.nextOverdue.title}
+                      </Link>
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               <p>Recently graded: {dashboard.assignmentsSummary.recentGradedCount}</p>
               {dashboard.assignmentsSummary.nextPending ? (
                 <>

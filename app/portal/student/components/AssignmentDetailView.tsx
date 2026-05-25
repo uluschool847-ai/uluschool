@@ -30,6 +30,7 @@ type AssignmentDetail = {
   canSubmit?: boolean;
   canResubmit?: boolean;
   readOnlyReason?: string | null;
+  status?: string | null;
 };
 
 type AssignmentDetailViewProps = {
@@ -77,6 +78,7 @@ export function AssignmentDetailView({ assignment }: AssignmentDetailViewProps) 
   const currentSubmission = assignment.currentSubmission ?? null;
   const grade = assignment.grade ?? currentSubmission?.grade ?? null;
   const feedback = assignment.feedback ?? currentSubmission?.feedback ?? null;
+  const isMissingAssignment = assignment.status?.toLowerCase() === "missing";
   const subject = assignment.subject ?? null;
   const shouldRenderSubject =
     subject &&
@@ -94,6 +96,11 @@ export function AssignmentDetailView({ assignment }: AssignmentDetailViewProps) 
             {assignment.readOnlyReason
               ? `${assignment.readOnlyReason} Read-only.`
               : "This assignment is archived and read-only."}
+          </output>
+        ) : null}
+        {!assignment.archivedAt && isMissingAssignment ? (
+          <output className="block rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            Reminder: This assignment is overdue. Submit it as soon as possible.
           </output>
         ) : null}
       </div>

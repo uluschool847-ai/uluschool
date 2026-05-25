@@ -214,3 +214,41 @@ export async function sendClassReminderEmail(input: {
     `,
   });
 }
+
+export async function sendAssignmentReminderEmail(input: {
+  recipientEmail: string;
+  recipientName: string;
+  assignmentTitle: string;
+  dueDate: Date;
+  assignmentHref: string;
+}) {
+  const formattedDueDate = new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(input.dueDate);
+
+  return sendWithRetry({
+    subject: `Assignment overdue: ${input.assignmentTitle}`,
+    replyTo: getToAddress(),
+    text: [
+      `Hello ${input.recipientName},`,
+      "",
+      `This is a reminder that your assignment is overdue: ${input.assignmentTitle}`,
+      `Due: ${formattedDueDate}`,
+      `Open assignment: ${input.assignmentHref}`,
+      "",
+      "Please submit it as soon as possible.",
+      "",
+      "ULU Online School",
+    ].join("\n"),
+    html: `
+      <h2>Assignment Reminder</h2>
+      <p>Hello ${input.recipientName},</p>
+      <p>This is a reminder that your assignment is overdue: <strong>${input.assignmentTitle}</strong></p>
+      <p><strong>Due:</strong> ${formattedDueDate}</p>
+      <p><a href="${input.assignmentHref}">Open assignment</a></p>
+      <p>Please submit it as soon as possible.</p>
+      <p>ULU Online School</p>
+    `,
+  });
+}

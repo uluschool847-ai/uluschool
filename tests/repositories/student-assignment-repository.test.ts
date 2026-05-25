@@ -5,6 +5,9 @@ const prismaMock = vi.hoisted(() => ({
     findFirst: vi.fn(),
     findMany: vi.fn(),
   },
+  assignmentReminderLog: {
+    create: vi.fn(),
+  },
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -16,6 +19,8 @@ type StudentAssignmentRepositoryModule = {
     studentId: string,
     filters?: Record<string, unknown>,
   ) => Promise<unknown[]>;
+  listMissingAssignmentsForReminders: (now?: Date) => Promise<unknown[]>;
+  createAssignmentReminderLog: (input: Record<string, unknown>) => Promise<unknown>;
   getAssignmentDetailForStudent: (
     studentId: string,
     assignmentId: string,
@@ -57,6 +62,7 @@ function assignmentRow(overrides: Record<string, unknown> = {}) {
       ],
     },
     submissions: [],
+    assignmentReminders: [],
     ...overrides,
   };
 }
@@ -87,6 +93,8 @@ describe("student assignment read repository", () => {
     expect(repository).toEqual(
       expect.objectContaining({
         listAssignmentsForStudent: expect.any(Function),
+        listMissingAssignmentsForReminders: expect.any(Function),
+        createAssignmentReminderLog: expect.any(Function),
         getAssignmentDetailForStudent: expect.any(Function),
       }),
     );
@@ -158,6 +166,151 @@ describe("student assignment read repository", () => {
     const where = prismaMock.assignment.findMany.mock.calls[0][0].where;
     expect(where).toEqual(expect.objectContaining(expectedWhere));
     expect(JSON.stringify(where)).toContain("student-1");
+  });
+
+  it("lists missing assignment reminder candidates for enrolled students without submitted work", async () => {
+    const now = new Date("2026-06-02T12:00:00.000Z");
+    prismaMock.assignment.findMany.mockResolvedValueOnce([
+      assignmentRow({
+        dueDate: new Date("2026-06-01T10:00:00.000Z"),
+        scheduledClass: {
+          ...assignmentRow().scheduledClass,
+          students: [{ id: "direct-student" }, { id: "submitted-student" }],
+          classGroup: {
+            id: "group-1",
+            name: "IGCSE Mathematics A",
+            students: [{ id: "group-student" }, { id: "submitted-student" }],
+          },
+        },
+        submissions: [submissionRow({ studentId: "submitted-student" })],
+        assignmentReminders: [
+          {
+            recipientUserId: "direct-student",
+            channel: "EMAIL",
+            status: "SENT",
+            reminderWindowStart: new Date("2026-06-02T00:00:00.000Z"),
+            reminderWindowEnd: new Date("2026-06-02T23:59:59.999Z"),
+          },
+        ],
+      }),
+    ]);
+
+    const { listMissingAssignmentsForReminders } = await loadRepository();
+    const rows = await listMissingAssignmentsForReminders(now);
+
+    expect(prismaMock.assignment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          archivedAt: null,
+          dueDate: { lt: now },
+        },
+        include: expect.objectContaining({
+          submissions: { select: { studentId: true } },
+          assignmentReminders: expect.objectContaining({
+            where: expect.objectContaining({
+              status: "SENT",
+              reminderWindowStart: new Date("2026-06-02T00:00:00.000Z"),
+              reminderWindowEnd: new Date("2026-06-02T23:59:59.999Z"),
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(rows).toEqual([
+      expect.objectContaining({
+        id: "assignment-1",
+        recipients: [{ id: "direct-student" }, { id: "group-student" }],
+        reminders: [
+          expect.objectContaining({
+            recipientUserId: "direct-student",
+            channel: "EMAIL",
+          }),
+        ],
+      }),
+    ]);
+    expect(JSON.stringify(rows)).not.toContain("submitted-student");
+  });
+
+  it("creates assignment reminder logs without using scheduled class reminder state", async () => {
+    prismaMock.assignmentReminderLog.create.mockResolvedValueOnce({ id: "assignment-reminder-1" });
+
+    const { createAssignmentReminderLog } = await loadRepository();
+    await createAssignmentReminderLog({
+      assignmentId: "assignment-1",
+      recipientUserId: "student-1",
+      recipientEmail: "student@example.com",
+      channel: "EMAIL",
+      status: "SENT",
+      details: "Email sent.",
+      reminderWindowStart: new Date("2026-06-02T00:00:00.000Z"),
+      reminderWindowEnd: new Date("2026-06-02T23:59:59.999Z"),
+    });
+
+    expect(prismaMock.assignmentReminderLog.create).toHaveBeenCalledWith({
+      data: {
+        assignmentId: "assignment-1",
+        recipientUserId: "student-1",
+        recipientEmail: "student@example.com",
+        channel: "EMAIL",
+        status: "SENT",
+        details: "Email sent.",
+        reminderWindowStart: new Date("2026-06-02T00:00:00.000Z"),
+        reminderWindowEnd: new Date("2026-06-02T23:59:59.999Z"),
+      },
+    });
+  });
+
+  it("maps past-due non-archived unsubmitted assignments to Missing without creating a separate overdue status", async () => {
+    prismaMock.assignment.findMany.mockResolvedValueOnce([
+      assignmentRow({
+        dueDate: new Date("2020-01-01T10:00:00.000Z"),
+        submissions: [],
+      }),
+    ]);
+
+    const { listAssignmentsForStudent } = await loadRepository();
+    const rows = await listAssignmentsForStudent("student-1", { status: "missing" });
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        id: "assignment-1",
+        status: "Missing",
+      }),
+    ]);
+    expect(JSON.stringify(rows)).not.toMatch(/overdue/i);
+  });
+
+  it("does not mark past-due submitted, graded, or archived assignments as actionable overdue", async () => {
+    prismaMock.assignment.findMany.mockResolvedValueOnce([
+      assignmentRow({
+        id: "submitted-assignment",
+        dueDate: new Date("2020-01-01T10:00:00.000Z"),
+        submissions: [submissionRow()],
+      }),
+      assignmentRow({
+        id: "graded-assignment",
+        dueDate: new Date("2020-01-01T10:00:00.000Z"),
+        submissions: [submissionRow({ grade: 88 })],
+      }),
+      assignmentRow({
+        id: "archived-assignment",
+        archivedAt: new Date("2020-01-02T10:00:00.000Z"),
+        dueDate: new Date("2020-01-01T10:00:00.000Z"),
+        submissions: [],
+      }),
+    ]);
+
+    const { listAssignmentsForStudent } = await loadRepository();
+    const rows = await listAssignmentsForStudent("student-1", { status: "all" });
+
+    expect(rows).toEqual([
+      expect.objectContaining({ id: "submitted-assignment", status: "Submitted" }),
+      expect.objectContaining({ id: "graded-assignment", status: "Graded" }),
+      expect.objectContaining({ id: "archived-assignment", status: "Archived" }),
+    ]);
+    expect(rows).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: "Overdue" })]),
+    );
   });
 
   it("forwards subject, group, class, search, due date, and sort filters without widening ownership", async () => {

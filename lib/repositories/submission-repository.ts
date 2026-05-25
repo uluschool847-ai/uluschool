@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, ReminderChannel, ReminderDeliveryStatus } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 
@@ -78,6 +78,33 @@ type StudentAssignmentRecord = {
     submittedAt: Date;
     updatedAt: Date;
     attachments?: { id: string; filename: string; storageKey: string }[];
+  }[];
+};
+
+type AssignmentReminderRecord = {
+  id: string;
+  title: string;
+  description: string;
+  dueDate: Date;
+  scheduledClass: {
+    id: string;
+    title: string;
+    subject?: { id: string; name: string; slug?: string | null } | null;
+    teacher?: { id: string; fullName: string; email: string } | null;
+    classGroup?: {
+      id: string;
+      name: string;
+      students?: { id: string }[];
+    } | null;
+    students?: { id: string }[];
+  };
+  submissions: { studentId: string }[];
+  assignmentReminders?: {
+    recipientUserId: string;
+    channel: ReminderChannel;
+    status: ReminderDeliveryStatus;
+    reminderWindowStart?: Date | null;
+    reminderWindowEnd?: Date | null;
   }[];
 };
 
@@ -268,6 +295,33 @@ function studentAssignmentInclude(studentId: string) {
       orderBy: { submittedAt: "desc" as const },
     },
   } satisfies Prisma.AssignmentInclude;
+}
+
+function dailyReminderWindow(now: Date) {
+  const reminderWindowStart = new Date(now);
+  reminderWindowStart.setUTCHours(0, 0, 0, 0);
+  const reminderWindowEnd = new Date(now);
+  reminderWindowEnd.setUTCHours(23, 59, 59, 999);
+  return { reminderWindowStart, reminderWindowEnd };
+}
+
+function uniqueStudentRecipients(assignment: AssignmentReminderRecord) {
+  const submittedStudentIds = new Set(
+    assignment.submissions.map((submission) => submission.studentId),
+  );
+  const enrolledStudentIds = new Set<string>();
+
+  for (const student of assignment.scheduledClass.students ?? []) {
+    enrolledStudentIds.add(student.id);
+  }
+  for (const student of assignment.scheduledClass.classGroup?.students ?? []) {
+    enrolledStudentIds.add(student.id);
+  }
+
+  return [...enrolledStudentIds]
+    .filter((studentId) => !submittedStudentIds.has(studentId))
+    .sort()
+    .map((id) => ({ id }));
 }
 
 function studentAssignmentWhere(studentId: string, filters: StudentAssignmentFilters = {}) {
@@ -698,6 +752,107 @@ export async function listAssignmentsForStudent(
   }
 
   return rows;
+}
+
+export async function listMissingAssignmentsForReminders(
+  now = new Date(),
+  database: SubmissionDatabase = prisma,
+) {
+  const { reminderWindowStart, reminderWindowEnd } = dailyReminderWindow(now);
+  const assignments = await database.assignment.findMany({
+    where: {
+      archivedAt: null,
+      dueDate: { lt: now },
+    },
+    include: {
+      scheduledClass: {
+        include: {
+          subject: { select: { id: true, name: true, slug: true } },
+          teacher: { select: { id: true, fullName: true, email: true } },
+          classGroup: {
+            select: {
+              id: true,
+              name: true,
+              students: { select: { id: true } },
+            },
+          },
+          students: { select: { id: true } },
+          courseMaterials: false,
+        },
+      },
+      submissions: { select: { studentId: true } },
+      assignmentReminders: {
+        where: {
+          status: "SENT",
+          reminderWindowStart,
+          reminderWindowEnd,
+        },
+        select: {
+          recipientUserId: true,
+          channel: true,
+          status: true,
+          reminderWindowStart: true,
+          reminderWindowEnd: true,
+        },
+      },
+    },
+    orderBy: [{ dueDate: "asc" }, { title: "asc" }],
+  });
+
+  return (assignments as unknown as AssignmentReminderRecord[])
+    .map((assignment) => ({
+      id: assignment.id,
+      title: assignment.title,
+      description: assignment.description,
+      dueDate: assignment.dueDate,
+      scheduledClass: {
+        id: assignment.scheduledClass.id,
+        title: assignment.scheduledClass.title,
+      },
+      subject: assignment.scheduledClass.subject
+        ? {
+            id: assignment.scheduledClass.subject.id,
+            name: assignment.scheduledClass.subject.name,
+            slug: assignment.scheduledClass.subject.slug ?? "",
+          }
+        : null,
+      classGroup: assignment.scheduledClass.classGroup
+        ? {
+            id: assignment.scheduledClass.classGroup.id,
+            name: assignment.scheduledClass.classGroup.name,
+          }
+        : null,
+      recipients: uniqueStudentRecipients(assignment),
+      reminders: assignment.assignmentReminders ?? [],
+    }))
+    .filter((assignment) => assignment.recipients.length > 0);
+}
+
+export async function createAssignmentReminderLog(
+  input: {
+    assignmentId: string;
+    recipientUserId: string;
+    recipientEmail: string;
+    channel: ReminderChannel;
+    status: ReminderDeliveryStatus;
+    details?: string | null;
+    reminderWindowStart?: Date;
+    reminderWindowEnd?: Date;
+  },
+  database: SubmissionDatabase = prisma,
+) {
+  return database.assignmentReminderLog.create({
+    data: {
+      assignmentId: input.assignmentId,
+      recipientUserId: input.recipientUserId,
+      recipientEmail: input.recipientEmail,
+      channel: input.channel,
+      status: input.status,
+      details: input.details,
+      reminderWindowStart: input.reminderWindowStart,
+      reminderWindowEnd: input.reminderWindowEnd,
+    },
+  });
 }
 
 export async function getAssignmentDetailForStudent(

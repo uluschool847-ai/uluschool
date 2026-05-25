@@ -69,6 +69,7 @@ function detail(overrides: Record<string, unknown> = {}) {
     submissionHistory: [],
     grade: null,
     feedback: null,
+    status: "Not submitted",
     ...overrides,
   };
 }
@@ -205,6 +206,53 @@ describe("Student assignment detail page", () => {
     expect(screen.getByRole("button", { name: /^submit$/i })).toBeDefined();
   });
 
+  it("shows an overdue reminder above the submit form for Missing assignments", async () => {
+    getAssignmentDetailForStudentMock.mockResolvedValueOnce(
+      detail({
+        dueDate: new Date("2020-01-01T10:00:00.000Z"),
+        status: "Missing",
+      }),
+    );
+
+    const page = await loadPage();
+    const element = await page.default({ params: { assignmentId: "assignment-1" } });
+    render(element);
+
+    const reminder = screen.getByText(
+      /reminder:\s*this assignment is overdue\. submit it as soon as possible\./i,
+    );
+    const submitButton = screen.getByRole("button", { name: /^submit$/i });
+
+    expect(reminder).toBeDefined();
+    expect(reminder.compareDocumentPosition(submitButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it("does not show overdue reminder for submitted or graded assignment details", async () => {
+    getAssignmentDetailForStudentMock.mockResolvedValueOnce(
+      detail({
+        canResubmit: true,
+        currentSubmission: {
+          id: "submission-1",
+          contentUrl: "https://drive.example.com/work-v1",
+          submittedWorkHref: "https://drive.example.com/work-v1",
+          submittedAt: "2026-06-19T18:00:00.000Z",
+          grade: null,
+          feedback: null,
+        },
+        status: "Submitted",
+        submissionHistory: [],
+      }),
+    );
+
+    const page = await loadPage();
+    const element = await page.default({ params: { assignmentId: "assignment-1" } });
+    render(element);
+
+    expect(screen.queryByText(/this assignment is overdue/i)).toBeNull();
+  });
+
   it("renders archived assignments read-only and without an active submit form", async () => {
     getAssignmentDetailForStudentMock.mockResolvedValueOnce(
       detail({
@@ -220,6 +268,7 @@ describe("Student assignment detail page", () => {
     render(element);
 
     expect(screen.getByText(/archived/i)).toBeDefined();
+    expect(screen.queryByText(/this assignment is overdue/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /^submit$|resubmit/i })).toBeNull();
   });
 

@@ -85,8 +85,10 @@ import {
   listProgressNotesForTeacher,
 } from "@/lib/repositories/student-progress-repository";
 import {
+  createAssignmentReminderLog,
   getStudentAssignmentWithSubmission,
   getSubmissionForTeacher,
+  listMissingAssignmentsForReminders,
   listSubmissionsForAssignmentByTeacher as listScopedSubmissionsForAssignmentByTeacher,
 } from "@/lib/repositories/submission-repository";
 import {
@@ -177,6 +179,14 @@ export async function auditRepositoryUsageConnections() {
     studentId: "student-1",
   });
   await getStudentAssignmentWithSubmission("student-1", "assignment-1");
+  await listMissingAssignmentsForReminders(new Date());
+  await createAssignmentReminderLog({
+    assignmentId: "assignment-1",
+    recipientUserId: "student-1",
+    recipientEmail: "student@example.com",
+    channel: "EMAIL",
+    status: "SKIPPED",
+  });
   await getSubmissionForTeacher("teacher-1", "submission-1");
   await listScopedSubmissionsForAssignmentByTeacher("teacher-1", "assignment-1");
   await createStudentSubmission({

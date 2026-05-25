@@ -59,6 +59,7 @@ function detail(overrides: Record<string, unknown> = {}) {
     feedback: "Strong structure. Improve final explanation.",
     canSubmit: true,
     canResubmit: true,
+    status: "Graded",
     ...overrides,
   };
 }
@@ -154,5 +155,51 @@ describe("AssignmentDetailView", () => {
     expect(screen.getByText(/archived/i)).toBeDefined();
     expect(screen.getByText(/read-only|cannot submit|no longer accepting/i)).toBeDefined();
     expect(screen.queryByRole("button", { name: /^submit$|resubmit/i })).toBeNull();
+  });
+
+  it("renders an overdue reminder for Missing assignments", () => {
+    render(
+      <AssignmentDetailView
+        assignment={
+          detail({
+            currentSubmission: null,
+            dueDate: "2020-01-01T10:00:00.000Z",
+            feedback: null,
+            grade: null,
+            status: "Missing",
+            submissionHistory: [],
+            canResubmit: false,
+          }) as never
+        }
+      />,
+    );
+
+    const reminder = screen.getByText(
+      /reminder:\s*this assignment is overdue\. submit it as soon as possible\./i,
+    );
+
+    expect(reminder).toBeDefined();
+  });
+
+  it("does not render an overdue reminder for submitted, graded, or archived assignments", () => {
+    const { rerender } = render(<AssignmentDetailView assignment={detail() as never} />);
+
+    expect(screen.queryByText(/this assignment is overdue/i)).toBeNull();
+
+    rerender(
+      <AssignmentDetailView
+        assignment={
+          detail({
+            archivedAt: "2026-08-11T10:00:00.000Z",
+            canSubmit: false,
+            canResubmit: false,
+            readOnlyReason: "This assignment is archived.",
+            status: "Archived",
+          }) as never
+        }
+      />,
+    );
+
+    expect(screen.queryByText(/this assignment is overdue/i)).toBeNull();
   });
 });

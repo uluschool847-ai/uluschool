@@ -56,6 +56,18 @@ function isPendingAssignment(assignment: {
   return !isArchivedAssignment(assignment) && !isGradedAssignment(assignment);
 }
 
+function isMissingAssignment(assignment: {
+  archivedAt?: DashboardDate;
+  grade?: unknown;
+  status?: unknown;
+}) {
+  return (
+    !isArchivedAssignment(assignment) &&
+    !isGradedAssignment(assignment) &&
+    statusText(assignment.status) === "missing"
+  );
+}
+
 function readCount(summary: Record<string, unknown> | null | undefined, keys: string[]) {
   for (const key of keys) {
     const value = summary?.[key];
@@ -96,6 +108,11 @@ function mapAssignmentsSummary(assignments: Awaited<ReturnType<typeof listAssign
     const rightDate = toDate(right.dueDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
     return leftDate - rightDate || left.title.localeCompare(right.title);
   });
+  const overdue = assignments.filter(isMissingAssignment).sort((left, right) => {
+    const leftDate = toDate(left.dueDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    const rightDate = toDate(right.dueDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    return leftDate - rightDate || left.title.localeCompare(right.title);
+  });
 
   const latestGraded = assignments.find(
     (assignment) => !isArchivedAssignment(assignment) && isGradedAssignment(assignment),
@@ -107,6 +124,13 @@ function mapAssignmentsSummary(assignments: Awaited<ReturnType<typeof listAssign
           title: latestGraded.title,
         }
       : null,
+    nextOverdue: overdue[0]
+      ? {
+          dueDate: overdue[0].dueDate,
+          href: overdue[0].detailHref,
+          title: overdue[0].title,
+        }
+      : null,
     nextPending: pending[0]
       ? {
           dueDate: pending[0].dueDate,
@@ -114,6 +138,7 @@ function mapAssignmentsSummary(assignments: Awaited<ReturnType<typeof listAssign
           title: pending[0].title,
         }
       : null,
+    overdueCount: overdue.length,
     pendingCount: pending.length,
     recentGradedCount: assignments.filter(
       (assignment) => !isArchivedAssignment(assignment) && isGradedAssignment(assignment),

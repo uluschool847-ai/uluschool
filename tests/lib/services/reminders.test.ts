@@ -2,9 +2,12 @@ import { ReminderChannel } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const listUpcomingClassesForRemindersMock = vi.hoisted(() => vi.fn());
+const listMissingAssignmentsForRemindersMock = vi.hoisted(() => vi.fn());
 const createReminderLogMock = vi.hoisted(() => vi.fn());
+const createAssignmentReminderLogMock = vi.hoisted(() => vi.fn());
 const getUsersByIdsMock = vi.hoisted(() => vi.fn());
 const sendClassReminderEmailMock = vi.hoisted(() => vi.fn());
+const sendAssignmentReminderEmailMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/repositories/schedule-repository", () => ({
   createReminderLog: createReminderLogMock,
@@ -15,7 +18,13 @@ vi.mock("@/lib/repositories/user-repository", () => ({
   getUsersByIds: getUsersByIdsMock,
 }));
 
+vi.mock("@/lib/repositories/submission-repository", () => ({
+  createAssignmentReminderLog: createAssignmentReminderLogMock,
+  listMissingAssignmentsForReminders: listMissingAssignmentsForRemindersMock,
+}));
+
 vi.mock("@/lib/services/email", () => ({
+  sendAssignmentReminderEmail: sendAssignmentReminderEmailMock,
   sendClassReminderEmail: sendClassReminderEmailMock,
 }));
 
@@ -61,11 +70,27 @@ function userFixture(id: string) {
   };
 }
 
+function assignmentReminderFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "assignment-1",
+    title: "Quadratic homework",
+    dueDate: new Date("2026-05-31T20:00:00.000Z"),
+    scheduledClass: {
+      id: "lesson-1",
+      title: "Quadratic functions",
+    },
+    recipients: [{ id: "student-direct" }, { id: "student-group" }],
+    reminders: [] as ReminderLogFixture[],
+    ...overrides,
+  };
+}
+
 async function loadReminderService() {
   const specifier = "@/lib/services/reminders";
   return import(/* @vite-ignore */ specifier) as Promise<{
     processDueReminders: () => Promise<{
       scannedClasses: number;
+      scannedAssignments: number;
       sent: number;
       failed: number;
       skipped: number;
@@ -78,8 +103,11 @@ describe("reminder lifecycle for scheduled lessons", () => {
     vi.resetAllMocks();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-01T09:00:00.000Z"));
+    listMissingAssignmentsForRemindersMock.mockResolvedValue([]);
     sendClassReminderEmailMock.mockResolvedValue({ delivered: true });
+    sendAssignmentReminderEmailMock.mockResolvedValue({ delivered: true });
     createReminderLogMock.mockResolvedValue({});
+    createAssignmentReminderLogMock.mockResolvedValue({});
     getUsersByIdsMock.mockImplementation((ids: string[]) => Promise.resolve(ids.map(userFixture)));
   });
 
@@ -296,5 +324,69 @@ describe("reminder lifecycle for scheduled lessons", () => {
         String(payload.liveLessonUrl).includes("javascript:"),
       ),
     ).toBe(false);
+  });
+
+  it("sends assignment overdue reminders to enrolled students with missing submissions", async () => {
+    listUpcomingClassesForRemindersMock.mockResolvedValue([]);
+    listMissingAssignmentsForRemindersMock.mockResolvedValue([assignmentReminderFixture()]);
+
+    const { processDueReminders } = await loadReminderService();
+    const result = await processDueReminders();
+
+    expect(result.scannedAssignments).toBe(1);
+    expect(getUsersByIdsMock).toHaveBeenCalledWith(
+      expect.arrayContaining(["student-direct", "student-group"]),
+    );
+    expect(sendAssignmentReminderEmailMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assignmentHref: expect.stringContaining("/portal/student/assignments/assignment-1"),
+        assignmentTitle: "Quadratic homework",
+        dueDate: new Date("2026-05-31T20:00:00.000Z"),
+        recipientEmail: "student-direct@example.com",
+      }),
+    );
+    expect(createAssignmentReminderLogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assignmentId: "assignment-1",
+        recipientUserId: expect.stringMatching(/student-/),
+        channel: "EMAIL",
+        status: "SENT",
+        reminderWindowStart: new Date("2026-06-01T00:00:00.000Z"),
+        reminderWindowEnd: new Date("2026-06-01T23:59:59.999Z"),
+      }),
+    );
+  });
+
+  it("does not send duplicate assignment reminders within the same daily reminder window", async () => {
+    listUpcomingClassesForRemindersMock.mockResolvedValue([]);
+    listMissingAssignmentsForRemindersMock.mockResolvedValue([
+      assignmentReminderFixture({
+        reminders: [
+          {
+            recipientUserId: "student-direct",
+            channel: ReminderChannel.EMAIL,
+            status: "SENT",
+            reminderWindowStart: new Date("2026-06-01T00:00:00.000Z"),
+            reminderWindowEnd: new Date("2026-06-01T23:59:59.999Z"),
+          },
+        ],
+      }),
+    ]);
+
+    const { processDueReminders } = await loadReminderService();
+    await processDueReminders();
+
+    expect(sendAssignmentReminderEmailMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientEmail: "student-direct@example.com",
+      }),
+    );
+    expect(createAssignmentReminderLogMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        assignmentId: "assignment-1",
+        recipientUserId: "student-direct",
+        channel: "EMAIL",
+      }),
+    );
   });
 });

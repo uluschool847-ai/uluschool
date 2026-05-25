@@ -81,6 +81,10 @@ function Field({
   );
 }
 
+function isMissingAssignment(status: string | null | undefined) {
+  return status?.toLowerCase() === "missing";
+}
+
 export default async function StudentAssignmentsPage({ searchParams = {} }: PageProps) {
   const session = await requireRole([UserRole.STUDENT]);
   const params = await searchParams;
@@ -217,6 +221,11 @@ export default async function StudentAssignmentsPage({ searchParams = {} }: Page
                     {assignment.classGroup ? ` / ${assignment.classGroup.name}` : ""}. Subject:{" "}
                     {assignment.subject?.name ?? "Not set"}. Due: {formatDate(assignment.dueDate)}.
                   </p>
+                  {isMissingAssignment(assignment.status) ? (
+                    <output className="block rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      Reminder: This assignment is overdue. Submit it as soon as possible.
+                    </output>
+                  ) : null}
                   {assignment.status === "Graded" ? (
                     <div className="rounded-md bg-muted p-3 text-sm">
                       {assignment.grade !== null ? <p>Grade: {assignment.grade}</p> : null}

@@ -140,6 +140,7 @@ function reportPreview(overrides: Record<string, unknown> = {}) {
 function dashboardData(overrides: Record<string, unknown> = {}) {
   return {
     assignmentsSummary: {
+      overdueCount: 0,
       pendingCount: 2,
       recentGradedCount: 1,
       nextPending: {
@@ -147,6 +148,7 @@ function dashboardData(overrides: Record<string, unknown> = {}) {
         href: "/portal/student/assignments/assignment-1",
         title: "Quadratic equations",
       },
+      nextOverdue: null,
     },
     attendanceSummary: {
       absentCount: 1,
@@ -411,6 +413,67 @@ describe("Student dashboard assignment preview cleanup", () => {
     expect(screen.getByText(/active work/i)).toBeDefined();
     expect(screen.queryByText(/graded assignment/i)).toBeNull();
     expect(screen.queryByText(/archived assignment/i)).toBeNull();
+  });
+
+  it("shows an overdue assignment reminder in the Assignments card when missing assignments exist", async () => {
+    getStudentDashboardDataMock.mockResolvedValueOnce(
+      dashboardData({
+        assignmentsSummary: {
+          overdueCount: 1,
+          pendingCount: 2,
+          recentGradedCount: 0,
+          nextPending: {
+            dueDate: new Date("2020-01-01T10:00:00.000Z"),
+            href: "/portal/student/assignments/assignment-overdue",
+            title: "Overdue factoring practice",
+          },
+          nextOverdue: {
+            dueDate: new Date("2020-01-01T10:00:00.000Z"),
+            href: "/portal/student/assignments/assignment-overdue",
+            title: "Overdue factoring practice",
+          },
+        },
+      }),
+    );
+
+    const page = await loadDashboardPage();
+    const element = await page.default();
+    render(element);
+
+    expect(screen.getByRole("heading", { name: /^assignments$/i })).toBeDefined();
+    expect(screen.getByText(/1 overdue assignment/i)).toBeDefined();
+    expect(
+      screen.getByText(/reminder:\s*this assignment is overdue\. submit it as soon as possible\./i),
+    ).toBeDefined();
+    expect(screen.getByRole("link", { name: /overdue factoring practice/i })).toHaveAttribute(
+      "href",
+      "/portal/student/assignments/assignment-overdue",
+    );
+  });
+
+  it("does not show an overdue reminder when only future, submitted, graded, or archived assignments exist", async () => {
+    getStudentDashboardDataMock.mockResolvedValueOnce(
+      dashboardData({
+        assignmentsSummary: {
+          overdueCount: 0,
+          pendingCount: 1,
+          recentGradedCount: 2,
+          nextPending: {
+            dueDate: new Date("2026-06-20T20:00:00.000Z"),
+            href: "/portal/student/assignments/future-assignment",
+            title: "Future homework",
+          },
+          nextOverdue: null,
+        },
+      }),
+    );
+
+    const page = await loadDashboardPage();
+    const element = await page.default();
+    render(element);
+
+    expect(screen.queryByText(/overdue assignment/i)).toBeNull();
+    expect(screen.queryByText(/this assignment is overdue/i)).toBeNull();
   });
 
   it("renders quick links to student workflows", async () => {
