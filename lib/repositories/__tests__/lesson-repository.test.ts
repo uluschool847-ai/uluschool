@@ -12,12 +12,19 @@ const prismaMock = vi.hoisted(() => ({
     create: vi.fn(),
     createMany: vi.fn(),
     delete: vi.fn(),
+    findFirst: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn(),
     update: vi.fn(),
   },
   subject: {
     findUnique: vi.fn(),
+  },
+  teacherAvailabilityRule: {
+    findMany: vi.fn(),
+  },
+  teacherUnavailablePeriod: {
+    findMany: vi.fn(),
   },
 }));
 
@@ -182,6 +189,8 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    prismaMock.teacherUnavailablePeriod.findMany.mockResolvedValue([]);
+    prismaMock.scheduledClass.findFirst.mockResolvedValue(null);
   });
 
   it("lists admin lessons with filters, schedule metadata, relations, and reminder counts", async () => {
@@ -723,20 +732,40 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
       teacherId: "teacher-1",
       subjectId: "subject-math",
     });
-    prismaMock.appUser.findUnique.mockResolvedValueOnce({
+    prismaMock.appUser.findUnique.mockResolvedValue({
       id: "teacher-1",
       role: UserRole.TEACHER,
     });
+    prismaMock.teacherAvailabilityRule.findMany.mockResolvedValue([
+      {
+        id: "rule-monday",
+        teacherId: "teacher-1",
+        weekday: 1,
+        startTime: "09:00",
+        endTime: "12:00",
+        timezone: "Europe/Kiev",
+        status: "ACTIVE",
+      },
+      {
+        id: "rule-wednesday",
+        teacherId: "teacher-1",
+        weekday: 3,
+        startTime: "09:00",
+        endTime: "12:00",
+        timezone: "Europe/Kiev",
+        status: "ACTIVE",
+      },
+    ]);
     prismaMock.scheduledClass.findMany.mockResolvedValueOnce([
       {
         id: "existing-lesson",
-        startAt: new Date("2026-06-03T10:00:00.000Z"),
+        startAt: new Date("2026-06-03T07:00:00.000Z"),
       },
     ]);
     prismaMock.scheduledClass.createMany.mockResolvedValueOnce({ count: 2 });
     prismaMock.scheduledClass.findMany.mockResolvedValueOnce([
-      lessonRecord({ id: "created-1", startAt: new Date("2026-06-01T10:00:00.000Z") }),
-      lessonRecord({ id: "created-2", startAt: new Date("2026-06-08T10:00:00.000Z") }),
+      lessonRecord({ id: "created-1", startAt: new Date("2026-06-01T07:00:00.000Z") }),
+      lessonRecord({ id: "created-2", startAt: new Date("2026-06-08T07:00:00.000Z") }),
     ]);
 
     const { createRecurringLessons } = await loadLessonRepository();
@@ -771,14 +800,14 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
           expect.objectContaining({
             classGroupId: "group-1",
             title: "Weekly mathematics lesson",
-            startAt: new Date("2026-06-01T10:00:00.000Z"),
-            endAt: new Date("2026-06-01T11:00:00.000Z"),
+            startAt: new Date("2026-06-01T07:00:00.000Z"),
+            endAt: new Date("2026-06-01T08:00:00.000Z"),
           }),
           expect.objectContaining({
             classGroupId: "group-1",
             title: "Weekly mathematics lesson",
-            startAt: new Date("2026-06-08T10:00:00.000Z"),
-            endAt: new Date("2026-06-08T11:00:00.000Z"),
+            startAt: new Date("2026-06-08T07:00:00.000Z"),
+            endAt: new Date("2026-06-08T08:00:00.000Z"),
           }),
         ]),
       }),
@@ -786,7 +815,7 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
     expect(prismaMock.scheduledClass.createMany).not.toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.arrayContaining([
-          expect.objectContaining({ startAt: new Date("2026-06-03T10:00:00.000Z") }),
+          expect.objectContaining({ startAt: new Date("2026-06-03T07:00:00.000Z") }),
         ]),
       }),
     );
@@ -800,5 +829,51 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
         ]),
       }),
     );
+  });
+
+  it("blocks recurring lesson generation outside teacher weekly availability", async () => {
+    prismaMock.classGroup.findUnique.mockResolvedValueOnce({
+      id: "group-1",
+      status: "ACTIVE",
+      teacherId: "teacher-1",
+      subjectId: "subject-math",
+    });
+    prismaMock.appUser.findUnique.mockResolvedValue({
+      id: "teacher-1",
+      role: UserRole.TEACHER,
+    });
+    prismaMock.teacherAvailabilityRule.findMany.mockResolvedValue([
+      {
+        id: "rule-monday",
+        teacherId: "teacher-1",
+        weekday: 1,
+        startTime: "09:00",
+        endTime: "12:00",
+        timezone: "Europe/Kiev",
+        status: "ACTIVE",
+      },
+    ]);
+    prismaMock.scheduledClass.findMany.mockResolvedValueOnce([]);
+
+    const { createRecurringLessons } = await loadLessonRepository();
+
+    await expect(
+      createRecurringLessons({
+        classGroupId: "group-1",
+        title: "Weekly mathematics lesson",
+        startDate: new Date("2026-06-01T00:00:00.000Z"),
+        endDate: new Date("2026-06-03T23:59:59.999Z"),
+        weekdays: [1, 3],
+        startTime: "10:00",
+        endTime: "11:00",
+        timezone: "Europe/Kiev",
+        liveLessonUrl: "https://meet.google.com/abc-defg-hij",
+        meetingProvider: "GOOGLE_MEET",
+      }),
+    ).rejects.toThrow(
+      "Teacher is not available at this time. The lesson is outside weekly availability.",
+    );
+
+    expect(prismaMock.scheduledClass.createMany).not.toHaveBeenCalled();
   });
 });

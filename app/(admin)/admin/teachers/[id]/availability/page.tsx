@@ -72,6 +72,9 @@ export default async function AdminTeacherAvailabilityPage({ params, searchParam
       : Promise.resolve([]),
   ]);
   const hasAvailabilityProbeConflict = firstLessonAvailability.some((result) => !result.available);
+  const now = new Date();
+  const upcomingPeriods = unavailablePeriods.filter((period) => period.endAt >= now);
+  const pastPeriods = unavailablePeriods.filter((period) => period.endAt < now);
 
   return (
     <main className="space-y-6">
@@ -142,12 +145,28 @@ export default async function AdminTeacherAvailabilityPage({ params, searchParam
 
       <Card>
         <CardContent className="pt-6">
+          <h2 className="mb-3 text-xl font-semibold">Upcoming unavailable periods</h2>
           <TeacherUnavailablePeriods
             teacherId={id}
-            periods={unavailablePeriods}
+            periods={upcomingPeriods}
             message={periodMessage}
             error={resolvedSearchParams?.availabilityError}
           />
+          <section aria-label="Past unavailable periods" className="mt-6 space-y-3">
+            <h2 className="text-xl font-semibold">Past unavailable periods</h2>
+            {pastPeriods.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No past unavailable periods.</p>
+            ) : (
+              <ul className="space-y-2 text-sm">
+                {pastPeriods.map((period) => (
+                  <li key={period.id} className="rounded-md border px-3 py-2">
+                    {formatDateTime(period.startAt)} - {formatDateTime(period.endAt)}
+                    {period.reason ? ` · ${period.reason}` : ""}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </CardContent>
       </Card>
 

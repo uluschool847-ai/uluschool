@@ -234,8 +234,8 @@ test.describe("Admin Scheduled Lessons Management", () => {
         classGroupId: group.id,
         teacherId: teacherUserId,
         subjectId: group.subjectId,
-        startAt: new Date("2026-07-14T10:00:00.000Z"),
-        endAt: new Date("2026-07-14T11:00:00.000Z"),
+        startAt: new Date("2026-07-14T07:00:00.000Z"),
+        endAt: new Date("2026-07-14T08:00:00.000Z"),
         liveLessonUrl: testMeetUrl("qa-recurring-existing"),
       },
     });

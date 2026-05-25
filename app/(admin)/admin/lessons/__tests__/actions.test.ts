@@ -8,6 +8,10 @@ const createLessonMock = vi.hoisted(() => vi.fn());
 const updateLessonMock = vi.hoisted(() => vi.fn());
 const rescheduleLessonMock = vi.hoisted(() => vi.fn());
 const checkTeacherAvailabilityMock = vi.hoisted(() => vi.fn());
+const createGoogleMeetEventForLessonMock = vi.hoisted(() => vi.fn());
+const updateGoogleMeetEventForLessonMock = vi.hoisted(() => vi.fn());
+const deleteGoogleMeetEventForLessonMock = vi.hoisted(() => vi.fn());
+const isGoogleCalendarEnabledMock = vi.hoisted(() => vi.fn());
 const getLessonByIdMock = vi.hoisted(() => vi.fn());
 const cancelLessonMock = vi.hoisted(() => vi.fn());
 const completeLessonMock = vi.hoisted(() => vi.fn());
@@ -30,6 +34,13 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   createAdminAuditLog: createAdminAuditLogMock,
+}));
+
+vi.mock("@/lib/integrations/google-calendar", () => ({
+  createGoogleMeetEventForLesson: createGoogleMeetEventForLessonMock,
+  deleteGoogleMeetEventForLesson: deleteGoogleMeetEventForLessonMock,
+  isGoogleCalendarEnabled: isGoogleCalendarEnabledMock,
+  updateGoogleMeetEventForLesson: updateGoogleMeetEventForLessonMock,
 }));
 
 vi.mock("@/lib/repositories/lesson-repository", () => ({
@@ -188,6 +199,7 @@ describe("Admin lesson actions", () => {
     requireRoleMock.mockResolvedValue({ uid: "admin-1", role: UserRole.ADMIN });
     getLessonByIdMock.mockResolvedValue(lessonRecord());
     checkTeacherAvailabilityMock.mockResolvedValue({ available: true });
+    isGoogleCalendarEnabledMock.mockReturnValue(false);
     prismaMock.$transaction.mockImplementation(
       async (callback: (tx: typeof transactionClientMock) => unknown) =>
         callback(transactionClientMock),
@@ -277,6 +289,37 @@ describe("Admin lesson actions", () => {
       expect(createAdminAuditLogMock).not.toHaveBeenCalled();
     },
   );
+
+  it("blocks unavailable-period conflicts before Google Meet auto-create or lesson mutation", async () => {
+    isGoogleCalendarEnabledMock.mockReturnValue(true);
+    checkTeacherAvailabilityMock.mockResolvedValueOnce({
+      available: false,
+      reason: "UNAVAILABLE_PERIOD",
+    });
+
+    const { createLessonAction } = await loadLessonActions();
+    const result = await createLessonAction(lessonForm({ liveLessonUrl: "" }));
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: false,
+        message:
+          "Teacher is not available at this time. The lesson overlaps an unavailable period.",
+      }),
+    );
+    expect(checkTeacherAvailabilityMock).toHaveBeenCalledWith(
+      {
+        teacherId: "teacher-1",
+        startAt: new Date("2026-06-01T10:00:00.000Z"),
+        endAt: new Date("2026-06-01T11:00:00.000Z"),
+      },
+      transactionClientMock,
+    );
+    expect(createGoogleMeetEventForLessonMock).not.toHaveBeenCalled();
+    expect(createLessonMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
 
   it.each([
     { field: "title", value: "", errorKey: "title", pattern: /required/i },
@@ -789,6 +832,24 @@ describe("Admin lesson actions", () => {
         message: expect.stringMatching(/2.*created.*1.*skipped|recurring lessons created/i),
       }),
     );
+  });
+
+  it("returns a clean weekly availability message when recurring lesson generation is blocked", async () => {
+    createRecurringLessonsMock.mockRejectedValueOnce(
+      new Error(
+        "Teacher is not available at this time. The lesson is outside weekly availability.",
+      ),
+    );
+
+    const { createRecurringLessonsAction } = await loadLessonActions();
+    const result = await createRecurringLessonsAction(recurringForm());
+
+    expect(result).toEqual({
+      success: false,
+      message: "Teacher is not available at this time. The lesson is outside weekly availability.",
+    });
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
   it("does not write audit or revalidate on mutation failure", async () => {

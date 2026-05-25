@@ -404,6 +404,13 @@ function googleMeetErrorMessage(error: unknown, fallback: string) {
   return /google|calendar|meet/i.test(message) ? message : `${fallback} ${message}`;
 }
 
+function lessonActionErrorMessage(error: unknown, fallback: string) {
+  const message = failureMessage(error, fallback);
+  return message.startsWith("Teacher is not available at this time.")
+    ? message
+    : googleMeetErrorMessage(error, fallback);
+}
+
 function buildGoogleLessonInput(
   lesson: {
     id: string;
@@ -613,7 +620,7 @@ export async function createLessonAction(formData: FormData): Promise<LessonActi
     return { success: true, message: "Lesson created." };
   } catch (error) {
     if (isNextRedirect(error)) throw error;
-    const message = googleMeetErrorMessage(error, "Failed to create lesson.");
+    const message = lessonActionErrorMessage(error, "Failed to create lesson.");
     maybeRedirectError(formData, message, `/admin/classes/${lessonInput.classGroupId}/lessons/new`);
     return { success: false, message };
   }
@@ -729,7 +736,7 @@ export async function updateLessonAction(formData: FormData): Promise<LessonActi
     return { success: true, message };
   } catch (error) {
     if (isNextRedirect(error)) throw error;
-    const message = googleMeetErrorMessage(error, "Failed to update lesson.");
+    const message = lessonActionErrorMessage(error, "Failed to update lesson.");
     maybeRedirectError(
       formData,
       message,
@@ -812,7 +819,7 @@ export async function rescheduleLessonAction(formData: FormData): Promise<Lesson
     return { success: true, message: "Lesson rescheduled." };
   } catch (error) {
     if (isNextRedirect(error)) throw error;
-    const message = googleMeetErrorMessage(error, "Failed to reschedule lesson.");
+    const message = lessonActionErrorMessage(error, "Failed to reschedule lesson.");
     maybeRedirectError(
       formData,
       message,

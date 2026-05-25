@@ -229,6 +229,10 @@ describe("Teacher class/group detail page", () => {
       "href",
       "/portal/teacher/schedule?classGroupId=group-1",
     );
+    expect(screen.getByRole("link", { name: /assignments|homework/i })).toHaveAttribute(
+      "href",
+      "/portal/teacher/assignments?classGroupId=group-1",
+    );
     expect(screen.queryByRole("link", { name: /create class/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /delete class/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /enrol student/i })).toBeNull();

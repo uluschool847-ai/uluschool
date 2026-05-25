@@ -83,13 +83,20 @@ function LessonList({
             <div className="flex flex-wrap gap-2">
               {lesson.startHref ? (
                 <Button asChild size="sm">
-                  <a href={lesson.startHref} target="_blank" rel="noreferrer">
+                  <a
+                    href={lesson.startHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`Start Lesson ${lesson.title}`}
+                  >
                     Start Lesson - {lesson.title}
                   </a>
                 </Button>
               ) : null}
               <Button asChild variant="secondary" size="sm">
-                <Link href={lesson.detailHref}>Open Details - {lesson.title}</Link>
+                <Link href={lesson.detailHref} aria-label={`Open Details ${lesson.title}`}>
+                  Open Details - {lesson.title}
+                </Link>
               </Button>
             </div>
           </div>
@@ -121,6 +128,22 @@ export default async function TeacherClassGroupPage({
           </Button>
           <Button asChild variant="secondary" size="sm">
             <Link href={`/portal/teacher/schedule?classGroupId=${classGroup.id}`}>Schedule</Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm">
+            <Link href={`/portal/teacher/assignments?classGroupId=${classGroup.id}`}>
+              Assignments
+            </Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm">
+            <Link href={`/portal/teacher/submissions?classGroupId=${classGroup.id}`}>
+              Submissions
+            </Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm">
+            <Link href={`/portal/teacher/materials?classGroupId=${classGroup.id}`}>Materials</Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm">
+            <Link href="/portal/teacher/progress">Progress</Link>
           </Button>
         </div>
         <h1 className="text-3xl font-bold tracking-tight">{classGroup.name}</h1>
@@ -223,7 +246,9 @@ export default async function TeacherClassGroupPage({
                     <p className="font-medium">{material.title}</p>
                     {material.fileHref ? (
                       <Button asChild variant="secondary" size="sm" className="mt-3">
-                        <a href={material.fileHref}>Open Material - {material.title}</a>
+                        <a href={material.fileHref} aria-label={`Open Material ${material.title}`}>
+                          Open Material - {material.title}
+                        </a>
                       </Button>
                     ) : null}
                   </li>

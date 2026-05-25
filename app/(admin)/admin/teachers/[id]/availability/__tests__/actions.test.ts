@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { UserRole } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -81,6 +82,8 @@ async function loadTeacherAvailabilityActions() {
   const specifier = "@/app/(admin)/admin/teachers/[id]/availability/actions";
   return import(/* @vite-ignore */ specifier) as Promise<TeacherAvailabilityActionsModule>;
 }
+
+const ACTION_SOURCE_PATH = "app/(admin)/admin/teachers/[id]/availability/actions.ts";
 
 function availabilityRuleForm(overrides?: Partial<Record<string, string | null>>) {
   const formData = new FormData();
@@ -397,6 +400,33 @@ describe("Admin teacher availability actions", () => {
     expect(JSON.stringify(result.errors ?? result.message)).toMatch(/start.*end|end.*start/i);
     expect(createTeacherUnavailablePeriodMock).not.toHaveBeenCalled();
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { field: "startAt", value: "not-a-date", message: /date.*valid|valid.*date/i },
+    { field: "endAt", value: "not-a-date", message: /date.*valid|valid.*date/i },
+    { field: "timezone", value: "Invalid/Timezone", message: /timezone/i },
+  ])(
+    "validates unavailable period date and timezone input %#",
+    async ({ field, value, message }) => {
+      const { createTeacherUnavailablePeriodAction } = await loadTeacherAvailabilityActions();
+      const result = await createTeacherUnavailablePeriodAction(
+        unavailablePeriodForm({ [field]: value }),
+      );
+
+      expect(result.success).toBe(false);
+      expect(JSON.stringify(result.errors ?? result.message)).toMatch(message);
+      expect(createTeacherUnavailablePeriodMock).not.toHaveBeenCalled();
+      expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("uses the shared timezone conversion helper instead of appending Z to datetime-local input", () => {
+    const source = readFileSync(ACTION_SOURCE_PATH, "utf8");
+
+    expect(source).toContain("localDateTimeToUtc");
+    expect(source).not.toContain("`${value}Z`");
+    expect(source).not.toContain("`${value}:00.000Z`");
   });
 
   it("converts unavailable period datetime-local values through the shared timezone helper", async () => {

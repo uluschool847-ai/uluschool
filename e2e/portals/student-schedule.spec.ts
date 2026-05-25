@@ -210,7 +210,7 @@ test.describe("Student and parent schedule portals", () => {
     await expect(page.getByRole("heading", { name: fixture.joinableLessonTitle })).toBeVisible();
     await expect(page.getByText("Quadratics worksheet")).toBeVisible();
     await expect(page.getByText("Complete quadratic practice")).toBeVisible();
-    await expect(page.getByText(/submitted|graded|submission/i)).toBeVisible();
+    await expect(page.getByText(/^Submission:\s*Graded$/i)).toBeVisible();
 
     await page.goto(`${BASE_URL}/portal/student/schedule/${fixture.unlinkedLessonId}`);
     await expect(page.getByText(/not found|unauthorized|forbidden|not available/i)).toBeVisible();
@@ -254,7 +254,7 @@ test.describe("Student and parent schedule portals", () => {
     await expect(page.getByText(fixture.subjectName)).toBeVisible();
     await expect(page.getByText("Quadratics worksheet")).toBeVisible();
     await expect(page.getByText("Complete quadratic practice")).toBeVisible();
-    await expect(page.getByText(/submitted|graded|submission/i)).toBeVisible();
+    await expect(page.getByText(/^Submission:\s*Graded$/i)).toBeVisible();
 
     await page.goto(
       `${BASE_URL}/portal/parent/schedule/${fixture.unlinkedStudentId}/${fixture.unlinkedLessonId}`,

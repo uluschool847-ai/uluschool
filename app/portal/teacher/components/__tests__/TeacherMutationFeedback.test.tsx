@@ -61,10 +61,9 @@ describe("Teacher mutation feedback", () => {
         ]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /archive\/delete/i }));
-    await waitFor(() =>
-      expect(screen.getByText(/archived|deleted|something went wrong/i)).toBeDefined(),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /^archive$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /confirm archive/i }));
+    await waitFor(() => expect(screen.getByText(/archived|something went wrong/i)).toBeDefined());
   });
 
   it("SubmissionReviewForm shows generic error feedback on thrown grading failure", async () => {

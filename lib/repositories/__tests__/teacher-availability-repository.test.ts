@@ -20,6 +20,7 @@ const prismaMock = vi.hoisted(() => ({
   teacherUnavailablePeriod: {
     create: vi.fn(),
     delete: vi.fn(),
+    findFirst: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn(),
     update: vi.fn(),
@@ -78,6 +79,25 @@ type TeacherAvailabilityRepositoryModule = {
   createTeacherUnavailablePeriod: (
     input: UnavailablePeriodInput,
   ) => Promise<UnavailablePeriodRecord>;
+  getTeacherAvailabilityAdminData: (teacherId: string) => Promise<{
+    teacher: { id: string; name: string; role: UserRole };
+    rules: AvailabilityRuleRecord[];
+    unavailablePeriods: UnavailablePeriodRecord[];
+    upcomingLessons: Array<{
+      id: string;
+      title: string;
+      startAt: Date;
+      endAt: Date;
+      teacherId: string | null;
+      classGroup: { id: string; name: string } | null;
+    }>;
+    conflicts: Array<{
+      lessonId: string;
+      title: string;
+      reason: TeacherUnavailableReason;
+      ownershipPath: "DIRECT_TEACHER" | "CLASS_GROUP_TEACHER";
+    }>;
+  } | null>;
   updateTeacherUnavailablePeriod: (
     id: string,
     teacherId: string,
@@ -177,6 +197,7 @@ describe("teacher-availability-repository contract", () => {
     prismaMock.appUser.findUnique.mockResolvedValue(teacher());
     prismaMock.teacherAvailabilityRule.findMany.mockResolvedValue([rule()]);
     prismaMock.teacherUnavailablePeriod.findMany.mockResolvedValue([]);
+    prismaMock.teacherUnavailablePeriod.findFirst.mockResolvedValue(null);
     prismaMock.scheduledClass.findFirst.mockResolvedValue(null);
   });
 
@@ -311,7 +332,7 @@ describe("teacher-availability-repository contract", () => {
   it("lists and mutates unavailable periods with startAt before endAt validation", async () => {
     prismaMock.teacherUnavailablePeriod.findMany.mockResolvedValueOnce([unavailablePeriod()]);
     prismaMock.teacherUnavailablePeriod.create.mockResolvedValueOnce(unavailablePeriod());
-    prismaMock.teacherUnavailablePeriod.findUnique.mockResolvedValue(unavailablePeriod());
+    prismaMock.teacherUnavailablePeriod.findFirst.mockResolvedValue(unavailablePeriod());
     prismaMock.teacherUnavailablePeriod.update.mockResolvedValueOnce(
       unavailablePeriod({ reason: "Conference" }),
     );
@@ -353,6 +374,103 @@ describe("teacher-availability-repository contract", () => {
         endAt: lessonEnd,
       }),
     });
+    expect(prismaMock.teacherUnavailablePeriod.delete).toHaveBeenCalledWith({
+      where: { id: "unavailable-1" },
+    });
+  });
+
+  it("creates unavailable periods only for existing AppUser teachers", async () => {
+    const { createTeacherUnavailablePeriod } = await loadTeacherAvailabilityRepository();
+
+    prismaMock.appUser.findUnique.mockResolvedValueOnce(null);
+    await expect(
+      createTeacherUnavailablePeriod({
+        teacherId: "missing-teacher",
+        startAt: lessonStart,
+        endAt: lessonEnd,
+        reason: "Conference",
+      }),
+    ).rejects.toThrow(/teacher.*not found|invalid teacher/i);
+
+    prismaMock.appUser.findUnique.mockResolvedValueOnce({
+      id: "student-1",
+      role: UserRole.STUDENT,
+    });
+    await expect(
+      createTeacherUnavailablePeriod({
+        teacherId: "student-1",
+        startAt: lessonStart,
+        endAt: lessonEnd,
+        reason: "Conference",
+      }),
+    ).rejects.toThrow(/teacher.*role|invalid teacher/i);
+
+    expect(prismaMock.teacherUnavailablePeriod.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "invalid start date",
+      input: { startAt: new Date("not-a-date"), endAt: lessonEnd },
+      message: /start.*valid/i,
+    },
+    {
+      label: "invalid end date",
+      input: { startAt: lessonStart, endAt: new Date("not-a-date") },
+      message: /end.*valid/i,
+    },
+    {
+      label: "start equals end",
+      input: { startAt: lessonStart, endAt: lessonStart },
+      message: /start.*before.*end/i,
+    },
+    {
+      label: "start after end",
+      input: { startAt: lessonEnd, endAt: lessonStart },
+      message: /start.*before.*end/i,
+    },
+  ])("validates unavailable period date values for $label", async ({ input, message }) => {
+    const { createTeacherUnavailablePeriod, updateTeacherUnavailablePeriod } =
+      await loadTeacherAvailabilityRepository();
+
+    await expect(
+      createTeacherUnavailablePeriod({
+        teacherId: "teacher-1",
+        startAt: input.startAt,
+        endAt: input.endAt,
+        reason: "Conference",
+      }),
+    ).rejects.toThrow(message);
+
+    prismaMock.teacherUnavailablePeriod.findFirst.mockResolvedValueOnce(unavailablePeriod());
+    await expect(
+      updateTeacherUnavailablePeriod("unavailable-1", "teacher-1", input),
+    ).rejects.toThrow(message);
+    expect(prismaMock.teacherUnavailablePeriod.create).not.toHaveBeenCalled();
+    expect(prismaMock.teacherUnavailablePeriod.update).not.toHaveBeenCalled();
+  });
+
+  it("requires unavailable-period update and delete lookups to include both id and teacherId", async () => {
+    prismaMock.teacherUnavailablePeriod.findFirst.mockResolvedValue(unavailablePeriod());
+    prismaMock.teacherUnavailablePeriod.update.mockResolvedValueOnce(unavailablePeriod());
+    prismaMock.teacherUnavailablePeriod.delete.mockResolvedValueOnce({ id: "unavailable-1" });
+
+    const { updateTeacherUnavailablePeriod, deleteTeacherUnavailablePeriod } =
+      await loadTeacherAvailabilityRepository();
+
+    await updateTeacherUnavailablePeriod("unavailable-1", "teacher-1", {
+      reason: "Conference",
+    });
+    await deleteTeacherUnavailablePeriod("unavailable-1", "teacher-1");
+
+    expect(prismaMock.teacherUnavailablePeriod.findFirst).toHaveBeenCalledWith({
+      where: { id: "unavailable-1", teacherId: "teacher-1" },
+    });
+    expect(prismaMock.teacherUnavailablePeriod.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "unavailable-1" },
+      }),
+    );
     expect(prismaMock.teacherUnavailablePeriod.delete).toHaveBeenCalledWith({
       where: { id: "unavailable-1" },
     });
@@ -513,5 +631,52 @@ describe("teacher-availability-repository contract", () => {
     expect(prismaMock.teacherAvailabilityRule.create).not.toHaveBeenCalled();
     expect(prismaMock.teacherUnavailablePeriod.create).not.toHaveBeenCalled();
     expect(prismaMock.scheduledClass.create).toBeUndefined();
+  });
+
+  it("builds unavailable-period conflicts for direct and class-group-owned teacher lessons", async () => {
+    const directLesson = {
+      id: "lesson-direct",
+      title: "Direct lesson",
+      startAt: new Date("2026-06-01T07:30:00.000Z"),
+      endAt: new Date("2026-06-01T08:30:00.000Z"),
+      teacherId: "teacher-1",
+      classGroup: { id: "group-1", name: "Direct group" },
+    };
+    const classGroupLesson = {
+      id: "lesson-class-group",
+      title: "Class group lesson",
+      startAt: new Date("2026-06-01T07:45:00.000Z"),
+      endAt: new Date("2026-06-01T08:45:00.000Z"),
+      teacherId: "other-teacher",
+      classGroup: { id: "group-2", name: "Owned group" },
+    };
+    prismaMock.teacherAvailabilityRule.findMany.mockResolvedValueOnce([rule()]);
+    prismaMock.teacherUnavailablePeriod.findMany.mockResolvedValueOnce([unavailablePeriod()]);
+    prismaMock.scheduledClass.findMany.mockResolvedValueOnce([directLesson, classGroupLesson]);
+
+    const { getTeacherAvailabilityAdminData } = await loadTeacherAvailabilityRepository();
+    const result = await getTeacherAvailabilityAdminData("teacher-1");
+
+    expect(prismaMock.scheduledClass.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [{ teacherId: "teacher-1" }, { classGroup: { teacherId: "teacher-1" } }],
+        }),
+      }),
+    );
+    expect(result?.conflicts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          lessonId: "lesson-direct",
+          ownershipPath: "DIRECT_TEACHER",
+          reason: "UNAVAILABLE_PERIOD",
+        }),
+        expect.objectContaining({
+          lessonId: "lesson-class-group",
+          ownershipPath: "CLASS_GROUP_TEACHER",
+          reason: "UNAVAILABLE_PERIOD",
+        }),
+      ]),
+    );
   });
 });

@@ -51,6 +51,13 @@ function lessonDetail(overrides: Record<string, unknown> = {}) {
     level: { id: "level-igcse", name: "IGCSE", slug: "igcse" },
     teacher: { id: "teacher-1", fullName: "Jane Teacher", email: "jane@example.com" },
     classGroup: { id: "group-1", name: "IGCSE Mathematics Group A" },
+    attendance: {
+      id: "attendance-1",
+      status: "ABSENT",
+      lateMinutes: null,
+      reason: "Family emergency",
+      markedAt: new Date("2026-06-10T10:12:00.000Z"),
+    },
     cancelReason: "Teacher unavailable",
     rescheduledFromId: null,
     materialsCount: 2,
@@ -66,6 +73,7 @@ function lessonDetail(overrides: Record<string, unknown> = {}) {
         submissionStatus: "GRADED",
         submissionId: "submission-1",
         grade: 92,
+        feedback: "Strong structure. Improve final explanation.",
       },
       {
         id: "assignment-2",
@@ -129,6 +137,7 @@ describe("Parent child schedule lesson detail page", () => {
     expect(screen.getByText(/extra practice/i)).toBeDefined();
     expect(screen.getByText(/graded/i)).toBeDefined();
     expect(screen.getByText(/92/)).toBeDefined();
+    expect(screen.getByText(/strong structure/i)).toBeDefined();
     expect(screen.getByText(/not submitted/i)).toBeDefined();
     expect(screen.getByText("Lesson is cancelled")).toBeDefined();
     expect(screen.queryByRole("link", { name: /join lesson/i })).toBeNull();
@@ -155,6 +164,59 @@ describe("Parent child schedule lesson detail page", () => {
     expect(joinLink).toHaveProperty("target", "_blank");
     expect(joinLink).toHaveProperty("rel", "noreferrer");
     expect(container.textContent).not.toContain("https://meet.google.com/abc-defg-hij");
+  });
+
+  it("shows grade without feedback for the linked child when graded feedback is null", async () => {
+    getParentScopedStudentScheduleLessonMock.mockResolvedValueOnce(
+      lessonDetail({
+        assignments: [
+          {
+            id: "assignment-1",
+            title: "Quadratics homework",
+            dueDate: new Date("2026-06-12T20:00:00.000Z"),
+            submissionStatus: "GRADED",
+            submissionId: "submission-1",
+            grade: 88,
+            feedback: null,
+          },
+        ],
+      }),
+    );
+
+    const page = await loadParentScheduleDetailPage();
+    const element = await page.default({
+      params: { studentId: "student-1", lessonId: "lesson-1" },
+    });
+    render(element);
+
+    expect(screen.getByText(/graded/i)).toBeDefined();
+    expect(screen.getByText(/88/)).toBeDefined();
+    expect(screen.queryByText(/feedback:/i)).toBeNull();
+    expect(screen.queryByText(/strong structure/i)).toBeNull();
+  });
+
+  it("shows attendance only for the linked child lesson", async () => {
+    getParentScopedStudentScheduleLessonMock.mockResolvedValueOnce(
+      lessonDetail({
+        attendance: {
+          id: "attendance-1",
+          lateMinutes: null,
+          reason: "Family emergency",
+          status: "ABSENT",
+        },
+      }),
+    );
+
+    const page = await loadParentScheduleDetailPage();
+    const element = await page.default({
+      params: { studentId: "student-1", lessonId: "lesson-1" },
+    });
+    render(element);
+
+    expect(screen.getByRole("heading", { name: /attendance/i })).toBeDefined();
+    expect(screen.getByText(/attendance:\s*absent/i)).toBeDefined();
+    expect(screen.getByText(/family emergency/i)).toBeDefined();
+    expect(screen.queryByText(/unlinked child attendance/i)).toBeNull();
   });
 
   it("calls notFound when the student is not linked to the parent", async () => {

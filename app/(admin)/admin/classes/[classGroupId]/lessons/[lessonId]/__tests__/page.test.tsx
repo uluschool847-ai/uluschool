@@ -13,6 +13,13 @@ vi.mock("@/lib/repositories/lesson-repository", () => ({
   getLessonById: getLessonByIdMock,
 }));
 
+vi.mock("@/components/admin/classes/LessonRowActions", () => ({
+  LessonRowActions: ({ lesson }: { lesson: { status: string; liveLessonUrl?: string | null } }) =>
+    lesson.status !== "CANCELLED" && lesson.status !== "COMPLETED" && lesson.liveLessonUrl ? (
+      <a href={lesson.liveLessonUrl}>Start Lesson</a>
+    ) : null,
+}));
+
 type LessonDetailPageModule = {
   default: (props: {
     params:

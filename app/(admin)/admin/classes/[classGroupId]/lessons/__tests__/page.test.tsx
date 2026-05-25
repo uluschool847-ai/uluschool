@@ -13,6 +13,13 @@ vi.mock("@/lib/repositories/lesson-repository", () => ({
   listAdminLessons: listAdminLessonsMock,
 }));
 
+vi.mock("@/components/admin/classes/LessonRowActions", () => ({
+  LessonRowActions: ({ lesson }: { lesson: { status: string; liveLessonUrl?: string | null } }) =>
+    lesson.status !== "CANCELLED" && lesson.liveLessonUrl ? (
+      <a href={lesson.liveLessonUrl}>Start Lesson</a>
+    ) : null,
+}));
+
 type LessonsListPageModule = {
   default: (props: {
     params: Promise<{ classGroupId: string }> | { classGroupId: string };

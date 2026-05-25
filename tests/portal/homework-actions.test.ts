@@ -19,11 +19,30 @@ vi.mock("@/lib/auth/session", () => ({
 const createHomeworkAssignmentMock = vi.hoisted(() => vi.fn());
 const updateHomeworkAssignmentMock = vi.hoisted(() => vi.fn());
 const archiveHomeworkAssignmentMock = vi.hoisted(() => vi.fn());
+const legacyCreateHomeworkAssignmentMock = vi.hoisted(() => vi.fn());
+const legacyUpdateHomeworkAssignmentMock = vi.hoisted(() => vi.fn());
+const legacyArchiveHomeworkAssignmentMock = vi.hoisted(() => vi.fn());
+const revalidatePathMock = vi.hoisted(() => vi.fn());
+const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/repositories/portal-repository", () => ({
+vi.mock("@/lib/repositories/homework-repository", () => ({
   createHomeworkAssignment: createHomeworkAssignmentMock,
   updateHomeworkAssignment: updateHomeworkAssignmentMock,
   archiveHomeworkAssignment: archiveHomeworkAssignmentMock,
+}));
+
+vi.mock("@/lib/repositories/portal-repository", () => ({
+  createHomeworkAssignment: legacyCreateHomeworkAssignmentMock,
+  updateHomeworkAssignment: legacyUpdateHomeworkAssignmentMock,
+  archiveHomeworkAssignment: legacyArchiveHomeworkAssignmentMock,
+}));
+
+vi.mock("@/lib/repositories/admin-audit-repository", () => ({
+  createAdminAuditLog: createAdminAuditLogMock,
+}));
+
+vi.mock("next/cache", () => ({
+  revalidatePath: revalidatePathMock,
 }));
 
 import {
@@ -39,6 +58,8 @@ const validHomeworkPayload = {
   title: "Math Homework",
   description: "Pages 10-12",
   classId: "class-1",
+  scheduledClassId: "class-1",
+  subjectId: "subject-math",
   dueDate: "2026-06-10T08:00:00.000Z",
 };
 
@@ -47,6 +68,37 @@ function expectEnumTeacherGuardSource() {
   expect(source).toContain("requireRole([UserRole.TEACHER])");
   expect(source).not.toContain('requireRole(["TEACHER"])');
   expect(source).not.toContain("requireRole(['TEACHER'])");
+}
+
+function expectDedicatedHomeworkRepositorySource() {
+  const source = readFileSync(ACTION_SOURCE_PATH, "utf8");
+  expect(source).toContain("@/lib/repositories/homework-repository");
+  expect(source).not.toMatch(
+    /from\s+["']@\/lib\/repositories\/portal-repository["'][\s\S]*(createHomeworkAssignment|updateHomeworkAssignment|archiveHomeworkAssignment)/,
+  );
+  expect(source).not.toMatch(/teacherId\s*:\s*(data|payload|parsed\.data)\.teacherId/);
+}
+
+function expectHomeworkRevalidation(classGroupId = "class-1") {
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/teacher");
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/teacher/classes");
+  expect(revalidatePathMock).toHaveBeenCalledWith(`/portal/teacher/classes/${classGroupId}`);
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/teacher/assignments");
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/student");
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/student/assignments");
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/parent");
+}
+
+function expectHomeworkAudit(action: string) {
+  expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      action,
+      targetType: "homework",
+      actorId: "teacher-1",
+      meta: expect.objectContaining({ teacherId: "teacher-1" }),
+    }),
+    expect.anything(),
+  );
 }
 
 function expectRejectedAuthResult(result: unknown) {
@@ -62,6 +114,10 @@ describe("Teacher Homework Actions (RBAC + validation)", () => {
 
   it("uses enum-based teacher guards in source", () => {
     expectEnumTeacherGuardSource();
+  });
+
+  it("imports dedicated homework repository write helpers and does not trust hidden teacherId", () => {
+    expectDedicatedHomeworkRepositorySource();
   });
 
   it("blocks STUDENT from creating homework", async () => {
@@ -82,6 +138,7 @@ describe("Teacher Homework Actions (RBAC + validation)", () => {
     expect(result.success).toBe(false);
     expect(JSON.stringify(result)).toMatch(/forbidden|unauthorized/i);
     expect(createHomeworkAssignmentMock).not.toHaveBeenCalled();
+    expect(legacyCreateHomeworkAssignmentMock).not.toHaveBeenCalled();
     expect(requireRole).toHaveBeenCalledWith([UserRole.TEACHER]);
   });
 
@@ -105,6 +162,9 @@ describe("Teacher Homework Actions (RBAC + validation)", () => {
       expect(createHomeworkAssignmentMock).not.toHaveBeenCalled();
       expect(updateHomeworkAssignmentMock).not.toHaveBeenCalled();
       expect(archiveHomeworkAssignmentMock).not.toHaveBeenCalled();
+      expect(legacyCreateHomeworkAssignmentMock).not.toHaveBeenCalled();
+      expect(legacyUpdateHomeworkAssignmentMock).not.toHaveBeenCalled();
+      expect(legacyArchiveHomeworkAssignmentMock).not.toHaveBeenCalled();
     },
   );
 
@@ -164,6 +224,7 @@ describe("Teacher Homework Actions (RBAC + validation)", () => {
 
     const createResult = await createHomeworkAction({
       ...validHomeworkPayload,
+      teacherId: "teacher-2",
     });
     const editResult = await editHomeworkAction("hw-1", {
       title: "Updated Math Homework",
@@ -172,13 +233,75 @@ describe("Teacher Homework Actions (RBAC + validation)", () => {
     });
     const archiveResult = await archiveHomeworkAction("hw-1");
 
-    expect(createHomeworkAssignmentMock).toHaveBeenCalled();
-    expect(updateHomeworkAssignmentMock).toHaveBeenCalled();
+    expect(createHomeworkAssignmentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        teacherId: "teacher-1",
+        scheduledClassId: "class-1",
+        subjectId: "subject-math",
+      }),
+    );
+    expect(JSON.stringify(createHomeworkAssignmentMock.mock.calls[0][0])).not.toContain(
+      "teacher-2",
+    );
+    expect(updateHomeworkAssignmentMock).toHaveBeenCalledWith(
+      "hw-1",
+      "teacher-1",
+      expect.objectContaining({ title: "Updated Math Homework" }),
+    );
     expect(archiveHomeworkAssignmentMock).toHaveBeenCalledWith("hw-1", "teacher-1");
 
     expect(createResult.success).toBe(true);
     expect(editResult.success).toBe(true);
     expect(archiveResult.success).toBe(true);
+    expectHomeworkAudit("HOMEWORK_CREATED");
+    expectHomeworkAudit("HOMEWORK_UPDATED");
+    expectHomeworkAudit("HOMEWORK_ARCHIVED");
+    expectHomeworkRevalidation("class-1");
+  });
+
+  it("returns repository ownership errors for foreign classes without audit or revalidation", async () => {
+    createHomeworkAssignmentMock.mockRejectedValueOnce(
+      new Error("Unauthorized: teacher does not own this class"),
+    );
+
+    const result = await createHomeworkAction({
+      ...validHomeworkPayload,
+      classId: "foreign-class",
+      scheduledClassId: "foreign-class",
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: false,
+        error: expect.stringMatching(/unauthorized|own|class/i),
+      }),
+    );
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects archived assignment updates and foreign archives without audit", async () => {
+    updateHomeworkAssignmentMock.mockRejectedValueOnce(new Error("Assignment is archived"));
+    archiveHomeworkAssignmentMock.mockRejectedValueOnce(
+      new Error("Assignment not found or not owned by teacher"),
+    );
+
+    const updateResult = await editHomeworkAction("archived-hw", validHomeworkPayload);
+    const archiveResult = await archiveHomeworkAction("foreign-hw");
+
+    expect(updateResult).toEqual(
+      expect.objectContaining({
+        success: false,
+        error: expect.stringMatching(/archived/i),
+      }),
+    );
+    expect(archiveResult).toEqual(
+      expect.objectContaining({
+        success: false,
+        error: expect.stringMatching(/not found|not owned|unauthorized/i),
+      }),
+    );
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
   });
 
   it("returns validation error when required fields are missing", async () => {

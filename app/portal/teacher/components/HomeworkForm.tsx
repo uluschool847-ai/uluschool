@@ -14,18 +14,27 @@ type ClassOption = {
   name: string;
 };
 
+type SubjectOption = {
+  id: string;
+  name: string;
+};
+
 type HomeworkFormValues = {
   title: string;
   description: string;
   classId: string;
+  subjectId: string;
   dueDate: string;
 };
 
 type HomeworkFormProps = {
   mode: "create" | "edit";
   classes: ClassOption[];
+  subjects?: SubjectOption[];
   assignmentId?: string;
   initialValues?: Partial<HomeworkFormValues>;
+  cancelHref?: string;
+  disabled?: boolean;
 };
 
 type FormErrors = Partial<Record<keyof HomeworkFormValues | "form", string>>;
@@ -73,12 +82,21 @@ function normalizeActionError(error: unknown): FormErrors {
   return errors;
 }
 
-export function HomeworkForm({ mode, classes, assignmentId, initialValues }: HomeworkFormProps) {
+export function HomeworkForm({
+  mode,
+  classes,
+  subjects = [],
+  assignmentId,
+  initialValues,
+  cancelHref = "/portal/teacher/assignments",
+  disabled = false,
+}: HomeworkFormProps) {
   const router = useRouter();
   const [values, setValues] = useState<HomeworkFormValues>({
     title: initialValues?.title ?? "",
     description: initialValues?.description ?? "",
     classId: initialValues?.classId ?? "",
+    subjectId: initialValues?.subjectId ?? "",
     dueDate: initialValues?.dueDate ?? "",
   });
   const [errors, setErrors] = useState<FormErrors>({});
@@ -86,6 +104,7 @@ export function HomeworkForm({ mode, classes, assignmentId, initialValues }: Hom
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (disabled) return;
     const nextErrors = validate(values);
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
@@ -99,6 +118,7 @@ export function HomeworkForm({ mode, classes, assignmentId, initialValues }: Hom
       title: values.title,
       description: values.description,
       classId: values.classId,
+      subjectId: values.subjectId,
       dueDate: values.dueDate,
     };
 
@@ -109,12 +129,16 @@ export function HomeworkForm({ mode, classes, assignmentId, initialValues }: Hom
           : await submitHomeworkAction(payload);
 
       if (!result.success) {
-        setErrors(normalizeActionError(result.error));
+        setErrors(
+          typeof result.error === "string"
+            ? { form: result.error }
+            : normalizeActionError(result.error),
+        );
         setIsSubmitting(false);
         return;
       }
 
-      router.push("/portal/teacher");
+      router.push(cancelHref);
     } catch {
       setErrors({ form: normalizeActionResult(undefined).message });
       setIsSubmitting(false);
@@ -145,11 +169,12 @@ export function HomeworkForm({ mode, classes, assignmentId, initialValues }: Hom
       </div>
 
       <div>
-        <label htmlFor="homework-class">Class</label>
+        <label htmlFor="homework-class">Class / group</label>
         <select
           id="homework-class"
           name="classId"
           value={values.classId}
+          disabled={disabled}
           onChange={(event) => setValues((prev) => ({ ...prev, classId: event.target.value }))}
         >
           <option value="">Select class</option>
@@ -163,12 +188,31 @@ export function HomeworkForm({ mode, classes, assignmentId, initialValues }: Hom
       </div>
 
       <div>
+        <label htmlFor="homework-subject">Subject</label>
+        <select
+          id="homework-subject"
+          name="subjectId"
+          value={values.subjectId}
+          onChange={(event) => setValues((prev) => ({ ...prev, subjectId: event.target.value }))}
+        >
+          <option value="">No subject</option>
+          {subjects.map((subject) => (
+            <option key={subject.id} value={subject.id}>
+              {subject.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
         <label htmlFor="homework-due-date">Due Date</label>
         <input
           id="homework-due-date"
-          type="date"
+          type="text"
           name="dueDate"
+          placeholder="YYYY-MM-DD"
           value={values.dueDate}
+          disabled={disabled}
           onChange={(event) => setValues((prev) => ({ ...prev, dueDate: event.target.value }))}
         />
         {errors.dueDate ? <p role="alert">{errors.dueDate}</p> : null}
@@ -176,9 +220,10 @@ export function HomeworkForm({ mode, classes, assignmentId, initialValues }: Hom
 
       {errors.form ? <p role="alert">{errors.form}</p> : null}
 
-      <button type="submit" disabled={isSubmitting}>
+      <button type="submit" disabled={disabled || isSubmitting}>
         {mode === "edit" ? "Save Changes" : "Create Homework"}
       </button>
+      <a href={cancelHref}>Cancel</a>
     </form>
   );
 }

@@ -1,9 +1,9 @@
+import { UserRole } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let mockSession: { uid: string; role: string; email: string } | null = null;
-
-vi.mock("@/lib/auth/session", () => ({
-  requireRole: vi.fn(async (allowedRoles: string[]) => {
+const requireRoleMock = vi.hoisted(() =>
+  vi.fn(async (allowedRoles: string[]) => {
     if (!mockSession) {
       throw new Error("Unauthorized");
     }
@@ -12,11 +12,15 @@ vi.mock("@/lib/auth/session", () => ({
     }
     return mockSession;
   }),
+);
+
+vi.mock("@/lib/auth/session", () => ({
+  requireRole: requireRoleMock,
 }));
 
 const listStudentCourseMaterialsMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/repositories/portal-repository", () => ({
+vi.mock("@/lib/repositories/course-material-repository", () => ({
   listStudentCourseMaterials: listStudentCourseMaterialsMock,
 }));
 
@@ -28,7 +32,15 @@ describe("Student material action integration", () => {
     mockSession = { uid: "student-101", role: "STUDENT", email: "student@test.local" };
   });
 
-  it("allows only STUDENT role to fetch materials", async () => {
+  it("uses the UserRole.STUDENT enum guard", async () => {
+    listStudentCourseMaterialsMock.mockResolvedValue([]);
+
+    await getStudentMaterialsAction();
+
+    expect(requireRoleMock).toHaveBeenCalledWith([UserRole.STUDENT]);
+  });
+
+  it("requires the STUDENT enum guard to fetch materials", async () => {
     const blockedRoles: Array<{ role: string; session: typeof mockSession }> = [
       {
         role: "TEACHER",
@@ -59,9 +71,25 @@ describe("Student material action integration", () => {
         title: "Chemistry Bonding Notes",
         description: "Read before next lesson.",
         fileUrl: "https://cdn.school/chem-bonding.pdf",
+        safeFileUrl: "https://cdn.school/chem-bonding.pdf",
+        attachments: [
+          {
+            filename: "bonding-lab.pdf",
+            href: "/uploads/materials/bonding-lab.pdf",
+            mimeType: "application/pdf",
+            size: 4096,
+          },
+        ],
         scheduledClassId: "class-chem-1",
-        scheduledClass: { title: "IGCSE Chemistry - Group A" },
+        scheduledClass: {
+          id: "class-chem-1",
+          title: "IGCSE Chemistry - Group A",
+          startAt: new Date("2026-06-10T10:00:00.000Z"),
+        },
+        classGroup: { id: "group-chem-a", name: "Chemistry Group A" },
         subject: { name: "Chemistry" },
+        createdAt: new Date("2026-06-01T09:00:00.000Z"),
+        updatedAt: new Date("2026-06-02T09:00:00.000Z"),
       },
     ]);
 
@@ -72,11 +100,44 @@ describe("Student material action integration", () => {
     expect(result.data).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          attachments: [
+            expect.objectContaining({
+              filename: "bonding-lab.pdf",
+              href: "/uploads/materials/bonding-lab.pdf",
+            }),
+          ],
+          classGroup: { id: "group-chem-a", name: "Chemistry Group A" },
+          scheduledClass: expect.objectContaining({ id: "class-chem-1" }),
+          subject: { name: "Chemistry" },
           title: "Chemistry Bonding Notes",
-          fileUrl: "https://cdn.school/chem-bonding.pdf",
+          safeFileUrl: "https://cdn.school/chem-bonding.pdf",
         }),
       ]),
     );
     expect(JSON.stringify(result.data)).toMatch(/chemistry|group a/i);
+  });
+
+  it("uses session.uid, forwards filters, and ignores client-provided studentId", async () => {
+    listStudentCourseMaterialsMock.mockResolvedValue([]);
+
+    await (getStudentMaterialsAction as (filters: Record<string, unknown>) => Promise<unknown>)({
+      classGroupId: "group-1",
+      scheduledClassId: "lesson-1",
+      search: "bonding",
+      sort: "subject",
+      studentId: "student-other",
+      subjectId: "subject-chem",
+    });
+
+    expect(listStudentCourseMaterialsMock).toHaveBeenCalledWith("student-101", {
+      classGroupId: "group-1",
+      scheduledClassId: "lesson-1",
+      search: "bonding",
+      sort: "subject",
+      subjectId: "subject-chem",
+    });
+    expect(JSON.stringify(listStudentCourseMaterialsMock.mock.calls[0])).not.toContain(
+      "student-other",
+    );
   });
 });

@@ -47,12 +47,38 @@ function lessonDetail(overrides: Record<string, unknown> = {}) {
     level: { id: "level-igcse", name: "IGCSE", slug: "igcse" },
     teacher: { id: "teacher-1", fullName: "Jane Teacher", email: "jane@example.com" },
     classGroup: { id: "group-1", name: "IGCSE Mathematics Group A" },
+    attendance: {
+      id: "attendance-1",
+      status: "LATE",
+      lateMinutes: 7,
+      reason: "Transport delay",
+      markedAt: new Date("2026-06-10T10:12:00.000Z"),
+    },
     cancelReason: "Teacher unavailable",
     rescheduledFromId: null,
     materialsCount: 2,
     materials: [
-      { id: "material-1", title: "Quadratics worksheet", url: "https://cdn.example.com/ws.pdf" },
-      { id: "material-2", title: "Graphing notes", url: null },
+      {
+        id: "material-1",
+        title: "Quadratics worksheet",
+        url: "https://cdn.example.com/ws.pdf",
+        safeFileUrl: "https://cdn.example.com/ws.pdf",
+        attachments: [
+          {
+            filename: "quadratics-extra.pdf",
+            href: "/uploads/materials/quadratics-extra.pdf",
+            mimeType: "application/pdf",
+            size: 1234,
+          },
+        ],
+      },
+      {
+        id: "material-2",
+        title: "Graphing notes",
+        url: "/uploads/materials/graphing-notes.pdf",
+        safeFileUrl: "/uploads/materials/graphing-notes.pdf",
+        attachments: [],
+      },
     ],
     assignments: [
       {
@@ -62,6 +88,7 @@ function lessonDetail(overrides: Record<string, unknown> = {}) {
         submissionStatus: "GRADED",
         submissionId: "submission-1",
         grade: 92,
+        feedback: "Strong structure. Improve final explanation.",
       },
       {
         id: "assignment-2",
@@ -115,11 +142,32 @@ describe("Student schedule lesson detail page", () => {
     expect(screen.getByText(/focus on factoring strategies/i)).toBeDefined();
     expect(screen.getByText(/quadratics worksheet/i)).toBeDefined();
     expect(screen.getByText(/graphing notes/i)).toBeDefined();
+    expect(screen.getByRole("link", { name: /quadratics worksheet/i })).toHaveAttribute(
+      "href",
+      "https://cdn.example.com/ws.pdf",
+    );
+    expect(screen.getByRole("link", { name: /graphing notes/i })).toHaveAttribute(
+      "href",
+      "/uploads/materials/graphing-notes.pdf",
+    );
+    expect(screen.getByRole("link", { name: /quadratics-extra\.pdf/i })).toHaveAttribute(
+      "href",
+      "/uploads/materials/quadratics-extra.pdf",
+    );
+    expect(screen.getByRole("link", { name: /view all materials/i })).toHaveAttribute(
+      "href",
+      "/portal/student/materials?scheduledClassId=lesson-1",
+    );
     expect(screen.getByText(/quadratics homework/i)).toBeDefined();
     expect(screen.getByText(/extra practice/i)).toBeDefined();
     expect(screen.getByText(/graded/i)).toBeDefined();
     expect(screen.getByText(/92/)).toBeDefined();
+    expect(screen.getByText(/strong structure/i)).toBeDefined();
     expect(screen.getByText(/not submitted/i)).toBeDefined();
+    expect(screen.getByRole("link", { name: /view attendance history/i })).toHaveAttribute(
+      "href",
+      "/portal/student/attendance?scheduledClassId=lesson-1",
+    );
     expect(screen.getByText("Lesson is cancelled")).toBeDefined();
     expect(screen.queryByRole("link", { name: /join lesson/i })).toBeNull();
   });
@@ -149,6 +197,76 @@ describe("Student schedule lesson detail page", () => {
     expect(container.textContent).not.toContain("https://meet.google.com/abc-defg-hij");
   });
 
+  it("shows grade without feedback when graded submission feedback is null", async () => {
+    getStudentScheduleLessonMock.mockResolvedValueOnce(
+      lessonDetail({
+        assignments: [
+          {
+            id: "assignment-1",
+            title: "Quadratics homework",
+            dueDate: new Date("2026-06-12T20:00:00.000Z"),
+            submissionStatus: "GRADED",
+            submissionId: "submission-1",
+            grade: 88,
+            feedback: null,
+          },
+        ],
+      }),
+    );
+
+    const page = await loadStudentScheduleDetailPage();
+    const element = await page.default({ params: { lessonId: "lesson-1" } });
+    render(element);
+
+    expect(screen.getByText(/graded/i)).toBeDefined();
+    expect(screen.getByText(/88/)).toBeDefined();
+    expect(screen.queryByText(/feedback:/i)).toBeNull();
+    expect(screen.queryByText(/strong structure/i)).toBeNull();
+  });
+
+  it("shows only the signed-in student's own lesson attendance", async () => {
+    getStudentScheduleLessonMock.mockResolvedValueOnce(
+      lessonDetail({
+        attendance: {
+          id: "attendance-1",
+          lateMinutes: 7,
+          markedAt: new Date("2026-06-10T10:12:00.000Z"),
+          reason: "Transport delay",
+          status: "LATE",
+        },
+      }),
+    );
+
+    const page = await loadStudentScheduleDetailPage();
+    const element = await page.default({ params: { lessonId: "lesson-1" } });
+    render(element);
+
+    expect(screen.getByRole("heading", { name: /attendance/i })).toBeDefined();
+    expect(screen.getByText(/attendance:\s*late/i)).toBeDefined();
+    expect(screen.getByText(/late minutes:\s*7/i)).toBeDefined();
+    expect(screen.getByText(/transport delay/i)).toBeDefined();
+    expect(screen.getByText(/marked/i)).toBeDefined();
+    expect(screen.getByRole("link", { name: /view attendance history/i })).toHaveAttribute(
+      "href",
+      "/portal/student/attendance?scheduledClassId=lesson-1",
+    );
+    expect(screen.queryByText(/other student attendance/i)).toBeNull();
+  });
+
+  it("keeps the attendance section visible with a clear empty state when attendance is unmarked", async () => {
+    getStudentScheduleLessonMock.mockResolvedValueOnce(lessonDetail({ attendance: null }));
+
+    const page = await loadStudentScheduleDetailPage();
+    const element = await page.default({ params: { lessonId: "lesson-1" } });
+    render(element);
+
+    const attendanceSection = screen.getByRole("region", { name: /attendance/i });
+    expect(within(attendanceSection).getByText(/attendance has not been marked/i)).toBeDefined();
+    expect(
+      within(attendanceSection).getByRole("link", { name: /view attendance history/i }),
+    ).toHaveAttribute("href", "/portal/student/attendance?scheduledClassId=lesson-1");
+  });
+
   it("calls notFound when the repository returns null for another student's lesson", async () => {
     getStudentScheduleLessonMock.mockResolvedValueOnce(null);
 
@@ -171,5 +289,55 @@ describe("Student schedule lesson detail page", () => {
       "NEXT_NOT_FOUND",
     );
     expect(screen.queryByText(/private lesson/i)).toBeNull();
+  });
+
+  it("does not render unsafe lesson material URLs as active links", async () => {
+    getStudentScheduleLessonMock.mockResolvedValueOnce(
+      lessonDetail({
+        materials: [
+          {
+            id: "material-unsafe-js",
+            title: "Unsafe javascript worksheet",
+            url: "javascript:alert(1)",
+            attachments: [{ filename: "unsafe-js.pdf", href: "javascript:alert(2)" }],
+          },
+          {
+            id: "material-unsafe-data",
+            title: "Unsafe data notes",
+            url: "data:text/html,<h1>unsafe</h1>",
+            attachments: [{ filename: "unsafe-data.pdf", href: "data:text/plain,unsafe" }],
+          },
+          {
+            id: "material-unsafe-file",
+            title: "Unsafe file notes",
+            url: "file:///etc/passwd",
+            attachments: [{ filename: "unsafe-file.pdf", href: "file:///etc/passwd" }],
+          },
+          {
+            id: "material-unsafe-http",
+            title: "Unsafe http notes",
+            url: "http://cdn.example.com/insecure.pdf",
+            attachments: [{ filename: "unsafe-http.pdf", href: "http://cdn.example.com/a.pdf" }],
+          },
+        ],
+      }),
+    );
+
+    const page = await loadStudentScheduleDetailPage();
+    const element = await page.default({ params: { lessonId: "lesson-1" } });
+    const { container } = render(element);
+
+    expect(screen.getByText(/unsafe javascript worksheet/i)).toBeDefined();
+    expect(screen.getByText(/unsafe data notes/i)).toBeDefined();
+    expect(screen.getByText(/unsafe file notes/i)).toBeDefined();
+    expect(screen.getByText(/unsafe http notes/i)).toBeDefined();
+    expect(screen.queryByRole("link", { name: /unsafe javascript worksheet/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /unsafe data notes/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /unsafe file notes/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /unsafe http notes/i })).toBeNull();
+    expect(container.textContent).not.toContain("javascript:alert");
+    expect(container.textContent).not.toContain("data:text");
+    expect(container.textContent).not.toContain("file://");
+    expect(container.textContent).not.toContain("http://cdn.example.com");
   });
 });

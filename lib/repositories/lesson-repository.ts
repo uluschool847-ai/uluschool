@@ -9,6 +9,8 @@ import {
 import { assertValidLessonStatusTransition, parseLessonStatus } from "@/lib/lessons/lesson-status";
 import { validateLiveLessonUrl } from "@/lib/lessons/live-lesson-url";
 import { prisma } from "@/lib/prisma";
+import { checkTeacherAvailability } from "@/lib/repositories/teacher-availability-repository";
+import { localDateTimeToUtc } from "@/lib/scheduling/availability";
 
 type LessonDatabase = typeof prisma | Prisma.TransactionClient;
 
@@ -764,15 +766,35 @@ function parseTimeParts(value: string) {
   return { hour, minute };
 }
 
-function buildDateAtTime(date: Date, time: string) {
+function localDateLabel(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function buildDateAtTime(date: Date, time: string, timezone = "Europe/Kiev") {
   const { hour, minute } = parseTimeParts(time);
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), hour, minute, 0, 0),
-  );
+  return localDateTimeToUtc({
+    value: `${localDateLabel(date)}T${hour.toString().padStart(2, "0")}:${minute
+      .toString()
+      .padStart(2, "0")}`,
+    timezone,
+  });
 }
 
 function sameDayAndTimeKey(date: Date) {
   return date.toISOString().slice(0, 16);
+}
+
+function availabilityFailureMessage(reason: string) {
+  if (reason === "OUTSIDE_AVAILABILITY") {
+    return "Teacher is not available at this time. The lesson is outside weekly availability.";
+  }
+  if (reason === "UNAVAILABLE_PERIOD") {
+    return "Teacher is not available at this time. The lesson overlaps an unavailable period.";
+  }
+  if (reason === "ALREADY_BOOKED") {
+    return "Teacher is not available at this time. The teacher is already booked.";
+  }
+  return "Teacher is not available at this time.";
 }
 
 export async function createRecurringLessons(
@@ -785,8 +807,8 @@ export async function createRecurringLessons(
     {
       classGroupId: input.classGroupId,
       title: input.title,
-      startAt: buildDateAtTime(input.startDate, input.startTime),
-      endAt: buildDateAtTime(input.startDate, input.endTime),
+      startAt: buildDateAtTime(input.startDate, input.startTime, input.timezone),
+      endAt: buildDateAtTime(input.startDate, input.endTime, input.timezone),
       teacherId: input.teacherId,
       subjectId: input.subjectId,
       liveLessonUrl: input.liveLessonUrl,
@@ -814,36 +836,50 @@ export async function createRecurringLessons(
   endDate.setUTCHours(23, 59, 59, 999);
   while (cursor <= endDate) {
     if (input.weekdays.includes(cursor.getUTCDay())) {
-      const startAt = buildDateAtTime(cursor, input.startTime);
-      const endAt = buildDateAtTime(cursor, input.endTime);
+      const startAt = buildDateAtTime(cursor, input.startTime, input.timezone);
+      const endAt = buildDateAtTime(cursor, input.endTime, input.timezone);
       ensureValidTimeRange(startAt, endAt);
       dates.push({ startAt, endAt });
     }
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
 
-  const createRows = dates
-    .filter(({ startAt }) => !existingKeys.has(sameDayAndTimeKey(startAt)))
-    .map(({ startAt, endAt }) => {
-      const meetingTimestamp = new Date();
+  const newDates = dates.filter(({ startAt }) => !existingKeys.has(sameDayAndTimeKey(startAt)));
 
-      return {
-        classGroupId: input.classGroupId,
-        title: input.title.trim(),
-        description: input.description?.trim() || null,
+  for (const { startAt, endAt } of newDates) {
+    const availability = await checkTeacherAvailability(
+      {
+        teacherId,
         startAt,
         endAt,
-        timezone: input.timezone || "Europe/Kiev",
-        status: LessonStatus.SCHEDULED,
-        liveLessonUrl,
-        meetingProvider,
-        meetingCreatedAt: meetingTimestamp,
-        meetingUpdatedAt: meetingTimestamp,
-        teacherId,
-        subjectId,
-        reminderMinutesBefore: 60,
-      };
-    });
+      },
+      database,
+    );
+    if (!availability.available) {
+      throw new Error(availabilityFailureMessage(availability.reason));
+    }
+  }
+
+  const createRows = newDates.map(({ startAt, endAt }) => {
+    const meetingTimestamp = new Date();
+
+    return {
+      classGroupId: input.classGroupId,
+      title: input.title.trim(),
+      description: input.description?.trim() || null,
+      startAt,
+      endAt,
+      timezone: input.timezone || "Europe/Kiev",
+      status: LessonStatus.SCHEDULED,
+      liveLessonUrl,
+      meetingProvider,
+      meetingCreatedAt: meetingTimestamp,
+      meetingUpdatedAt: meetingTimestamp,
+      teacherId,
+      subjectId,
+      reminderMinutesBefore: 60,
+    };
+  });
 
   if (createRows.length > 0) {
     await database.scheduledClass.createMany({ data: createRows });

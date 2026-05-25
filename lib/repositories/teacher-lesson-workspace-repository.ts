@@ -75,6 +75,14 @@ type LessonRecord = {
     students?: StudentRecord[];
   } | null;
   students?: StudentRecord[];
+  attendanceRecords?: Array<{
+    id: string;
+    studentId: string;
+    status: string;
+    lateMinutes?: number | null;
+    reason?: string | null;
+    markedAt?: Date | null;
+  }>;
   courseMaterials?: MaterialRecord[];
   assignments?: AssignmentRecord[];
 };
@@ -112,10 +120,10 @@ export type TeacherLessonWorkspace = {
   navigationHrefs: {
     backToSchedule: string;
     classDetail: string | DisabledAction;
-    submissions: DisabledAction;
+    submissions: LinkAction;
     progress: DisabledAction;
-    materials: DisabledAction;
-    attendance: DisabledAction;
+    materials: LinkAction;
+    attendance: LinkAction;
   };
   roster: Array<{
     id: string;
@@ -124,6 +132,13 @@ export type TeacherLessonWorkspace = {
     isActive: boolean;
     learningStatus: string | null;
     submissionStatus: "graded" | "not-submitted" | "pending";
+    attendance: {
+      id: string;
+      status: string;
+      lateMinutes: number | null;
+      reason: string | null;
+      markedAt: Date | null;
+    } | null;
   }>;
   materials: Array<{
     id: string;
@@ -141,7 +156,7 @@ export type TeacherLessonWorkspace = {
     dueState: "active" | "archived" | "due-soon" | "overdue";
     submissionsCount: number;
     pendingSubmissionsCount: number;
-    review: DisabledAction;
+    review: LinkAction;
   }>;
   submissions: Array<{
     id: string;
@@ -151,7 +166,7 @@ export type TeacherLessonWorkspace = {
     grade: number | null;
     feedback: string | null;
     status: "graded" | "pending";
-    review: DisabledAction;
+    review: LinkAction;
   }>;
   gradingSummary: {
     totalSubmissions: number;
@@ -160,9 +175,9 @@ export type TeacherLessonWorkspace = {
   };
   progressSummary: DisabledAction & { count: number };
   attendanceSummary: {
-    disabled: true;
-    hidden: true;
-    reason: string;
+    disabled: boolean;
+    hidden: boolean;
+    reason: string | null;
   };
 };
 
@@ -245,6 +260,16 @@ function lessonInclude() {
       },
       orderBy: { dueDate: "asc" as const },
     },
+    attendanceRecords: {
+      select: {
+        id: true,
+        studentId: true,
+        status: true,
+        lateMinutes: true,
+        reason: true,
+        markedAt: true,
+      },
+    },
   };
 }
 
@@ -325,6 +350,9 @@ function mapWorkspace(lesson: LessonRecord): TeacherLessonWorkspace {
       review: disabled("Teacher submission detail route is not implemented"),
     })),
   );
+  const attendanceByStudentId = new Map(
+    (lesson.attendanceRecords ?? []).map((record) => [record.studentId, record]),
+  );
   const pendingSubmissions = submissions.filter((submission) => submission.status === "pending");
   const classDetailHref = lesson.classGroup
     ? `/portal/teacher/classes/${lesson.classGroup.id}`
@@ -364,10 +392,22 @@ function mapWorkspace(lesson: LessonRecord): TeacherLessonWorkspace {
     navigationHrefs: {
       backToSchedule: "/portal/teacher/schedule",
       classDetail: classDetailHref ?? disabled("Lesson is not tied to a class group"),
-      submissions: disabled("Teacher submissions route is not implemented"),
+      submissions: {
+        disabled: false,
+        href: `/portal/teacher/submissions?scheduledClassId=${lesson.id}`,
+        label: "Review Submissions",
+      },
       progress: disabled("Teacher progress route is not implemented"),
-      materials: disabled("Teacher materials route is not implemented"),
-      attendance: disabled("Attendance module is not implemented"),
+      materials: {
+        disabled: false,
+        href: `/portal/teacher/materials?scheduledClassId=${lesson.id}`,
+        label: "Materials",
+      },
+      attendance: {
+        disabled: false,
+        href: `/portal/teacher/lessons/${lesson.id}#attendance`,
+        label: "Attendance",
+      },
     },
     roster: rosterSource.map((student) => ({
       id: student.id,
@@ -376,6 +416,15 @@ function mapWorkspace(lesson: LessonRecord): TeacherLessonWorkspace {
       isActive: student.isActive ?? true,
       learningStatus: student.learningStatus ?? null,
       submissionStatus: submissionStatusForStudent(assignments, student.id),
+      attendance: attendanceByStudentId.get(student.id)
+        ? {
+            id: attendanceByStudentId.get(student.id)?.id ?? "",
+            status: attendanceByStudentId.get(student.id)?.status ?? "",
+            lateMinutes: attendanceByStudentId.get(student.id)?.lateMinutes ?? null,
+            reason: attendanceByStudentId.get(student.id)?.reason ?? null,
+            markedAt: attendanceByStudentId.get(student.id)?.markedAt ?? null,
+          }
+        : null,
     })),
     materials: (lesson.courseMaterials ?? []).map((material) => ({
       id: material.id,
@@ -397,7 +446,11 @@ function mapWorkspace(lesson: LessonRecord): TeacherLessonWorkspace {
         pendingSubmissionsCount: assignmentSubmissions.filter(
           (submission) => submission.grade === null,
         ).length,
-        review: disabled("Teacher submissions route is not implemented"),
+        review: {
+          disabled: false,
+          href: `/portal/teacher/submissions?assignmentId=${assignment.id}`,
+          label: "Review assignment work",
+        },
       };
     }),
     submissions,
@@ -411,9 +464,9 @@ function mapWorkspace(lesson: LessonRecord): TeacherLessonWorkspace {
       count: 0,
     },
     attendanceSummary: {
-      disabled: true,
-      hidden: true,
-      reason: "Attendance module is not implemented",
+      disabled: false,
+      hidden: false,
+      reason: null,
     },
   };
 }

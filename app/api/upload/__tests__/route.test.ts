@@ -145,6 +145,52 @@ describe("app/api/upload/route local-first upload integration", () => {
     });
   });
 
+  it.each([
+    ["PDF", "worksheet.pdf", "application/pdf"],
+    ["DOC", "lesson.doc", "application/msword"],
+    [
+      "DOCX",
+      "lesson.docx",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ],
+    ["PPT", "slides.ppt", "application/vnd.ms-powerpoint"],
+    [
+      "PPTX",
+      "slides.pptx",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ],
+    ["ZIP", "materials.zip", "application/zip"],
+    ["PNG image", "diagram.png", "image/png"],
+  ])("accepts allowed course material MIME type: %s", async (_label, filename, mimeType) => {
+    uploadMock.mockResolvedValueOnce(`uploads/teacher/${filename}`);
+    getURLMock.mockReturnValueOnce(`/uploads/teacher/${filename}`);
+
+    const { POST } = await import("@/app/api/upload/route");
+
+    const form = new FormData();
+    form.append("file", new File(["content"], filename, { type: mimeType }), filename);
+
+    const response = await POST(
+      new Request("http://localhost/api/upload", {
+        method: "POST",
+        headers: { "x-role": "TEACHER" },
+        body: form,
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({
+        success: true,
+        storageKey: `uploads/teacher/${filename}`,
+        publicUrl: `/uploads/teacher/${filename}`,
+        filename,
+        mimeType,
+        size: expect.any(Number),
+      }),
+    );
+  });
+
   it("rejects file over 5MB", async () => {
     const { POST } = await import("@/app/api/upload/route");
 
@@ -284,6 +330,40 @@ describe("app/api/upload/route local-first upload integration", () => {
     const payload = await response.json();
     expect(payload.fileId).not.toMatch(/\.\./);
     expect(payload.url).toMatch(/^\/(public\/)?uploads\//i);
+  });
+
+  it("returns upload metadata using storageKey/publicUrl rather than trusting path traversal filename", async () => {
+    uploadMock.mockResolvedValueOnce("uploads/teacher/safe-secret.pdf");
+    getURLMock.mockReturnValueOnce("/uploads/teacher/safe-secret.pdf");
+
+    const { POST } = await import("@/app/api/upload/route");
+
+    const form = new FormData();
+    form.append(
+      "file",
+      new File(["pdf"], "..\\..\\secret.pdf", { type: "application/pdf" }),
+      "..\\..\\secret.pdf",
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/upload", {
+        method: "POST",
+        headers: { "x-role": "TEACHER" },
+        body: form,
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({
+        success: true,
+        storageKey: "uploads/teacher/safe-secret.pdf",
+        publicUrl: "/uploads/teacher/safe-secret.pdf",
+        filename: "safe-secret.pdf",
+        mimeType: "application/pdf",
+        size: expect.any(Number),
+      }),
+    );
   });
 
   it("returns 507 when underlying storage reports disk full", async () => {

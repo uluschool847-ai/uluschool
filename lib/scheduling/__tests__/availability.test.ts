@@ -193,4 +193,64 @@ describe("teacher availability scheduling utilities", () => {
       ),
     ).toBe(false);
   });
+
+  it.each([
+    {
+      label: "lesson fully inside unavailable period",
+      startAt: "2026-06-01T10:15:00.000Z",
+      endAt: "2026-06-01T10:45:00.000Z",
+    },
+    {
+      label: "lesson starts before period and ends inside",
+      startAt: "2026-06-01T09:30:00.000Z",
+      endAt: "2026-06-01T10:30:00.000Z",
+    },
+    {
+      label: "lesson starts inside period and ends after",
+      startAt: "2026-06-01T10:30:00.000Z",
+      endAt: "2026-06-01T11:30:00.000Z",
+    },
+    {
+      label: "lesson fully covers unavailable period",
+      startAt: "2026-06-01T09:30:00.000Z",
+      endAt: "2026-06-01T11:30:00.000Z",
+    },
+  ])("blocks $label", async ({ startAt, endAt }) => {
+    const { isTeacherBlockedByUnavailablePeriod } = await loadAvailabilityUtils();
+    const periods = [
+      {
+        startAt: new Date("2026-06-01T10:00:00.000Z"),
+        endAt: new Date("2026-06-01T11:00:00.000Z"),
+      },
+    ];
+
+    expect(isTeacherBlockedByUnavailablePeriod(new Date(startAt), new Date(endAt), periods)).toBe(
+      true,
+    );
+  });
+
+  it("does not block lessons that exactly touch unavailable period boundaries", async () => {
+    const { isTeacherBlockedByUnavailablePeriod } = await loadAvailabilityUtils();
+    const periods = [
+      {
+        startAt: new Date("2026-06-01T10:00:00.000Z"),
+        endAt: new Date("2026-06-01T11:00:00.000Z"),
+      },
+    ];
+
+    expect(
+      isTeacherBlockedByUnavailablePeriod(
+        new Date("2026-06-01T09:00:00.000Z"),
+        new Date("2026-06-01T10:00:00.000Z"),
+        periods,
+      ),
+    ).toBe(false);
+    expect(
+      isTeacherBlockedByUnavailablePeriod(
+        new Date("2026-06-01T11:00:00.000Z"),
+        new Date("2026-06-01T12:00:00.000Z"),
+        periods,
+      ),
+    ).toBe(false);
+  });
 });

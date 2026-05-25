@@ -201,7 +201,9 @@ function LessonCard({
         <div className="flex flex-wrap gap-2">
           <TeacherStartLessonButton provider={startProvider} startState={normalizedStartState} />
           <Button asChild variant="secondary" size="sm">
-            <Link href={detailHref}>{detailsLabel}</Link>
+            <Link href={detailHref} aria-label={detailsLabel}>
+              {detailsLabel}
+            </Link>
           </Button>
         </div>
       </div>
@@ -333,6 +335,8 @@ export default async function TeacherPortalDashboard() {
                 }>;
                 const className = item.name ?? item.classGroup?.name ?? item.title;
                 const hasDashboardNextLesson = Boolean(item.nextLesson);
+                const hasStandaloneLessonCards =
+                  dashboard.todayLessons.length > 0 || dashboard.upcomingLessons.length > 0;
                 const nextLesson =
                   item.nextLesson ??
                   (legacyItem.startAt && legacyItem.endAt
@@ -432,16 +436,25 @@ export default async function TeacherPortalDashboard() {
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Button asChild variant="secondary" size="sm">
-                          <Link href={detailHref}>View Class - {className}</Link>
+                          <Link href={detailHref} aria-label={`View Class ${className}`}>
+                            View Class - {className}
+                          </Link>
                         </Button>
                         <Button asChild variant="secondary" size="sm">
-                          <Link href={scheduleHref}>Schedule - {className}</Link>
+                          <Link href={scheduleHref} aria-label={`Schedule ${className}`}>
+                            Schedule - {className}
+                          </Link>
                         </Button>
                         {nextLesson ? (
                           <Button asChild variant="secondary" size="sm">
-                            <Link href={nextLesson.detailHref}>
-                              {hasDashboardNextLesson ? "Open Details" : "Lesson Details"} -{" "}
-                              {nextLesson.title}
+                            <Link
+                              href={nextLesson.detailHref}
+                              aria-label={`${hasStandaloneLessonCards ? "Lesson Details" : "Open Details"} ${nextLesson.title}`}
+                            >
+                              {hasDashboardNextLesson && !hasStandaloneLessonCards
+                                ? "Open Details"
+                                : "Lesson Details"}{" "}
+                              - {nextLesson.title}
                             </Link>
                           </Button>
                         ) : null}
@@ -637,6 +650,18 @@ export default async function TeacherPortalDashboard() {
           </Button>
           <Button asChild variant="secondary" size="sm">
             <Link href="/portal/teacher/availability">Availability</Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm">
+            <Link href="/portal/teacher/assignments">Assignments</Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm">
+            <Link href="/portal/teacher/submissions">Submissions</Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm">
+            <Link href="/portal/teacher/progress">Progress</Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm">
+            <Link href="/portal/teacher/materials">Materials</Link>
           </Button>
         </div>
       </section>

@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const routerPushMock = vi.hoisted(() => vi.fn());
@@ -20,6 +21,15 @@ vi.mock("@/app/portal/teacher/actions/homework-actions", () => ({
 }));
 
 import { HomeworkForm } from "@/app/portal/teacher/components/HomeworkForm";
+
+const HomeworkFormWithPlannedProps = HomeworkForm as unknown as ComponentType<{
+  assignmentId?: string;
+  classes: Array<{ id: string; name: string }>;
+  initialValues?: Record<string, unknown>;
+  mode: "create" | "edit";
+  subjects?: Array<{ id: string; name: string }>;
+  cancelHref?: string;
+}>;
 
 describe("HomeworkForm", () => {
   beforeEach(() => {
@@ -46,6 +56,26 @@ describe("HomeworkForm", () => {
     expect(screen.getByLabelText(/due date/i)).toBeDefined();
   });
 
+  it("renders subject selection and cancel/back link in create mode", () => {
+    render(
+      <HomeworkFormWithPlannedProps
+        mode="create"
+        classes={[{ id: "class-1", name: "IGCSE Mathematics" }]}
+        subjects={[{ id: "subject-1", name: "Mathematics" }]}
+        cancelHref="/portal/teacher/assignments"
+      />,
+    );
+
+    expect(screen.getByLabelText(/subject/i)).toBeDefined();
+    expect(screen.getByRole("option", { name: /^mathematics$/i })).toBeDefined();
+    expect(screen.getByRole("link", { name: /cancel|back/i })).toHaveAttribute(
+      "href",
+      "/portal/teacher/assignments",
+    );
+    expect(screen.queryByDisplayValue(/teacher-/i)).toBeNull();
+    expect(document.querySelector('input[name="teacherId"]')).toBeNull();
+  });
+
   it("shows validation errors on empty submit", async () => {
     render(<HomeworkForm mode="create" classes={[{ id: "class-1", name: "IGCSE Mathematics" }]} />);
 
@@ -54,6 +84,30 @@ describe("HomeworkForm", () => {
     expect(await screen.findByText(/title is required/i)).toBeDefined();
     expect(await screen.findByText(/class is required/i)).toBeDefined();
     expect(await screen.findByText(/due date is required/i)).toBeDefined();
+  });
+
+  it("validates invalid due dates before calling the server action", async () => {
+    render(
+      <HomeworkFormWithPlannedProps
+        mode="create"
+        classes={[{ id: "class-1", name: "IGCSE Mathematics" }]}
+        subjects={[{ id: "subject-1", name: "Mathematics" }]}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "A valid title" },
+    });
+    fireEvent.change(screen.getByLabelText(/class/i), {
+      target: { value: "class-1" },
+    });
+    fireEvent.change(screen.getByLabelText(/due date/i), {
+      target: { value: "not-a-date" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create homework|save|submit/i }));
+
+    expect(await screen.findByText(/due date is invalid/i)).toBeDefined();
+    expect(submitHomeworkActionMock).not.toHaveBeenCalled();
   });
 
   it("calls submitHomeworkAction with payload for create mode", async () => {
@@ -113,5 +167,34 @@ describe("HomeworkForm", () => {
         title: "Final exam review pack",
       }),
     );
+  });
+
+  it("shows server action errors without navigating away", async () => {
+    submitHomeworkActionMock.mockResolvedValue({
+      success: false,
+      error: { title: ["Server says title is required"] },
+    });
+
+    render(
+      <HomeworkFormWithPlannedProps
+        mode="create"
+        classes={[{ id: "class-1", name: "IGCSE Mathematics" }]}
+        subjects={[{ id: "subject-1", name: "Mathematics" }]}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Temporary title" },
+    });
+    fireEvent.change(screen.getByLabelText(/class/i), {
+      target: { value: "class-1" },
+    });
+    fireEvent.change(screen.getByLabelText(/due date/i), {
+      target: { value: "2026-06-22" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create homework/i }));
+
+    expect(await screen.findByText(/server says title is required/i)).toBeDefined();
+    expect(routerPushMock).not.toHaveBeenCalled();
   });
 });

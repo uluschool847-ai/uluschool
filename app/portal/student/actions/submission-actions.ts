@@ -1,9 +1,11 @@
 "use server";
 
+import { UserRole } from "@prisma/client";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireRole } from "@/lib/auth/session";
-import { submitOrResubmitStudentWork } from "@/lib/repositories/portal-repository";
+import { submitOrResubmitStudentWork } from "@/lib/repositories/submission-repository";
 
 const submitWorkSchema = z.object({
   assignmentId: z.string().trim().min(1, "Assignment ID is required"),
@@ -32,7 +34,7 @@ type SubmitWorkResult =
 
 export async function submitWorkAction(payload: SubmitWorkPayload): Promise<SubmitWorkResult> {
   try {
-    const session = await requireRole(["STUDENT"]);
+    const session = await requireRole([UserRole.STUDENT]);
 
     const parsed = submitWorkSchema.safeParse(payload);
     if (!parsed.success) {
@@ -47,6 +49,13 @@ export async function submitWorkAction(payload: SubmitWorkPayload): Promise<Subm
       assignmentId: parsed.data.assignmentId,
       contentUrl: parsed.data.contentUrl,
     });
+
+    revalidatePath("/portal/student");
+    revalidatePath("/portal/student/assignments");
+    revalidatePath(`/portal/student/assignments/${parsed.data.assignmentId}`);
+    revalidatePath("/portal/parent");
+    revalidatePath("/portal/teacher");
+    revalidatePath("/portal/teacher/submissions");
 
     return {
       success: true,

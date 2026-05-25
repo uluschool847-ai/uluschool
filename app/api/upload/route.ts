@@ -5,6 +5,10 @@ import { createStorageService } from "@/lib/storage";
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set([
   "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "application/zip",
   "application/x-zip-compressed",
   "image/png",
@@ -26,10 +30,37 @@ function isAllowedMime(type: string) {
   return ALLOWED_MIME_TYPES.has(type);
 }
 
+function sanitizeFilename(raw: string) {
+  const parts = raw.split(/[\\/]+/);
+  const base = parts.at(-1) ?? "file";
+  const clean = base.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/-+/g, "-");
+  return clean || "file";
+}
+
+function filenameFromStorageKey(storageKey: string) {
+  return sanitizeFilename(storageKey.split(/[\\/]+/).at(-1) ?? "file");
+}
+
+function responseFilename(file: FileLike, storageKey: string) {
+  const filename = sanitizeFilename(file.name);
+  return filename === "blob" ? filenameFromStorageKey(storageKey) : filename;
+}
+
 type FileLike = {
   name: string;
   size: number;
   type: string;
+};
+
+type UploadedFilePayload = {
+  fileId: string;
+  url: string;
+  name: string;
+  filename?: string;
+  mimeType?: string;
+  publicUrl?: string;
+  size?: number;
+  storageKey?: string;
 };
 
 function isFileLike(value: unknown): value is FileLike & File {
@@ -48,6 +79,34 @@ function getStatusForUploadError(message: string) {
   if (/empty|zero/i.test(message)) return 400;
   if (/enospc|no space left/i.test(message)) return 507;
   return 500;
+}
+
+function uploadSuccessPayload(input: {
+  filename: string;
+  mimeType: string;
+  role: string | null;
+  size: number;
+  storageKey: string;
+  publicUrl: string;
+}) {
+  const legacy = {
+    success: true,
+    fileId: input.storageKey,
+    url: input.publicUrl,
+  };
+
+  if (input.role?.toUpperCase() !== "TEACHER") {
+    return legacy;
+  }
+
+  return {
+    ...legacy,
+    storageKey: input.storageKey,
+    publicUrl: input.publicUrl,
+    filename: input.filename,
+    mimeType: input.mimeType,
+    size: input.size,
+  };
 }
 
 export async function POST(request: Request) {
@@ -82,8 +141,7 @@ export async function POST(request: Request) {
 
   if (effectiveFiles.length === 1) {
     const current = effectiveFiles[0];
-    const bytes = Buffer.from(await current.arrayBuffer());
-    const fileSize = bytes.byteLength;
+    const fileSize = current.size;
     if (fileSize <= 0) {
       return NextResponse.json({ success: false, error: "File is empty" }, { status: 400 });
     }
@@ -100,7 +158,17 @@ export async function POST(request: Request) {
     try {
       const fileId = await service.upload(current);
       const url = service.getURL(fileId);
-      return NextResponse.json({ success: true, fileId, url }, { status: 201 });
+      return NextResponse.json(
+        uploadSuccessPayload({
+          role,
+          storageKey: fileId,
+          publicUrl: url,
+          filename: responseFilename(current, fileId),
+          mimeType: current.type,
+          size: fileSize,
+        }),
+        { status: 201 },
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
       const status = getStatusForUploadError(message);
@@ -109,12 +177,11 @@ export async function POST(request: Request) {
     }
   }
 
-  const uploaded: Array<{ fileId: string; url: string; name: string }> = [];
+  const uploaded: UploadedFilePayload[] = [];
   const failed: Array<{ name: string; error: string }> = [];
 
   for (const current of effectiveFiles) {
-    const bytes = Buffer.from(await current.arrayBuffer());
-    const fileSize = bytes.byteLength;
+    const fileSize = current.size;
 
     if (fileSize <= 0) {
       failed.push({ name: current.name, error: "File is empty" });
@@ -131,10 +198,16 @@ export async function POST(request: Request) {
 
     try {
       const fileId = await service.upload(current);
+      const url = service.getURL(fileId);
       uploaded.push({
         fileId,
-        url: service.getURL(fileId),
-        name: current.name,
+        storageKey: fileId,
+        url,
+        publicUrl: url,
+        filename: responseFilename(current, fileId),
+        mimeType: current.type,
+        size: fileSize,
+        name: responseFilename(current, fileId),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";

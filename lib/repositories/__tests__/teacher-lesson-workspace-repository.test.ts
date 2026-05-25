@@ -248,9 +248,9 @@ describe("teacher lesson workspace repository", () => {
           backToSchedule: "/portal/teacher/schedule",
           classDetail: "/portal/teacher/classes/group-1",
           submissions: {
-            disabled: true,
-            href: null,
-            reason: "Teacher submissions route is not implemented",
+            disabled: false,
+            href: "/portal/teacher/submissions?scheduledClassId=lesson-1",
+            label: "Review Submissions",
           },
           progress: {
             disabled: true,
@@ -258,14 +258,14 @@ describe("teacher lesson workspace repository", () => {
             reason: "Teacher progress route is not implemented",
           },
           materials: {
-            disabled: true,
-            href: null,
-            reason: "Teacher materials route is not implemented",
+            disabled: false,
+            href: "/portal/teacher/materials?scheduledClassId=lesson-1",
+            label: "Materials",
           },
           attendance: {
-            disabled: true,
-            href: null,
-            reason: "Attendance module is not implemented",
+            disabled: false,
+            href: "/portal/teacher/lessons/lesson-1#attendance",
+            label: "Attendance",
           },
         },
         roster: [
@@ -309,9 +309,9 @@ describe("teacher lesson workspace repository", () => {
             submissionsCount: 2,
             pendingSubmissionsCount: 1,
             review: {
-              disabled: true,
-              href: null,
-              reason: "Teacher submissions route is not implemented",
+              disabled: false,
+              href: "/portal/teacher/submissions?assignmentId=assignment-1",
+              label: "Review assignment work",
             },
           }),
           expect.objectContaining({
@@ -352,9 +352,9 @@ describe("teacher lesson workspace repository", () => {
           reason: "Teacher progress route is not implemented",
         },
         attendanceSummary: {
-          disabled: true,
-          hidden: true,
-          reason: "Attendance module is not implemented",
+          disabled: false,
+          hidden: false,
+          reason: null,
         },
       }),
     );
@@ -477,7 +477,7 @@ describe("teacher lesson workspace repository", () => {
           gradedSubmissions: 0,
         },
         progressSummary: expect.objectContaining({ disabled: true, count: 0 }),
-        attendanceSummary: expect.objectContaining({ disabled: true, hidden: true }),
+        attendanceSummary: expect.objectContaining({ disabled: false, hidden: false }),
       }),
     );
   });

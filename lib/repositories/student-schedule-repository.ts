@@ -5,6 +5,7 @@ import {
   parseLessonStatus,
 } from "@/lib/lessons/lesson-status";
 import { prisma } from "@/lib/prisma";
+import { safeCourseMaterialHref } from "@/lib/security/course-material-links";
 
 const DEFAULT_TIMEZONE = "Europe/Kiev";
 
@@ -47,7 +48,18 @@ export type StudentScheduleLesson = {
   cancelReason: string | null;
   rescheduledFromId: string | null;
   materialsCount: number;
-  materials: Array<{ id: string; title: string; url: string | null }>;
+  materials: Array<{
+    id: string;
+    title: string;
+    url: string | null;
+    safeFileUrl: string | null;
+    attachments: Array<{
+      filename: string;
+      href: string | null;
+      mimeType: string;
+      size: number;
+    }>;
+  }>;
   assignments: Array<{
     id: string;
     title: string;
@@ -55,7 +67,15 @@ export type StudentScheduleLesson = {
     submissionStatus: "NOT_SUBMITTED" | "SUBMITTED" | "GRADED";
     submissionId: string | null;
     grade: number | null;
+    feedback: string | null;
   }>;
+  attendance?: {
+    id: string;
+    status: string;
+    lateMinutes: number | null;
+    reason: string | null;
+    markedAt: Date | null;
+  } | null;
 };
 
 export type JoinState = {
@@ -99,12 +119,31 @@ type LessonRecord = {
     title: string;
     fileUrl?: string | null;
     url?: string | null;
+    attachments?: Array<{
+      filename: string;
+      storageKey: string;
+      mimeType: string;
+      size: number;
+    }>;
   }>;
   assignments?: Array<{
     id: string;
     title: string;
     dueDate: Date;
-    submissions?: Array<{ id: string; studentId?: string; grade?: number | null }>;
+    submissions?: Array<{
+      id: string;
+      studentId?: string;
+      grade?: number | null;
+      feedback?: string | null;
+    }>;
+  }>;
+  attendanceRecords?: Array<{
+    id: string;
+    studentId: string;
+    status: string;
+    lateMinutes?: number | null;
+    reason?: string | null;
+    markedAt?: Date | null;
   }>;
   _count?: { courseMaterials?: number };
 };
@@ -178,6 +217,14 @@ function buildLessonInclude(studentId?: string, studentIds?: string[]) {
         id: true,
         title: true,
         fileUrl: true,
+        attachments: {
+          select: {
+            filename: true,
+            storageKey: true,
+            mimeType: true,
+            size: true,
+          },
+        },
       },
       orderBy: { createdAt: "desc" as const },
     },
@@ -189,10 +236,22 @@ function buildLessonInclude(studentId?: string, studentIds?: string[]) {
             id: true,
             studentId: true,
             grade: true,
+            feedback: true,
           },
         },
       },
       orderBy: { dueDate: "asc" as const },
+    },
+    attendanceRecords: {
+      ...(submissionsWhere ? { where: submissionsWhere } : {}),
+      select: {
+        id: true,
+        studentId: true,
+        status: true,
+        lateMinutes: true,
+        reason: true,
+        markedAt: true,
+      },
     },
     _count: {
       select: {
@@ -226,6 +285,10 @@ function mapLesson(
 ): StudentScheduleLesson {
   const studentIds = options.studentId ? [options.studentId] : (options.studentIds ?? []);
   const child = studentIds.length > 0 ? firstAccessibleStudent(lesson, studentIds) : null;
+  const attendanceRecord =
+    lesson.attendanceRecords?.find((record) =>
+      options.studentId ? record.studentId === options.studentId : true,
+    ) ?? lesson.attendanceRecords?.[0];
 
   return {
     id: lesson.id,
@@ -254,11 +317,28 @@ function mapLesson(
     cancelReason: lesson.cancelReason ?? null,
     rescheduledFromId: lesson.rescheduledFromId ?? null,
     materialsCount: lesson._count?.courseMaterials ?? lesson.courseMaterials?.length ?? 0,
-    materials: (lesson.courseMaterials ?? []).map((material) => ({
-      id: material.id,
-      title: material.title,
-      url: material.fileUrl ?? material.url ?? null,
-    })),
+    materials: (lesson.courseMaterials ?? []).map((material) => {
+      const url = material.fileUrl ?? material.url ?? null;
+      return {
+        id: material.id,
+        title: material.title,
+        url,
+        safeFileUrl: safeCourseMaterialHref(url),
+        attachments: (material.attachments ?? []).map((attachment) => {
+          const normalized = attachment.storageKey.replace(/^\/+/, "").replace(/^public[\\\/]/, "");
+          const href = normalized.startsWith("uploads/")
+            ? safeCourseMaterialHref(`/${normalized}`)
+            : null;
+
+          return {
+            filename: attachment.filename,
+            href,
+            mimeType: attachment.mimeType,
+            size: attachment.size,
+          };
+        }),
+      };
+    }),
     assignments: (lesson.assignments ?? []).map((assignment) => {
       const submission =
         assignment.submissions?.find((item) =>
@@ -272,8 +352,18 @@ function mapLesson(
         submissionStatus: mapSubmissionStatus(submission),
         submissionId: submission?.id ?? null,
         grade: submission?.grade ?? null,
+        feedback: submission?.feedback ?? null,
       };
     }),
+    attendance: attendanceRecord
+      ? {
+          id: attendanceRecord.id,
+          status: attendanceRecord.status,
+          lateMinutes: attendanceRecord.lateMinutes ?? null,
+          reason: attendanceRecord.reason ?? null,
+          markedAt: attendanceRecord.markedAt ?? null,
+        }
+      : null,
   };
 }
 

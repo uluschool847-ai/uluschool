@@ -10,6 +10,10 @@ const DEFAULT_UPLOAD_ROOT = path.join(process.cwd(), "public", "uploads");
 
 const ALLOWED_MIME_TYPES = new Set([
   "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "application/zip",
   "application/x-zip-compressed",
   "image/png",
@@ -133,7 +137,12 @@ export class LocalStorageService implements StorageService {
       .replace(/^\/+/, "")
       .replace(/^public[\\\/]/, "")
       .replace(/^uploads[\\\/]?/, "");
-    const absolutePath = path.join(this.uploadRoot, key);
+    const uploadRoot = path.resolve(this.uploadRoot);
+    const absolutePath = path.resolve(uploadRoot, key);
+
+    if (absolutePath !== uploadRoot && !absolutePath.startsWith(`${uploadRoot}${path.sep}`)) {
+      return;
+    }
 
     try {
       await unlink(absolutePath);

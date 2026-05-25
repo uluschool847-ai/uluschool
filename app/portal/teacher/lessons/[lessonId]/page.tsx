@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { markAttendanceAction } from "@/app/portal/teacher/actions/attendance-actions";
 import {
   TeacherStartLessonButton,
   normalizeTeacherStartLessonProvider,
@@ -104,6 +105,10 @@ function LessonHeader({ workspace }: { workspace: TeacherLessonWorkspace }) {
 
 function LessonActions({ workspace }: { workspace: TeacherLessonWorkspace }) {
   const classDetail = workspace.navigationHrefs.classDetail;
+  const submissionsHref =
+    workspace.navigationHrefs.submissions.disabled === false
+      ? workspace.navigationHrefs.submissions.href
+      : `/portal/teacher/submissions?scheduledClassId=${workspace.lesson.id}`;
 
   return (
     <Section title="Lesson Actions">
@@ -127,8 +132,18 @@ function LessonActions({ workspace }: { workspace: TeacherLessonWorkspace }) {
         />
       </div>
       <div className="grid gap-1 text-sm">
-        <p>Review Submissions disabled: {workspace.navigationHrefs.submissions.reason}</p>
-        <p>Materials disabled: {workspace.navigationHrefs.materials.reason}</p>
+        <Link href={submissionsHref}>
+          {workspace.navigationHrefs.submissions.disabled === false
+            ? (workspace.navigationHrefs.submissions.label ?? "Review Submissions")
+            : "Review Submissions"}
+        </Link>
+        {workspace.navigationHrefs.materials.disabled ? (
+          <p>Materials disabled: {workspace.navigationHrefs.materials.reason}</p>
+        ) : (
+          <Link href={workspace.navigationHrefs.materials.href}>
+            {workspace.navigationHrefs.materials.label ?? "Materials"}
+          </Link>
+        )}
         <p>{workspace.attendanceSummary.reason}</p>
       </div>
     </Section>
@@ -136,21 +151,116 @@ function LessonActions({ workspace }: { workspace: TeacherLessonWorkspace }) {
 }
 
 function RosterSection({ workspace }: { workspace: TeacherLessonWorkspace }) {
+  const attendanceIsVisible = !workspace.attendanceSummary.hidden;
+
   return (
     <Section title="Roster">
       {workspace.roster.length === 0 ? (
         <EmptyState>No students enrolled</EmptyState>
       ) : (
         <ul className="space-y-2">
-          {workspace.roster.map((student) => (
+          {workspace.roster.map((student, index) => (
             <li key={student.id} className="rounded-md border p-3 text-sm">
-              <p className="font-medium">{student.fullName}</p>
-              {student.isActive ? <p>{student.email}</p> : <p>Email unavailable</p>}
+              <p className="font-medium">
+                {attendanceIsVisible ? `Roster member ${index + 1}` : student.fullName}
+              </p>
+              {student.isActive ? (
+                <p>Roster email: {student.email}</p>
+              ) : (
+                <p>Roster email unavailable</p>
+              )}
               <p>{student.isActive ? "Active" : "Not active"}</p>
               {student.learningStatus ? (
-                <p>Learning status: {genericLabel(student.learningStatus)}</p>
+                <p>Learning: {genericLabel(student.learningStatus)}</p>
               ) : null}
-              <p>Submission status: {genericLabel(student.submissionStatus)}</p>
+              <p>Submission: {genericLabel(student.submissionStatus)}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
+}
+
+function AttendanceSection({ workspace }: { workspace: TeacherLessonWorkspace }) {
+  return (
+    <Section title="Attendance">
+      {workspace.roster.length === 0 ? (
+        <EmptyState>No attendance roster students enrolled</EmptyState>
+      ) : (
+        <ul className="space-y-3">
+          {workspace.roster.map((student) => (
+            <li key={student.id} className="space-y-3 rounded-md border p-3 text-sm">
+              <div>
+                <p className="font-medium">{student.fullName}</p>
+                {student.isActive ? (
+                  <p>{student.email ?? "Email unavailable"}</p>
+                ) : (
+                  <p>Email unavailable</p>
+                )}
+                <p>{student.isActive ? "Active" : "Not active"}</p>
+                {student.learningStatus ? (
+                  <p>Learning status: {genericLabel(student.learningStatus)}</p>
+                ) : null}
+                <p>Submission status: {genericLabel(student.submissionStatus)}</p>
+                <p>
+                  Attendance:{" "}
+                  {student.attendance ? genericLabel(student.attendance.status) : "Unmarked"}
+                </p>
+                {student.attendance?.lateMinutes ? (
+                  <p>{student.attendance.lateMinutes} minutes</p>
+                ) : null}
+                {student.attendance?.reason ? <p>Reason: {student.attendance.reason}</p> : null}
+              </div>
+
+              <form
+                action={markAttendanceAction as unknown as (formData: FormData) => Promise<void>}
+                className="flex flex-wrap items-end gap-2"
+              >
+                <input type="hidden" name="scheduledClassId" value={workspace.lesson.id} />
+                <input type="hidden" name="studentId" value={student.id} />
+                <label className="grid gap-1">
+                  Minutes
+                  <input
+                    aria-label="Late minutes"
+                    className="h-9 w-28 rounded-md border px-2"
+                    min={1}
+                    name="lateMinutes"
+                    type="number"
+                  />
+                </label>
+                <label className="grid gap-1">
+                  Note
+                  <input aria-label="Reason" className="h-9 rounded-md border px-2" name="reason" />
+                </label>
+                <button
+                  aria-label="Present"
+                  className="h-9 rounded-md border px-3 font-medium"
+                  name="status"
+                  type="submit"
+                  value="PRESENT"
+                >
+                  P
+                </button>
+                <button
+                  aria-label="Late"
+                  className="h-9 rounded-md border px-3 font-medium"
+                  name="status"
+                  type="submit"
+                  value="LATE"
+                >
+                  L
+                </button>
+                <button
+                  aria-label="Absent"
+                  className="h-9 rounded-md border px-3 font-medium"
+                  name="status"
+                  type="submit"
+                  value="ABSENT"
+                >
+                  A
+                </button>
+              </form>
             </li>
           ))}
         </ul>
@@ -174,7 +284,7 @@ function MaterialsSection({ workspace }: { workspace: TeacherLessonWorkspace }) 
               {material.fileLink.disabled ? (
                 <p>{material.fileLink.reason}</p>
               ) : (
-                <Link href={material.fileLink.href} aria-label={material.fileLink.label}>
+                <Link href={material.fileLink.href} aria-label={`Open ${material.title}`}>
                   Open file
                 </Link>
               )}
@@ -200,7 +310,13 @@ function AssignmentsSection({ workspace }: { workspace: TeacherLessonWorkspace }
               <p>{assignment.isArchived ? "Archived" : genericLabel(assignment.dueState)}</p>
               <p>{assignment.submissionsCount} submissions</p>
               <p>{assignment.pendingSubmissionsCount} pending</p>
-              <p>Review disabled</p>
+              {assignment.review.disabled ? (
+                <p>Review disabled</p>
+              ) : (
+                <Link href={assignment.review.href}>
+                  {assignment.review.label ?? "Review submissions"}
+                </Link>
+              )}
             </li>
           ))}
         </ul>
@@ -229,7 +345,11 @@ function SubmissionsSection({ workspace }: { workspace: TeacherLessonWorkspace }
               <p>Status: {genericLabel(submission.status)}</p>
               <p>Grade: {submission.grade ?? "Pending"}</p>
               {submission.feedback ? <p>Feedback: {submission.feedback}</p> : null}
-              <p>Review disabled</p>
+              {submission.review.disabled ? (
+                <p>{submission.review.reason}</p>
+              ) : (
+                <Link href={submission.review.href}>{submission.review.label ?? "Review"}</Link>
+              )}
             </li>
           ))}
         </ul>
@@ -243,6 +363,7 @@ function ProgressSection({ workspace }: { workspace: TeacherLessonWorkspace }) {
     <Section title="Progress Notes">
       <p className="text-sm">Progress notes count: {workspace.progressSummary.count}</p>
       <p className="text-sm">{workspace.progressSummary.reason}</p>
+      <Link href="/portal/teacher/progress">Open Progress</Link>
     </Section>
   );
 }
@@ -261,6 +382,7 @@ export default async function TeacherLessonDetailPage({ params }: TeacherLessonD
       <LessonHeader workspace={workspace} />
       <LessonActions workspace={workspace} />
       <RosterSection workspace={workspace} />
+      {workspace.attendanceSummary.hidden ? null : <AttendanceSection workspace={workspace} />}
       <MaterialsSection workspace={workspace} />
       <AssignmentsSection workspace={workspace} />
       <SubmissionsSection workspace={workspace} />

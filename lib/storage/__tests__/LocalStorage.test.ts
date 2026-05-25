@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { UserRole } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -247,5 +249,23 @@ describe("lib/storage local-first contract", () => {
 
     const file = new File(["x"], "note.pdf", { type: "application/pdf" });
     await expect(service.upload(file)).rejects.toThrow(/(enospc|disk|space)/i);
+  });
+
+  it("delete() should ignore path traversal keys and never remove files outside uploads root", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "ulu-storage-delete-"));
+    const uploadRoot = path.join(tempRoot, "uploads");
+    const outsidePath = path.join(tempRoot, "outside.txt");
+    await writeFile(outsidePath, "do-not-delete");
+
+    try {
+      const { LocalStorageService } = await import("@/lib/storage/LocalStorageService");
+      const service = new LocalStorageService(uploadRoot);
+
+      await expect(service.delete("../outside.txt")).resolves.toBeUndefined();
+
+      await expect(access(outsidePath)).resolves.toBeUndefined();
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 });

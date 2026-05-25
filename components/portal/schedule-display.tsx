@@ -71,6 +71,30 @@ function formatSubmissionStatus(value: string) {
   return genericLabel(value);
 }
 
+function isSafeHref(value: string | null | undefined) {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return false;
+  if (trimmed.startsWith("/uploads/")) return true;
+
+  try {
+    const url = new URL(trimmed);
+    if (
+      url.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "::1"].includes(url.hostname) &&
+      url.pathname.startsWith("/e2e-assets/")
+    ) {
+      return true;
+    }
+    return url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function safeHref(value: string | null | undefined) {
+  return isSafeHref(value) ? (value?.trim() ?? null) : null;
+}
+
 export function ScheduleFilters(props: {
   month: string;
   subjectId?: string;
@@ -189,6 +213,7 @@ export function LessonDetail(props: {
   lesson: StudentScheduleLesson;
   joinState: JoinState;
   childName?: string | null;
+  attendanceHistoryHref?: string;
 }) {
   const { lesson } = props;
   const runtime = deriveLessonRuntimeStatus(lesson, new Date());
@@ -218,13 +243,48 @@ export function LessonDetail(props: {
 
       <section className="space-y-2 rounded-lg border p-4" aria-label="Materials">
         <h2 className="text-xl font-semibold">Materials</h2>
+        <Link
+          href={`/portal/student/materials?scheduledClassId=${lesson.id}`}
+          className="text-sm font-medium underline"
+        >
+          View all materials
+        </Link>
         {lesson.materials.length === 0 ? (
           <p>No materials yet.</p>
         ) : (
           <ul className="list-disc space-y-1 pl-5">
-            {lesson.materials.map((material) => (
-              <li key={material.id}>{material.title}</li>
-            ))}
+            {lesson.materials.map((material) => {
+              const href = safeHref(material.safeFileUrl ?? material.url);
+              return (
+                <li key={material.id}>
+                  {href ? (
+                    <a href={href} target="_blank" rel="noreferrer">
+                      {material.title}
+                    </a>
+                  ) : (
+                    <span>{material.title}</span>
+                  )}
+                  {material.attachments && material.attachments.length > 0 ? (
+                    <ul className="list-disc pl-5">
+                      {material.attachments.map((attachment) => {
+                        const attachmentHref = safeHref(attachment.href);
+                        return (
+                          <li key={`${material.id}-${attachment.filename}`}>
+                            {attachmentHref ? (
+                              <a href={attachmentHref} target="_blank" rel="noreferrer">
+                                {attachment.filename}
+                              </a>
+                            ) : (
+                              <span>{attachment.filename}</span>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
@@ -241,9 +301,35 @@ export function LessonDetail(props: {
                 <p>Due: {formatDate(assignment.dueDate)}</p>
                 <p>Submission: {formatSubmissionStatus(assignment.submissionStatus)}</p>
                 {assignment.grade !== null ? <p>Grade: {assignment.grade}</p> : null}
+                {assignment.grade !== null && assignment.feedback ? (
+                  <p>Feedback: {assignment.feedback}</p>
+                ) : null}
               </li>
             ))}
           </ul>
+        )}
+      </section>
+
+      <section className="space-y-2 rounded-lg border p-4" aria-label="Attendance">
+        <h2 className="text-xl font-semibold">Attendance</h2>
+        {props.attendanceHistoryHref ? (
+          <Link href={props.attendanceHistoryHref} className="text-sm font-medium underline">
+            View attendance history
+          </Link>
+        ) : null}
+        {lesson.attendance ? (
+          <div className="space-y-1">
+            <p>Attendance: {genericLabel(lesson.attendance.status)}</p>
+            {lesson.attendance.lateMinutes ? (
+              <p>Late minutes: {lesson.attendance.lateMinutes}</p>
+            ) : null}
+            {lesson.attendance.reason ? <p>Reason: {lesson.attendance.reason}</p> : null}
+            {lesson.attendance.markedAt ? (
+              <p>Marked: {formatDate(lesson.attendance.markedAt)}</p>
+            ) : null}
+          </div>
+        ) : (
+          <p>Attendance has not been marked.</p>
         )}
       </section>
     </main>

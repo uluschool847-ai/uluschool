@@ -171,6 +171,12 @@ function workspaceRecord(overrides: Record<string, unknown> = {}) {
     },
     roster: [
       {
+        attendance: {
+          id: "attendance-present",
+          status: "PRESENT",
+          lateMinutes: null,
+          reason: null,
+        },
         id: "student-active",
         fullName: "Active Student",
         email: "active@example.com",
@@ -179,12 +185,41 @@ function workspaceRecord(overrides: Record<string, unknown> = {}) {
         submissionStatus: "pending",
       },
       {
+        attendance: {
+          id: "attendance-late",
+          status: "LATE",
+          lateMinutes: 8,
+          reason: "Joined after warm-up",
+        },
         id: "student-inactive",
         fullName: "Inactive Student",
         email: "inactive@example.com",
         isActive: false,
         learningStatus: "PAUSED",
         submissionStatus: "graded",
+      },
+      {
+        attendance: {
+          id: "attendance-absent",
+          status: "ABSENT",
+          lateMinutes: null,
+          reason: "Family emergency",
+        },
+        id: "student-absent",
+        fullName: "Absent Student",
+        email: "absent@example.com",
+        isActive: true,
+        learningStatus: null,
+        submissionStatus: "not-submitted",
+      },
+      {
+        attendance: null,
+        id: "student-unmarked",
+        fullName: "Unmarked Student",
+        email: "unmarked@example.com",
+        isActive: true,
+        learningStatus: null,
+        submissionStatus: "not-submitted",
       },
     ],
     materials: [
@@ -263,9 +298,9 @@ function workspaceRecord(overrides: Record<string, unknown> = {}) {
       reason: "Teacher progress route is not implemented",
     },
     attendanceSummary: {
-      disabled: true,
-      hidden: true,
-      reason: "Attendance module is not implemented",
+      disabled: false,
+      hidden: false,
+      reason: null,
     },
     ...overrides,
   };
@@ -398,6 +433,7 @@ describe("Teacher schedule lesson detail page", () => {
     expect(screen.getByRole("heading", { name: /homework \/ assignments/i })).toBeDefined();
     expect(screen.getByRole("heading", { name: /submissions \/ grading/i })).toBeDefined();
     expect(screen.getByRole("heading", { name: /progress notes/i })).toBeDefined();
+    expect(screen.getByRole("heading", { name: /^attendance$/i })).toBeDefined();
   });
 
   it("renders an owned classGroup lesson workspace with teacher navigation and no legacy schedule links", async () => {
@@ -417,13 +453,46 @@ describe("Teacher schedule lesson detail page", () => {
       "href",
       "/portal/teacher/classes/group-1",
     );
-    expect(screen.queryByRole("link", { name: /review submissions/i })).toBeNull();
-    expect(screen.getByText(/teacher submissions route is not implemented/i)).toBeDefined();
+    expect(screen.getByRole("link", { name: /review submissions/i })).toHaveAttribute(
+      "href",
+      "/portal/teacher/submissions?scheduledClassId=lesson-1",
+    );
+    expect(screen.queryByText(/teacher submissions route is not implemented/i)).toBeNull();
     expect(screen.queryByRole("link", { name: /progress notes/i })).toBeNull();
     expect(screen.getByText(/teacher progress route is not implemented/i)).toBeDefined();
-    expect(screen.queryByRole("link", { name: /attendance/i })).toBeNull();
-    expect(screen.getByText(/attendance module is not implemented/i)).toBeDefined();
+    expect(screen.getByRole("heading", { name: /^attendance$/i })).toBeDefined();
+    expect(screen.queryByText(/attendance module is not implemented/i)).toBeNull();
     expect(container.querySelector('a[href="/portal/schedule"]')).toBeNull();
+  });
+
+  it("renders attendance roster controls and existing attendance states", async () => {
+    getTeacherLessonWorkspaceMock.mockResolvedValueOnce(workspaceRecord());
+
+    const page = await loadTeacherLessonDetailPage();
+    const element = await page.default({ params: { lessonId: "lesson-1" } });
+    render(element);
+
+    const attendanceSection = screen
+      .getByRole("heading", { name: /^attendance$/i })
+      .closest("section");
+    expect(attendanceSection).not.toBeNull();
+    const attendance = within(attendanceSection as HTMLElement);
+
+    expect(attendance.getByText(/^Active Student$/)).toBeDefined();
+    expect(attendance.getByText(/present/i)).toBeDefined();
+    expect(attendance.getByText(/^Inactive Student$/)).toBeDefined();
+    expect(attendance.getByText(/late/i)).toBeDefined();
+    expect(attendance.getByText(/8 minutes/i)).toBeDefined();
+    expect(attendance.getByText(/joined after warm-up/i)).toBeDefined();
+    expect(attendance.getByText(/^Absent Student$/)).toBeDefined();
+    expect(attendance.getByText(/family emergency/i)).toBeDefined();
+    expect(attendance.getByText(/^Unmarked Student$/)).toBeDefined();
+
+    expect(attendance.getAllByRole("button", { name: /present/i }).length).toBeGreaterThan(0);
+    expect(attendance.getAllByRole("button", { name: /late/i }).length).toBeGreaterThan(0);
+    expect(attendance.getAllByRole("button", { name: /absent/i }).length).toBeGreaterThan(0);
+    expect(attendance.getAllByLabelText(/late minutes/i).length).toBeGreaterThan(0);
+    expect(attendance.getAllByLabelText(/reason/i).length).toBeGreaterThan(0);
   });
 
   it("renders roster, materials, assignments, and submissions from the workspace view model", async () => {

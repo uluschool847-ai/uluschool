@@ -17,9 +17,24 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 
 const gradeSubmissionForTeacherMock = vi.hoisted(() => vi.fn());
+const legacyGradeSubmissionForTeacherMock = vi.hoisted(() => vi.fn());
+const revalidatePathMock = vi.hoisted(() => vi.fn());
+const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/repositories/submission-repository", () => ({
+  gradeSubmissionForTeacher: gradeSubmissionForTeacherMock,
+}));
 
 vi.mock("@/lib/repositories/portal-repository", () => ({
-  gradeSubmissionForTeacher: gradeSubmissionForTeacherMock,
+  gradeSubmissionForTeacher: legacyGradeSubmissionForTeacherMock,
+}));
+
+vi.mock("@/lib/repositories/admin-audit-repository", () => ({
+  createAdminAuditLog: createAdminAuditLogMock,
+}));
+
+vi.mock("next/cache", () => ({
+  revalidatePath: revalidatePathMock,
 }));
 
 import { gradeSubmissionAction } from "@/app/portal/teacher/actions/grading-actions";
@@ -41,6 +56,36 @@ function expectEnumTeacherGuardSource() {
   expect(source).not.toContain("requireRole(['TEACHER'])");
 }
 
+function expectDedicatedGradingRepositorySource() {
+  const source = readFileSync(ACTION_SOURCE_PATH, "utf8");
+  expect(source).toContain("@/lib/repositories/submission-repository");
+  expect(source).not.toMatch(
+    /from\s+["']@\/lib\/repositories\/portal-repository["'][\s\S]*gradeSubmissionForTeacher/,
+  );
+  expect(source).not.toMatch(/teacherId\s*:\s*(payload|data|parsed\.data)\.teacherId/);
+}
+
+function expectGradingRevalidation() {
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/teacher");
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/teacher/submissions");
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/teacher/submissions/sub-1");
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/student");
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/parent");
+}
+
+function expectGradingAudit(action: string) {
+  expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      action,
+      targetType: "submission",
+      targetId: "sub-1",
+      actorId: "teacher-1",
+      meta: expect.objectContaining({ teacherId: "teacher-1" }),
+    }),
+    expect.anything(),
+  );
+}
+
 function expectRejectedAuthResult(result: unknown) {
   const message = result instanceof Error ? result.message : JSON.stringify(result);
   expect(message).toMatch(/forbidden|unauthorized|invalid|redirect/i);
@@ -54,6 +99,10 @@ describe("Grading actions integration", () => {
 
   it("uses enum-based teacher guards in source", () => {
     expectEnumTeacherGuardSource();
+  });
+
+  it("imports dedicated submission repository grading helper and does not trust hidden teacherId", () => {
+    expectDedicatedGradingRepositorySource();
   });
 
   it("rejects STUDENT and GUEST roles for grading", async () => {
@@ -75,6 +124,7 @@ describe("Grading actions integration", () => {
     expect(studentMessage).toMatch(/forbidden|unauthorized/i);
     expect(guestMessage).toMatch(/forbidden|unauthorized/i);
     expect(gradeSubmissionForTeacherMock).not.toHaveBeenCalled();
+    expect(legacyGradeSubmissionForTeacherMock).not.toHaveBeenCalled();
     expect(requireRole).toHaveBeenCalledWith([UserRole.TEACHER]);
   });
 
@@ -88,6 +138,7 @@ describe("Grading actions integration", () => {
       expectRejectedAuthResult(result);
       expect(requireRole).toHaveBeenCalledWith([UserRole.TEACHER]);
       expect(gradeSubmissionForTeacherMock).not.toHaveBeenCalled();
+      expect(legacyGradeSubmissionForTeacherMock).not.toHaveBeenCalled();
     },
   );
 
@@ -113,6 +164,16 @@ describe("Grading actions integration", () => {
       grade: -5,
       feedback: "N/A",
     }).catch((error: Error) => error);
+    const tooHighGradeResult = await gradeSubmissionAction({
+      submissionId: "sub-1",
+      grade: 101,
+      feedback: "N/A",
+    }).catch((error: Error) => error);
+    const nonNumericGradeResult = await gradeSubmissionAction({
+      submissionId: "sub-1",
+      grade: "A",
+      feedback: "N/A",
+    } as never).catch((error: Error) => error);
 
     const missingFieldResult = await gradeSubmissionAction({
       submissionId: "",
@@ -133,6 +194,28 @@ describe("Grading actions integration", () => {
     } else {
       expect(missingFieldResult.message).toMatch(/submission|required|validation/i);
     }
+
+    for (const result of [tooHighGradeResult, nonNumericGradeResult]) {
+      const message = result instanceof Error ? result.message : JSON.stringify(result);
+      expect(message).toMatch(/grade|validation|number|100/i);
+    }
+    expect(gradeSubmissionForTeacherMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects over-limit feedback without repository mutation or audit", async () => {
+    const result = await gradeSubmissionAction({
+      submissionId: "sub-1",
+      grade: 90,
+      feedback: "x".repeat(2001),
+    });
+
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result)).toMatch(/feedback|2000/i);
+    expect(gradeSubmissionForTeacherMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
   it("returns forbidden when repository reports ownership mismatch", async () => {
@@ -148,13 +231,16 @@ describe("Grading actions integration", () => {
 
     expect(result.success).toBe(false);
     expect(JSON.stringify(result)).toMatch(/forbidden|unauthorized|not owned|not found/i);
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
-  it("allows TEACHER to grade a valid submission", async () => {
+  it("allows TEACHER to grade a valid submission with audit and revalidation", async () => {
     gradeSubmissionForTeacherMock.mockResolvedValueOnce({
       id: "sub-1",
       grade: 93,
       feedback: "Well done",
+      previousGrade: null,
     });
 
     const result = await gradeSubmissionAction({
@@ -164,14 +250,63 @@ describe("Grading actions integration", () => {
     });
 
     expect(gradeSubmissionForTeacherMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        teacherId: "teacher-1",
-        submissionId: "sub-1",
-        grade: 93,
-        feedback: "Well done",
-      }),
+      "teacher-1",
+      "sub-1",
+      expect.objectContaining({ grade: 93, feedback: "Well done" }),
     );
     expect(requireRole).toHaveBeenCalledWith([UserRole.TEACHER]);
     expect(result.success).toBe(true);
+    expectGradingAudit("SUBMISSION_GRADED");
+    expectGradingRevalidation();
+  });
+
+  it("writes SUBMISSION_GRADE_UPDATED when repository returns a previous grade", async () => {
+    gradeSubmissionForTeacherMock.mockResolvedValueOnce({
+      id: "sub-1",
+      grade: 95,
+      feedback: "Updated feedback",
+      previousGrade: 90,
+    });
+
+    const result = await gradeSubmissionAction({
+      submissionId: "sub-1",
+      grade: 95,
+      feedback: "Updated feedback",
+    });
+
+    expect(result.success).toBe(true);
+    expectGradingAudit("SUBMISSION_GRADE_UPDATED");
+  });
+
+  it("includes before/after feedback and feedbackChanged audit metadata", async () => {
+    gradeSubmissionForTeacherMock.mockResolvedValueOnce({
+      id: "sub-1",
+      grade: 95,
+      feedback: "Updated feedback",
+      previousGrade: 90,
+      assignmentId: "assignment-1",
+      before: { id: "sub-1", grade: 90, feedback: "Initial feedback" },
+      after: { id: "sub-1", grade: 95, feedback: "Updated feedback" },
+    });
+
+    const result = await gradeSubmissionAction({
+      submissionId: "sub-1",
+      grade: 95,
+      feedback: "Updated feedback",
+    });
+
+    expect(result.success).toBe(true);
+    expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "SUBMISSION_GRADE_UPDATED",
+        before: expect.objectContaining({ feedback: "Initial feedback" }),
+        after: expect.objectContaining({ feedback: "Updated feedback" }),
+        meta: expect.objectContaining({
+          feedbackChanged: true,
+          teacherId: "teacher-1",
+        }),
+      }),
+      expect.anything(),
+    );
   });
 });

@@ -33,6 +33,7 @@ type TeacherDashboardFixture = {
   feedbackText: string;
   groupName: string;
   missingLinkLessonTitle: string;
+  pendingSubmissionId: string;
   pendingStudentName: string;
   rosterStudentName: string;
   subjectName: string;
@@ -175,12 +176,15 @@ test.describe("Teacher dashboard portal", () => {
       await pendingSubmissionCard.getByLabel(/feedback/i).fill(fixture.feedbackText);
       await pendingSubmissionCard.getByRole("button", { name: /save grade/i }).click();
       await expect
-        .soft(
-          page
-            .getByText(/grade saved|graded|success/i)
-            .or(page.locator("article").filter({ hasText: fixture.pendingStudentName })),
-        )
-        .toHaveCount(1);
+        .poll(async () => {
+          const submission = await prisma.submission.findUnique({
+            select: { feedback: true, grade: true },
+            where: { id: fixture.pendingSubmissionId },
+          });
+
+          return `${submission?.grade ?? ""}:${submission?.feedback ?? ""}`;
+        })
+        .toBe(`92:${fixture.feedbackText}`);
     }
   });
 });
@@ -418,7 +422,7 @@ async function createFixtures(): Promise<TeacherDashboardFixture> {
     }),
   ]);
 
-  await Promise.all([
+  const [pendingSubmission] = await Promise.all([
     prisma.submission.create({
       data: {
         assignmentId: activeAssignment.id,
@@ -446,6 +450,7 @@ async function createFixtures(): Promise<TeacherDashboardFixture> {
     feedbackText,
     groupName,
     missingLinkLessonTitle,
+    pendingSubmissionId: pendingSubmission.id,
     pendingStudentName,
     rosterStudentName,
     subjectName,

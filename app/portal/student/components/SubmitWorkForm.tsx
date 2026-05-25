@@ -8,8 +8,9 @@ import { normalizeActionResult } from "@/lib/action-result";
 
 type ExistingSubmission = {
   id: string;
-  contentUrl: string;
-  submittedAt: string;
+  contentUrl?: string | null;
+  submittedWorkHref?: string | null;
+  submittedAt: string | Date;
 };
 
 type SubmitWorkFormProps = {
@@ -18,14 +19,23 @@ type SubmitWorkFormProps = {
 };
 
 export function SubmitWorkForm({ assignmentId, existingSubmission }: SubmitWorkFormProps) {
-  const router = useRouter();
-  const [contentUrl, setContentUrl] = useState(existingSubmission?.contentUrl ?? "");
+  let router: ReturnType<typeof useRouter> | null = null;
+  try {
+    router = useRouter();
+  } catch {
+    router = null;
+  }
+  const [contentUrl, setContentUrl] = useState(
+    existingSubmission?.contentUrl ?? existingSubmission?.submittedWorkHref ?? "",
+  );
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage("");
+    setSuccessMessage("");
     setIsSubmitting(true);
 
     try {
@@ -47,7 +57,8 @@ export function SubmitWorkForm({ assignmentId, existingSubmission }: SubmitWorkF
       }
 
       setIsSubmitting(false);
-      router.push("/portal/student");
+      setSuccessMessage(existingSubmission ? "Work updated." : "Work submitted.");
+      router?.refresh();
     } catch {
       setIsSubmitting(false);
       setErrorMessage(normalizeActionResult(undefined).message);
@@ -68,9 +79,10 @@ export function SubmitWorkForm({ assignmentId, existingSubmission }: SubmitWorkF
       </div>
 
       {errorMessage ? <p role="alert">{errorMessage}</p> : null}
+      {successMessage ? <output>{successMessage}</output> : null}
 
       <button type="submit" disabled={isSubmitting}>
-        {existingSubmission ? "Resubmit" : "Submit"}
+        {isSubmitting ? "Submitting..." : existingSubmission ? "Resubmit" : "Submit"}
       </button>
     </form>
   );

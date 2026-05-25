@@ -23,5 +23,11 @@ export default async function StudentScheduleDetailPage({
     notFound();
   }
 
-  return <LessonDetail lesson={lesson} joinState={canJoinLesson(lesson, new Date())} />;
+  return (
+    <LessonDetail
+      attendanceHistoryHref={`/portal/student/attendance?scheduledClassId=${lesson.id}`}
+      lesson={lesson}
+      joinState={canJoinLesson(lesson, new Date())}
+    />
+  );
 }

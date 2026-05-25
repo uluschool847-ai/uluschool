@@ -72,6 +72,12 @@ Open [http://localhost:3000](http://localhost:3000).
 | `npm run db:setup` | Generate Prisma client, reset the DB, and verify seed state |
 | `npm run db:studio` | Open Prisma Studio |
 
+### AI-Assisted Development
+
+AI-assisted work in this repository must follow the project rules in [`AGENTS.md`](./AGENTS.md):
+context first, plan before code, small scoped tasks, strict ownership checks, mandatory tests,
+manual browser verification for UI flows, and a final implementation report.
+
 ### Environment Variables
 
 #### Database & Runtime

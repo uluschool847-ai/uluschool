@@ -35,4 +35,17 @@ expect.extend({
         }, received ${actual === null ? "null" : `"${actual}"`}`,
     };
   },
+  toHaveTextContent(received: Element | null, expected: RegExp | string) {
+    const actual = received instanceof Element ? (received.textContent ?? "") : "";
+    const pass =
+      expected instanceof RegExp ? expected.test(actual) : actual.includes(String(expected));
+
+    return {
+      pass,
+      message: () =>
+        `expected element ${pass ? "not " : ""}to have text content ${
+          expected instanceof RegExp ? expected.toString() : `"${expected}"`
+        }, received "${actual}"`,
+    };
+  },
 });

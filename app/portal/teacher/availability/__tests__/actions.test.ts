@@ -193,7 +193,9 @@ describe("Teacher portal availability actions", () => {
 
   it.each([
     { field: "startAt", value: null, message: /start/i },
+    { field: "startAt", value: "not-a-date", message: /date.*valid|valid.*date/i },
     { field: "endAt", value: null, message: /end/i },
+    { field: "endAt", value: "not-a-date", message: /date.*valid|valid.*date/i },
     { field: "endAt", value: "2026-06-10T09:00", message: /start.*end|end.*start/i },
   ])("validates unavailable period input %#", async ({ field, value, message }) => {
     const { createTeacherUnavailablePeriodAction } = await loadTeacherPortalAvailabilityActions();
@@ -205,6 +207,14 @@ describe("Teacher portal availability actions", () => {
     expect(JSON.stringify(result.errors ?? result.message)).toMatch(message);
     expect(createTeacherUnavailablePeriodMock).not.toHaveBeenCalled();
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the shared timezone conversion helper instead of appending Z to datetime-local input", () => {
+    const source = readFileSync(ACTION_SOURCE_PATH, "utf8");
+
+    expect(source).toContain("localDateTimeToUtc");
+    expect(source).not.toContain("`${value}Z`");
+    expect(source).not.toContain("`${value}:00.000Z`");
   });
 
   it("allows teachers to create an unavailable period for themselves with optional reason", async () => {
@@ -348,4 +358,30 @@ describe("Teacher portal availability actions", () => {
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["updateTeacherUnavailablePeriodAction", updateTeacherUnavailablePeriodMock],
+    ["deleteTeacherUnavailablePeriodAction", deleteTeacherUnavailablePeriodMock],
+  ] as const)(
+    "returns a visible error without audit when teacher tries to %s for another teacher",
+    async (actionName, repositoryMock) => {
+      repositoryMock.mockRejectedValueOnce(new Error("Unavailable period not found for teacher."));
+
+      const actions = await loadTeacherPortalAvailabilityActions();
+      const result = await actions[actionName](
+        unavailablePeriodForm({
+          teacherId: "other-teacher",
+        }),
+      );
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: false,
+          message: expect.stringMatching(/not found|teacher|failed/i),
+        }),
+      );
+      expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      expect(revalidatePathMock).not.toHaveBeenCalled();
+    },
+  );
 });

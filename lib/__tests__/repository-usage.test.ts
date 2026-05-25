@@ -79,6 +79,24 @@ const featureFiles = FEATURE_DIRS.flatMap((dir) => walk(dir)).filter(
   (filePath) => isCodeFile(filePath) && !isTestFile(filePath),
 );
 
+const repositoryExportEntries = repositoryFiles.flatMap((repositoryFile) => {
+  const repositoryBaseName = repositoryFile.replace(/.*[\\/]/, "").replace(/\.ts$/, "");
+  return parseRepositoryExports(repositoryFile).map((exportName) => ({
+    exportName,
+    repositoryBaseName,
+    repositoryFile,
+  }));
+});
+
+const featureSnapshots = featureFiles.map((featureFile) => {
+  const { content, imports } = parseNamedImports(featureFile);
+  return {
+    body: stripImportLines(content),
+    featureFile,
+    imports,
+  };
+});
+
 function importTargetsRepository(importSource: string, repositoryBaseName: string) {
   return (
     importSource === `@/lib/repositories/${repositoryBaseName}` ||
@@ -92,23 +110,17 @@ describe("Repository usage audit", () => {
   it("every exported function in lib/repositories is imported by at least one feature file", () => {
     const unused: string[] = [];
 
-    for (const repositoryFile of repositoryFiles) {
-      const repositoryBaseName = repositoryFile.replace(/.*[\\/]/, "").replace(/\.ts$/, "");
-      const exports = parseRepositoryExports(repositoryFile);
+    for (const { exportName, repositoryBaseName, repositoryFile } of repositoryExportEntries) {
+      const importedSomewhere = featureSnapshots.some(({ imports }) =>
+        imports.some(
+          (entry) =>
+            entry.imported === exportName &&
+            importTargetsRepository(entry.from, repositoryBaseName),
+        ),
+      );
 
-      for (const exportName of exports) {
-        const importedSomewhere = featureFiles.some((featureFile) => {
-          const { imports } = parseNamedImports(featureFile);
-          return imports.some(
-            (entry) =>
-              entry.imported === exportName &&
-              importTargetsRepository(entry.from, repositoryBaseName),
-          );
-        });
-
-        if (!importedSomewhere) {
-          unused.push(`Unused export: ${exportName} from ${relative(ROOT, repositoryFile)}`);
-        }
+      if (!importedSomewhere) {
+        unused.push(`Unused export: ${exportName} from ${relative(ROOT, repositoryFile)}`);
       }
     }
 
@@ -118,31 +130,24 @@ describe("Repository usage audit", () => {
   it("every repository function call is inside a real feature, not just a test file", () => {
     const notCalled: string[] = [];
 
-    for (const repositoryFile of repositoryFiles) {
-      const repositoryBaseName = repositoryFile.replace(/.*[\\/]/, "").replace(/\.ts$/, "");
-      const exports = parseRepositoryExports(repositoryFile);
+    for (const { exportName, repositoryBaseName, repositoryFile } of repositoryExportEntries) {
+      const calledInFeature = featureSnapshots.some(({ body, imports }) => {
+        const matchingImport = imports.find(
+          (entry) =>
+            entry.imported === exportName &&
+            importTargetsRepository(entry.from, repositoryBaseName),
+        );
+        if (!matchingImport) return false;
 
-      for (const exportName of exports) {
-        const calledInFeature = featureFiles.some((featureFile) => {
-          const { content, imports } = parseNamedImports(featureFile);
-          const matchingImport = imports.find(
-            (entry) =>
-              entry.imported === exportName &&
-              importTargetsRepository(entry.from, repositoryBaseName),
-          );
-          if (!matchingImport) return false;
+        const callRegex = new RegExp(`\\b${matchingImport.local}\\s*\\(`);
+        const memberCallRegex = new RegExp(`\\b${matchingImport.local}\\.[A-Za-z0-9_]+\\s*\\(`);
+        return callRegex.test(body) || memberCallRegex.test(body);
+      });
 
-          const body = stripImportLines(content);
-          const callRegex = new RegExp(`\\b${matchingImport.local}\\s*\\(`);
-          const memberCallRegex = new RegExp(`\\b${matchingImport.local}\\.[A-Za-z0-9_]+\\s*\\(`);
-          return callRegex.test(body) || memberCallRegex.test(body);
-        });
-
-        if (!calledInFeature) {
-          notCalled.push(
-            `Repository function only imported or only used in tests: ${exportName} from ${relative(ROOT, repositoryFile)}`,
-          );
-        }
+      if (!calledInFeature) {
+        notCalled.push(
+          `Repository function only imported or only used in tests: ${exportName} from ${relative(ROOT, repositoryFile)}`,
+        );
       }
     }
 

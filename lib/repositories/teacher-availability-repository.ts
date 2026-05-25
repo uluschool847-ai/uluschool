@@ -117,8 +117,10 @@ async function getOwnedRule(id: string, teacherId: string, database: Availabilit
 }
 
 async function getOwnedPeriod(id: string, teacherId: string, database: AvailabilityDatabase) {
-  const period = await database.teacherUnavailablePeriod.findUnique({ where: { id } });
-  if (!period || period.teacherId !== teacherId) {
+  const period = await database.teacherUnavailablePeriod.findFirst({
+    where: { id, teacherId },
+  });
+  if (!period) {
     throw new Error("Unavailable period not found for teacher.");
   }
   return period;

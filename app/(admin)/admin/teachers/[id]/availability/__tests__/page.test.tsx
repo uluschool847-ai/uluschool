@@ -76,6 +76,13 @@ const teacherAvailabilityData = {
       endAt: new Date("2026-06-10T12:00:00.000Z"),
       reason: "Exam board meeting",
     },
+    {
+      id: "period-past",
+      teacherId: "teacher-1",
+      startAt: new Date("2026-04-10T09:00:00.000Z"),
+      endAt: new Date("2026-04-10T12:00:00.000Z"),
+      reason: "Past conference",
+    },
   ],
   upcomingLessons: [
     {
@@ -252,11 +259,27 @@ describe("Admin teacher availability page", () => {
       screen.getByRole("button", { name: /create unavailable period|add period/i }),
     ).toBeDefined();
     expect(
-      screen.getByRole("button", { name: /edit unavailable period|edit period/i }),
-    ).toBeDefined();
+      screen.getAllByRole("button", { name: /edit unavailable period|edit period/i }).length,
+    ).toBeGreaterThan(0);
     expect(
-      screen.getByRole("button", { name: /delete unavailable period|delete period/i }),
-    ).toBeDefined();
+      screen.getAllByRole("button", { name: /delete unavailable period|delete period/i }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("shows upcoming and past unavailable periods separately for the target teacher", async () => {
+    getTeacherAvailabilityAdminDataMock.mockResolvedValueOnce(teacherAvailabilityData);
+    listTeacherUnavailablePeriodsMock.mockResolvedValueOnce(
+      teacherAvailabilityData.unavailablePeriods,
+    );
+
+    const page = await loadTeacherAvailabilityPage();
+    render(await page.default({ params: { id: "teacher-1" } }));
+
+    expect(screen.getByRole("heading", { name: /upcoming unavailable periods/i })).toBeDefined();
+    expect(screen.getByRole("heading", { name: /past unavailable periods/i })).toBeDefined();
+    expect(screen.getByText(/exam board meeting/i)).toBeDefined();
+    expect(screen.getByText(/past conference/i)).toBeDefined();
+    expect(screen.queryByText(/other teacher period/i)).toBeNull();
   });
 
   it("exposes an availability affordance from the teacher admin area", async () => {

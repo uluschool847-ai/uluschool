@@ -1,9 +1,11 @@
+import { readFileSync } from "node:fs";
+import { UserRole } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-let mockSession: { uid: string; role: string; email: string } | null = null;
+let mockSession: { uid: string; role: UserRole; email: string } | null = null;
 
 vi.mock("@/lib/auth/session", () => ({
-  requireRole: vi.fn(async (allowedRoles: string[]) => {
+  requireRole: vi.fn(async (allowedRoles: UserRole[]) => {
     if (!mockSession) {
       throw new Error("Unauthorized");
     }
@@ -15,17 +17,38 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 
 const submitOrResubmitStudentWorkMock = vi.hoisted(() => vi.fn());
+const legacySubmitOrResubmitStudentWorkMock = vi.hoisted(() => vi.fn());
+const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/repositories/submission-repository", () => ({
+  submitOrResubmitStudentWork: submitOrResubmitStudentWorkMock,
+}));
 
 vi.mock("@/lib/repositories/portal-repository", () => ({
-  submitOrResubmitStudentWork: submitOrResubmitStudentWorkMock,
+  submitOrResubmitStudentWork: legacySubmitOrResubmitStudentWorkMock,
+}));
+
+vi.mock("@/lib/repositories/admin-audit-repository", () => ({
+  createAdminAuditLog: createAdminAuditLogMock,
 }));
 
 import { submitWorkAction } from "@/app/portal/student/actions/submission-actions";
 
+const ACTION_SOURCE_PATH = "app/portal/student/actions/submission-actions.ts";
+
 describe("Submission security action checks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSession = { uid: "student-1", role: "STUDENT", email: "student@test.local" };
+    mockSession = { uid: "student-1", role: UserRole.STUDENT, email: "student@test.local" };
+  });
+
+  it("does not import student submission writes from broad portal-repository", () => {
+    const source = readFileSync(ACTION_SOURCE_PATH, "utf8");
+    expect(source).toContain("@/lib/repositories/submission-repository");
+    expect(source).not.toMatch(
+      /from\s+["']@\/lib\/repositories\/portal-repository["'][\s\S]*submitOrResubmitStudentWork/,
+    );
+    expect(source).not.toMatch(/studentId\s*:\s*(payload|parsed\.data)\.studentId/);
   });
 
   it("rejects malformed URLs via strict Zod validation", async () => {
@@ -58,5 +81,6 @@ describe("Submission security action checks", () => {
       success: false,
       error: "Forbidden/Unauthorized",
     });
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
   });
 });

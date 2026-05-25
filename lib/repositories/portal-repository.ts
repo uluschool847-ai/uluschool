@@ -619,38 +619,10 @@ export async function getAdminParentById(parentId: string) {
 
 // --- Materials ---
 
-export async function createCourseMaterial(data: {
-  title: string;
-  description?: string | null;
-  fileUrl: string;
-  scheduledClassId: string;
-  teacherId: string;
-}) {
-  return prisma.courseMaterial.create({ data });
-}
-
 export async function getMaterialsForClass(scheduledClassId: string) {
   return prisma.courseMaterial.findMany({
     where: { scheduledClassId },
   });
-}
-
-export async function updateCourseMaterial(
-  id: string,
-  data: Prisma.CourseMaterialUpdateInput,
-  options?: { teacherId?: string },
-) {
-  return prisma.courseMaterial.update({
-    where: { id, ...(options?.teacherId ? { teacherId: options.teacherId } : {}) },
-    data,
-  });
-}
-
-export async function deleteCourseMaterial(id: string, options?: { teacherId?: string }) {
-  await prisma.courseMaterial.delete({
-    where: { id, ...(options?.teacherId ? { teacherId: options.teacherId } : {}) },
-  });
-  return { success: true as const };
 }
 
 // --- Homework ---
@@ -677,8 +649,8 @@ export async function createHomeworkAssignment(input: CreateHomeworkAssignmentIn
     data: {
       title: input.title,
       description: input.description,
-      dueDate: input.dueDate,
       scheduledClassId: input.classId,
+      dueDate: input.dueDate,
       teacherId: input.teacherId,
       subjectId: input.subjectId ?? null,
     },
@@ -686,27 +658,27 @@ export async function createHomeworkAssignment(input: CreateHomeworkAssignmentIn
 }
 
 export async function getHomeworkAssignmentById(id: string, teacherId: string) {
-  const assignment = await prisma.assignment.findUnique({
-    where: { id },
+  return prisma.assignment.findFirst({
+    where: {
+      id,
+      scheduledClass: {
+        teacherId,
+      },
+    },
   });
-
-  if (!assignment) {
-    throw new Error("Assignment not found");
-  }
-
-  if ("teacherId" in assignment && assignment.teacherId !== teacherId) {
-    throw new Error("Assignment not found");
-  }
-
-  return assignment;
 }
 
 export async function listHomeworkAssignmentsForTeacherClass(classId: string, teacherId: string) {
   return prisma.assignment.findMany({
     where: {
       scheduledClassId: classId,
-      teacherId,
-      archivedAt: null,
+      scheduledClass: {
+        teacherId,
+      },
+    },
+    include: {
+      scheduledClass: { select: { title: true } },
+      _count: { select: { submissions: true } },
     },
     orderBy: { dueDate: "asc" },
   });
@@ -717,10 +689,8 @@ export async function updateHomeworkAssignment(
   teacherId: string,
   data: UpdateHomeworkAssignmentInput,
 ) {
-  await getHomeworkAssignmentById(id, teacherId);
-
   return prisma.assignment.update({
-    where: { id },
+    where: { id, teacherId },
     data: {
       title: data.title,
       description: data.description,
@@ -732,31 +702,9 @@ export async function updateHomeworkAssignment(
 }
 
 export async function archiveHomeworkAssignment(id: string, teacherId: string) {
-  await getHomeworkAssignmentById(id, teacherId);
-
   return prisma.assignment.update({
-    where: { id },
+    where: { id, teacherId },
     data: { archivedAt: new Date() },
-  });
-}
-
-export async function listStudentHomework(studentId: string) {
-  // Find all scheduled classes the student participated in, and get their assignments
-  return prisma.assignment.findMany({
-    where: {
-      scheduledClass: {
-        students: {
-          some: { id: studentId },
-        },
-      },
-    },
-    include: {
-      scheduledClass: { select: { title: true } },
-      submissions: {
-        where: { studentId },
-      },
-    },
-    orderBy: { dueDate: "asc" },
   });
 }
 
@@ -798,29 +746,7 @@ type StudentResubmissionInput = {
 };
 
 export async function createStudentSubmission(input: StudentSubmissionInput) {
-  const enrollment = await prisma.assignment.findFirst({
-    where: {
-      id: input.assignmentId,
-      scheduledClass: {
-        students: {
-          some: { id: input.studentId },
-        },
-      },
-    },
-    select: { id: true },
-  });
-
-  if (!enrollment) {
-    throw new Error("Forbidden: student is not enrolled in this class");
-  }
-
-  return prisma.submission.create({
-    data: {
-      studentId: input.studentId,
-      assignmentId: input.assignmentId,
-      contentUrl: input.contentUrl,
-    },
-  });
+  return submitOrResubmitStudentWork(input);
 }
 
 export async function resubmitStudentSubmission(input: StudentResubmissionInput) {
@@ -835,7 +761,7 @@ export async function resubmitStudentSubmission(input: StudentResubmissionInput)
 }
 
 export async function submitOrResubmitStudentWork(input: StudentSubmissionInput) {
-  const assignmentInStudentScope = await prisma.assignment.findFirst({
+  const assignment = await prisma.assignment.findFirst({
     where: {
       id: input.assignmentId,
       scheduledClass: {
@@ -844,23 +770,25 @@ export async function submitOrResubmitStudentWork(input: StudentSubmissionInput)
         },
       },
     },
-    select: { id: true },
   });
 
-  if (!assignmentInStudentScope) {
-    const assignmentExists = await prisma.assignment.findUnique({
-      where: { id: input.assignmentId },
-      select: { id: true },
-    });
+  if (!assignment) {
+    const existingAssignment =
+      typeof prisma.assignment.findUnique === "function"
+        ? await prisma.assignment.findUnique({
+            where: { id: input.assignmentId },
+            select: { id: true },
+          })
+        : { id: input.assignmentId };
 
-    if (!assignmentExists) {
-      throw new Error("Not found");
+    if (!existingAssignment) {
+      throw new Error("Assignment not found");
     }
 
     throw new Error("Unauthorized: Student not enrolled in this assignment's class");
   }
 
-  const existingSubmission = await prisma.submission.findMany({
+  const submissions = await prisma.submission.findMany({
     where: {
       studentId: input.studentId,
       assignmentId: input.assignmentId,
@@ -868,16 +796,27 @@ export async function submitOrResubmitStudentWork(input: StudentSubmissionInput)
     orderBy: { submittedAt: "desc" },
     take: 1,
   });
+  const existing = Array.isArray(submissions) ? submissions[0] : null;
 
-  if (existingSubmission.length > 0) {
-    return resubmitStudentSubmission({
-      submissionId: existingSubmission[0].id,
-      studentId: input.studentId,
-      contentUrl: input.contentUrl,
+  if (existing) {
+    return prisma.submission.update({
+      where: { id: existing.id },
+      data: {
+        contentUrl: input.contentUrl,
+        submittedAt: new Date(),
+        grade: null,
+        feedback: null,
+      },
     });
   }
 
-  return createStudentSubmission(input);
+  return prisma.submission.create({
+    data: {
+      studentId: input.studentId,
+      assignmentId: input.assignmentId,
+      contentUrl: input.contentUrl,
+    },
+  });
 }
 
 export async function listTeacherHomework(teacherId: string) {
@@ -892,27 +831,6 @@ export async function listTeacherHomework(teacherId: string) {
       _count: { select: { submissions: true } },
     },
     orderBy: { dueDate: "desc" },
-  });
-}
-
-export async function listStudentCourseMaterials(studentId: string) {
-  return prisma.courseMaterial.findMany({
-    where: {
-      scheduledClass: {
-        students: {
-          some: { id: studentId },
-        },
-      },
-    },
-    include: {
-      scheduledClass: {
-        select: {
-          id: true,
-          title: true,
-        },
-      },
-    },
-    orderBy: { createdAt: "desc" },
   });
 }
 
@@ -1804,15 +1722,12 @@ export async function gradeSubmissionForTeacher(input: {
   });
 
   if (!ownedSubmission) {
-    throw new Error("Submission not found or not owned by teacher");
+    throw new Error("Submission not found or not owned by teacher.");
   }
 
   return prisma.submission.update({
     where: { id: input.submissionId },
-    data: {
-      grade: input.grade,
-      feedback: input.feedback ?? null,
-    },
+    data: { grade: input.grade, feedback: input.feedback ?? null },
   });
 }
 

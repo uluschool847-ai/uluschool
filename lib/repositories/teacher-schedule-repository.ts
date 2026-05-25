@@ -255,18 +255,40 @@ function mapLesson(lesson: TeacherLessonRecord): TeacherScheduleLesson {
   };
 }
 
-export async function listTeacherSchedule(input: TeacherScheduleInput) {
-  const where: Prisma.ScheduledClassWhereInput = {
-    startAt: { gte: input.from, lte: input.to },
-    OR: buildTeacherAccessWhere(input.teacherId),
+function normalizeTeacherScheduleInput(
+  input: TeacherScheduleInput | string,
+  filters: Partial<Omit<TeacherScheduleInput, "teacherId">> = {},
+): TeacherScheduleInput {
+  if (typeof input !== "string") {
+    return input;
+  }
+
+  return {
+    teacherId: input,
+    from: filters.from ?? new Date("2000-01-01T00:00:00.000Z"),
+    to: filters.to ?? new Date("2100-01-01T00:00:00.000Z"),
+    classGroupId: filters.classGroupId,
+    subjectId: filters.subjectId,
+    status: filters.status,
   };
-  if (input.classGroupId) {
-    where.classGroupId = input.classGroupId;
+}
+
+export async function listTeacherSchedule(
+  input: TeacherScheduleInput | string,
+  filters: Partial<Omit<TeacherScheduleInput, "teacherId">> = {},
+) {
+  const scheduleInput = normalizeTeacherScheduleInput(input, filters);
+  const where: Prisma.ScheduledClassWhereInput = {
+    startAt: { gte: scheduleInput.from, lte: scheduleInput.to },
+    OR: buildTeacherAccessWhere(scheduleInput.teacherId),
+  };
+  if (scheduleInput.classGroupId) {
+    where.classGroupId = scheduleInput.classGroupId;
   }
-  if (input.subjectId) {
-    where.subjectId = input.subjectId;
+  if (scheduleInput.subjectId) {
+    where.subjectId = scheduleInput.subjectId;
   }
-  const status = parseLessonStatus(input.status);
+  const status = parseLessonStatus(scheduleInput.status);
   if (status) {
     where.status = status;
   }

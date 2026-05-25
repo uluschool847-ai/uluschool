@@ -1,18 +1,28 @@
 import { readFileSync } from "node:fs";
-import { prisma } from "@/lib/prisma";
-import { type Prisma, UserRole } from "@prisma/client";
+import { UserRole } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    courseMaterial: {
-      create: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn(),
-    },
-  },
-}));
-
+const createCourseMaterialForTeacherMock = vi.hoisted(() => vi.fn());
+const updateCourseMaterialForTeacherMock = vi.hoisted(() => vi.fn());
+const deleteCourseMaterialForTeacherMock = vi.hoisted(() => vi.fn());
+const unlinkCourseMaterialAttachmentForTeacherMock = vi.hoisted(() => vi.fn());
+const validateCourseMaterialFileUrlMock = vi.hoisted(() =>
+  vi.fn((value: string | null | undefined) => {
+    const fileUrl = value?.trim() ?? "";
+    if (!fileUrl) return null;
+    if (fileUrl.startsWith("/uploads/")) return fileUrl;
+    const parsed = new URL(fileUrl);
+    if (parsed.protocol !== "https:") {
+      throw new Error("File URL must be a safe HTTPS URL or an internal upload path.");
+    }
+    return fileUrl;
+  }),
+);
+const legacyCreateCourseMaterialMock = vi.hoisted(() => vi.fn());
+const legacyUpdateCourseMaterialMock = vi.hoisted(() => vi.fn());
+const legacyDeleteCourseMaterialMock = vi.hoisted(() => vi.fn());
+const revalidatePathMock = vi.hoisted(() => vi.fn());
+const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const storageDeleteMock = vi.hoisted(() => vi.fn());
 const createStorageServiceMock = vi.hoisted(() =>
   vi.fn(() => ({
@@ -20,8 +30,8 @@ const createStorageServiceMock = vi.hoisted(() =>
   })),
 );
 
-// Mock the session module for robust authorization tests
 let mockSession: { uid: string; role: UserRole | "GUEST"; email: string } | null = null;
+
 vi.mock("@/lib/auth/session", () => ({
   requireRole: vi.fn(async (allowedRoles: UserRole[]) => {
     if (!mockSession) throw new Error("Unauthorized");
@@ -29,6 +39,28 @@ vi.mock("@/lib/auth/session", () => ({
     return mockSession;
   }),
   getSession: vi.fn(async () => mockSession),
+}));
+
+vi.mock("@/lib/repositories/course-material-repository", () => ({
+  createCourseMaterialForTeacher: createCourseMaterialForTeacherMock,
+  deleteCourseMaterialForTeacher: deleteCourseMaterialForTeacherMock,
+  unlinkCourseMaterialAttachmentForTeacher: unlinkCourseMaterialAttachmentForTeacherMock,
+  updateCourseMaterialForTeacher: updateCourseMaterialForTeacherMock,
+  validateCourseMaterialFileUrl: validateCourseMaterialFileUrlMock,
+}));
+
+vi.mock("@/lib/repositories/portal-repository", () => ({
+  createCourseMaterial: legacyCreateCourseMaterialMock,
+  updateCourseMaterial: legacyUpdateCourseMaterialMock,
+  deleteCourseMaterial: legacyDeleteCourseMaterialMock,
+}));
+
+vi.mock("@/lib/repositories/admin-audit-repository", () => ({
+  createAdminAuditLog: createAdminAuditLogMock,
+}));
+
+vi.mock("next/cache", () => ({
+  revalidatePath: revalidatePathMock,
 }));
 
 vi.mock("@/lib/storage", () => ({
@@ -39,7 +71,7 @@ import {
   createClassMaterialsAction,
   deleteCourseMaterialAction,
   deleteCourseMaterialWithFilesAction,
-  submitCourseMaterial,
+  submitCourseMaterial as submitCourseMaterialAction,
   unlinkAttachmentAction,
   updateCourseMaterialAction,
 } from "@/app/portal/teacher/actions/material-actions";
@@ -51,13 +83,32 @@ const validMaterialPayload = {
   title: "Physics Handout",
   description: "Please read pages 10-15 before next class",
   fileUrl: "https://example.com/physics.pdf",
-  scheduledClassId: "class-123",
+  scheduledClassId: "lesson-123",
 };
 
 const validMaterialUpdate = {
   title: "Updated Physics Handout",
   description: "Updated reading assignment: pages 10-20",
+  fileUrl: "https://example.com/physics-updated.pdf",
 };
+
+function material(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "mat-123",
+    title: validMaterialPayload.title,
+    description: validMaterialPayload.description,
+    fileUrl: validMaterialPayload.fileUrl,
+    scheduledClassId: "lesson-123",
+    teacherId: "teacher-123",
+    scheduledClass: {
+      id: "lesson-123",
+      classGroupId: "class-group-123",
+      classGroup: { id: "class-group-123" },
+    },
+    cleanup: { deleted: 0, queued: false },
+    ...overrides,
+  };
+}
 
 function expectEnumTeacherGuardSource() {
   const source = readFileSync(ACTION_SOURCE_PATH, "utf8");
@@ -67,6 +118,38 @@ function expectEnumTeacherGuardSource() {
   expect(source).not.toContain("requireRole(['TEACHER'])");
 }
 
+function expectDedicatedMaterialRepositorySource() {
+  const source = readFileSync(ACTION_SOURCE_PATH, "utf8");
+  expect(source).toContain("@/lib/repositories/course-material-repository");
+  expect(source).not.toMatch(
+    /from\s+["']@\/lib\/repositories\/portal-repository["'][\s\S]*(createCourseMaterial|updateCourseMaterial|deleteCourseMaterial)/,
+  );
+  expect(source).not.toMatch(/teacherId\s*:\s*(data|payload|parsed\.data)\.teacherId/);
+}
+
+function expectMaterialRevalidation(classGroupId = "class-group-123", lessonId = "lesson-123") {
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/teacher");
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/teacher/classes");
+  expect(revalidatePathMock).toHaveBeenCalledWith(`/portal/teacher/classes/${classGroupId}`);
+  expect(revalidatePathMock).toHaveBeenCalledWith(`/portal/teacher/lessons/${lessonId}`);
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/teacher/materials");
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/student");
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/student/materials");
+  expect(revalidatePathMock).toHaveBeenCalledWith("/portal/parent");
+}
+
+function expectMaterialAudit(action: string) {
+  expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      action,
+      actorId: "teacher-123",
+      targetType: "course_material",
+      meta: expect.objectContaining({ teacherId: "teacher-123" }),
+    }),
+    expect.anything(),
+  );
+}
+
 function expectRejectedAuthResult(result: unknown) {
   const message = result instanceof Error ? result.message : JSON.stringify(result);
   expect(message).toMatch(/forbidden|unauthorized|invalid|redirect/i);
@@ -74,41 +157,56 @@ function expectRejectedAuthResult(result: unknown) {
 
 describe("API/Action Integration - Teacher Course Material Management", () => {
   beforeEach(() => {
-    // Reset to a valid Teacher session by default for happy paths
     mockSession = {
       uid: "teacher-123",
       role: UserRole.TEACHER,
       email: "teacher@uluglobalacademy.com",
     };
     vi.clearAllMocks();
+    createCourseMaterialForTeacherMock.mockResolvedValue(material());
+    updateCourseMaterialForTeacherMock.mockResolvedValue(
+      material({ title: validMaterialUpdate.title, ...validMaterialUpdate }),
+    );
+    deleteCourseMaterialForTeacherMock.mockResolvedValue({
+      ...material(),
+      success: true,
+      cleanup: { deleted: 1, queued: true, storageKeys: ["uploads/teacher/material-1.pdf"] },
+    });
+    unlinkCourseMaterialAttachmentForTeacherMock.mockResolvedValue({
+      attachmentId: "attachment-1",
+      materialId: "mat-123",
+      storageKey: "uploads/teacher/material-1.pdf",
+    });
+    legacyCreateCourseMaterialMock.mockResolvedValue(material());
+    legacyUpdateCourseMaterialMock.mockResolvedValue(
+      material({ title: validMaterialUpdate.title, ...validMaterialUpdate }),
+    );
+    legacyDeleteCourseMaterialMock.mockResolvedValue({ success: true });
   });
 
-  describe("Authorization Rules", () => {
+  describe("Authorization and source ownership", () => {
     it("uses enum-based teacher guards in source", () => {
       expectEnumTeacherGuardSource();
+    });
+
+    it("imports dedicated material repository write helpers and does not trust hidden teacherId", () => {
+      expectDedicatedMaterialRepositorySource();
     });
 
     const restrictedRoles = [UserRole.STUDENT, "GUEST", UserRole.PARENT, UserRole.ADMIN] as const;
 
     for (const role of restrictedRoles) {
-      it(`should completely reject material creation for user with role ${role}`, async () => {
+      it(`rejects material creation for user with role ${role}`, async () => {
         mockSession = { uid: `user-${role}`, role, email: `${role.toLowerCase()}@test.com` };
 
-        const response = await submitCourseMaterial({
-          title: "Hacked Material",
-          scheduledClassId: "class-1",
-        }).catch((e: unknown) => e);
+        const response = await submitCourseMaterialAction(validMaterialPayload).catch(
+          (error: unknown) => error,
+        );
 
-        // Server actions typically return structured objects like { success: false, error: 'Forbidden' }
-        // or throw an Error entirely
-        if (response instanceof Error) {
-          expect(response.message).toMatch(/Forbidden|Unauthorized/i);
-        } else {
-          expect(response.success).toBe(false);
-          expect(response.error).toMatch(/Forbidden|Unauthorized/i);
-        }
+        expectRejectedAuthResult(response);
         expect(requireRole).toHaveBeenCalledWith([UserRole.TEACHER]);
-        expect(prisma.courseMaterial.create).not.toHaveBeenCalled();
+        expect(createCourseMaterialForTeacherMock).not.toHaveBeenCalled();
+        expect(legacyCreateCourseMaterialMock).not.toHaveBeenCalled();
       });
     }
 
@@ -128,26 +226,10 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
         expectRejectedAuthResult(updateResponse);
         expectRejectedAuthResult(deleteResponse);
         expect(requireRole).toHaveBeenCalledWith([UserRole.TEACHER]);
-        expect(prisma.courseMaterial.update).not.toHaveBeenCalled();
-        expect(prisma.courseMaterial.delete).not.toHaveBeenCalled();
+        expect(updateCourseMaterialForTeacherMock).not.toHaveBeenCalled();
+        expect(deleteCourseMaterialForTeacherMock).not.toHaveBeenCalled();
       },
     );
-
-    it("treats invalid or role-changed sessions as requireRole failures before material mutation", async () => {
-      vi.mocked(requireRole).mockRejectedValueOnce(
-        new Error("NEXT_REDIRECT:/portal/login?reason=invalid"),
-      );
-
-      const response = await submitCourseMaterial(validMaterialPayload);
-
-      expect(response).toEqual(
-        expect.objectContaining({
-          success: false,
-          error: expect.stringMatching(/invalid|redirect/i),
-        }),
-      );
-      expect(prisma.courseMaterial.create).not.toHaveBeenCalled();
-    });
 
     it.each([
       ["createClassMaterialsAction"],
@@ -179,184 +261,383 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
 
       expectRejectedAuthResult(result);
       expect(requireRole).toHaveBeenCalledWith([UserRole.TEACHER]);
-      expect(prisma.courseMaterial.delete).not.toHaveBeenCalled();
+      expect(deleteCourseMaterialForTeacherMock).not.toHaveBeenCalled();
       expect(createStorageServiceMock).not.toHaveBeenCalled();
       expect(storageDeleteMock).not.toHaveBeenCalled();
     });
   });
 
-  describe("Happy Path", () => {
-    it("should successfully process a valid material payload by a Teacher and return success", async () => {
-      vi.mocked(prisma.courseMaterial.create).mockResolvedValue({
-        id: "mat-123",
-        title: validMaterialPayload.title,
-        description: validMaterialPayload.description,
-        fileUrl: validMaterialPayload.fileUrl,
-        scheduledClassId: validMaterialPayload.scheduledClassId,
-        teacherId: "teacher-123",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as Prisma.CourseMaterialUncheckedCreateInput as never);
-
-      const response = await submitCourseMaterial(validMaterialPayload);
-
-      expect(response).toBeDefined();
-      expect(response.success).toBe(true);
-      expect(response.data).toHaveProperty("id");
-      expect(response.data.title).toBe(validMaterialPayload.title);
-      expect(requireRole).toHaveBeenCalledWith([UserRole.TEACHER]);
-    });
-  });
-
-  describe("Validation & Data Integrity", () => {
-    it("should throw a validation error (Bad Request) if required fields are missing", async () => {
-      // Explicitly missing the required 'title' and 'scheduledClassId'
-      const invalidPayload = {
-        description: "Some random description without a class or title",
-      };
-
-      const response = await submitCourseMaterial(invalidPayload).catch((e: unknown) => e);
-
-      expect(response).toBeDefined();
-
-      // Zod validation inside the action should catch this and return a structured error
-      expect(response.success).toBe(false);
-      expect(response.error).toBeDefined();
-
-      const errorString = JSON.stringify(response.error).toLowerCase();
-      expect(errorString).toContain("title");
-    });
-  });
-
-  describe("Update Action (updateCourseMaterialAction)", () => {
-    it("should successfully process a valid update payload by a Teacher", async () => {
-      const materialId = "mat-123";
-      vi.mocked(prisma.courseMaterial.update).mockResolvedValue({
-        id: materialId,
-        title: validMaterialUpdate.title,
-        description: validMaterialUpdate.description,
-        fileUrl: "https://example.com/physics.pdf",
-        scheduledClassId: "class-123",
-        teacherId: "teacher-123",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as Prisma.CourseMaterialUncheckedCreateInput as never);
-
-      const response = await updateCourseMaterialAction(materialId, validMaterialUpdate);
-
-      expect(response).toBeDefined();
-      expect(response.success).toBe(true);
-      expect(response.data).toHaveProperty("id", materialId);
-      expect(response.data.title).toBe(validMaterialUpdate.title);
-      expect(requireRole).toHaveBeenCalledWith([UserRole.TEACHER]);
-    });
-
-    it("scopes material updates to the signed-in teacher to prevent cross-teacher edits", async () => {
-      vi.mocked(prisma.courseMaterial.update).mockResolvedValue({
-        id: "foreign-material",
-        title: "Foreign material",
-        description: "Should not be editable",
-        fileUrl: "https://example.com/foreign.pdf",
-        scheduledClassId: "foreign-class",
+  describe("Create action", () => {
+    it("uses session.uid, ignores submitted teacherId, calls dedicated repository, audits, and revalidates", async () => {
+      const response = await submitCourseMaterialAction({
+        ...validMaterialPayload,
         teacherId: "teacher-2",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as Prisma.CourseMaterialUncheckedCreateInput as never);
+      });
 
-      await updateCourseMaterialAction("foreign-material", validMaterialUpdate);
-
-      expect(prisma.courseMaterial.update).toHaveBeenCalledWith(
+      expect(response).toEqual(
         expect.objectContaining({
-          where: expect.objectContaining({
-            id: "foreign-material",
-            teacherId: "teacher-123",
-          }),
+          success: true,
+          data: expect.objectContaining({ id: "mat-123", title: validMaterialPayload.title }),
         }),
       );
+      expect(createCourseMaterialForTeacherMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: validMaterialPayload.title,
+          scheduledClassId: "lesson-123",
+          teacherId: "teacher-123",
+        }),
+      );
+      expect(JSON.stringify(createCourseMaterialForTeacherMock.mock.calls[0][0])).not.toContain(
+        "teacher-2",
+      );
+      expect(legacyCreateCourseMaterialMock).not.toHaveBeenCalled();
+      expectMaterialAudit("COURSE_MATERIAL_CREATED");
+      expectMaterialRevalidation();
     });
 
-    it("should throw a validation error if invalid fields are provided during update", async () => {
-      const materialId = "mat-123";
-      // Testing URL validation failure
-      const invalidUpdate = {
-        fileUrl: "not-a-valid-url",
-      };
-
-      const response = await updateCourseMaterialAction(materialId, invalidUpdate).catch(
-        (e: unknown) => e,
+    it("returns repository ownership errors for foreign classes without audit or revalidation", async () => {
+      createCourseMaterialForTeacherMock.mockRejectedValueOnce(
+        new Error("Unauthorized: teacher does not own this class."),
       );
 
-      expect(response).toBeDefined();
-      expect(response.success).toBe(false);
-      expect(response.error).toBeDefined();
+      const response = await submitCourseMaterialAction({
+        ...validMaterialPayload,
+        scheduledClassId: "foreign-lesson",
+      });
 
-      const errorString = JSON.stringify(response.error).toLowerCase();
-      expect(errorString).toContain("url");
+      expect(response).toEqual(
+        expect.objectContaining({
+          success: false,
+          error: expect.stringMatching(/unauthorized|own|class/i),
+        }),
+      );
+      expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      expect(revalidatePathMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["missing title", { title: "" }, /title/i],
+      ["missing scheduledClassId", { scheduledClassId: "" }, /scheduled class/i],
+      ["missing fileUrl", { fileUrl: "" }, /file|url/i],
+      ["javascript URL", { fileUrl: "javascript:alert(1)" }, /file|url|safe/i],
+      ["data URL", { fileUrl: "data:text/html;base64,PHNjcmlwdA==" }, /file|url|safe/i],
+      ["file URL", { fileUrl: "file:///etc/passwd" }, /file|url|safe/i],
+      ["http URL", { fileUrl: "http://example.com/physics.pdf" }, /file|url|safe/i],
+    ])("validates create payload: %s", async (_caseName, overrides, message) => {
+      const response = await submitCourseMaterialAction({
+        ...validMaterialPayload,
+        ...overrides,
+      });
+
+      expect(response).toEqual(
+        expect.objectContaining({
+          success: false,
+          error: expect.anything(),
+        }),
+      );
+      expect(JSON.stringify(response.error).toLowerCase()).toMatch(message);
+      expect(createCourseMaterialForTeacherMock).not.toHaveBeenCalled();
+      expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    });
+
+    it.each(["https://example.com/physics.pdf", "/uploads/teacher/physics.pdf"])(
+      "accepts safe fileUrl: %s",
+      async (fileUrl) => {
+        await submitCourseMaterialAction({ ...validMaterialPayload, fileUrl });
+
+        expect(createCourseMaterialForTeacherMock).toHaveBeenCalledWith(
+          expect.objectContaining({ fileUrl }),
+        );
+      },
+    );
+  });
+
+  describe("Update action", () => {
+    it("uses session.uid, calls dedicated repository, audits, and revalidates", async () => {
+      const response = await updateCourseMaterialAction("mat-123", {
+        ...validMaterialUpdate,
+        teacherId: "teacher-2",
+      });
+
+      expect(response).toEqual(
+        expect.objectContaining({
+          success: true,
+          data: expect.objectContaining({ id: "mat-123", title: validMaterialUpdate.title }),
+        }),
+      );
+      expect(updateCourseMaterialForTeacherMock).toHaveBeenCalledWith(
+        "mat-123",
+        "teacher-123",
+        expect.not.objectContaining({ teacherId: "teacher-2" }),
+      );
+      expect(legacyUpdateCourseMaterialMock).not.toHaveBeenCalled();
+      expectMaterialAudit("COURSE_MATERIAL_UPDATED");
+      expectMaterialRevalidation();
+    });
+
+    it("rejects foreign material or moving to a foreign scheduledClassId without audit", async () => {
+      updateCourseMaterialForTeacherMock.mockRejectedValueOnce(
+        new Error("Assignment not found or not owned by teacher."),
+      );
+
+      const response = await updateCourseMaterialAction("foreign-material", {
+        ...validMaterialUpdate,
+        scheduledClassId: "foreign-lesson",
+      });
+
+      expect(response).toEqual(
+        expect.objectContaining({
+          success: false,
+          error: expect.stringMatching(/not found|owned|teacher|unauthorized/i),
+        }),
+      );
+      expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      expect(revalidatePathMock).not.toHaveBeenCalled();
     });
   });
 
-  describe("Delete Action (deleteCourseMaterialAction)", () => {
-    it("should successfully delete a material when a valid ID is provided by a Teacher", async () => {
-      const materialId = "mat-123";
-      vi.mocked(prisma.courseMaterial.delete).mockResolvedValue({
-        id: materialId,
-        title: "Updated Physics Handout",
-        description: "Updated reading assignment: pages 10-20",
-        fileUrl: "https://example.com/physics.pdf",
-        scheduledClassId: "class-123",
-        teacherId: "teacher-123",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as Prisma.CourseMaterialUncheckedCreateInput as never);
+  describe("Delete and attachment actions", () => {
+    it("uses session.uid, calls dedicated repository, audits, revalidates, and reports cleanup", async () => {
+      const response = await deleteCourseMaterialAction("mat-123");
 
-      const response = await deleteCourseMaterialAction(materialId);
-
-      expect(response).toBeDefined();
-      expect(response.success).toBe(true);
-      expect(requireRole).toHaveBeenCalledWith([UserRole.TEACHER]);
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(deleteCourseMaterialForTeacherMock).toHaveBeenCalledWith("mat-123", "teacher-123");
+      expect(legacyDeleteCourseMaterialMock).not.toHaveBeenCalled();
+      expectMaterialAudit("COURSE_MATERIAL_DELETED");
+      expectMaterialRevalidation();
     });
 
-    it("scopes material deletion to the signed-in teacher to prevent cross-teacher deletes", async () => {
-      vi.mocked(prisma.courseMaterial.delete).mockResolvedValue({
-        id: "foreign-material",
-        title: "Foreign material",
-        description: "Should not be deletable",
-        fileUrl: "https://example.com/foreign.pdf",
-        scheduledClassId: "foreign-class",
-        teacherId: "teacher-2",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      } as Prisma.CourseMaterialUncheckedCreateInput as never);
+    it("rejects foreign material delete without audit or cleanup", async () => {
+      deleteCourseMaterialForTeacherMock.mockRejectedValueOnce(
+        new Error("Material not found or not owned by teacher."),
+      );
 
-      await deleteCourseMaterialAction("foreign-material");
+      const response = await deleteCourseMaterialAction("foreign-material");
 
-      expect(prisma.courseMaterial.delete).toHaveBeenCalledWith(
+      expect(response).toEqual(
         expect.objectContaining({
-          where: expect.objectContaining({
-            id: "foreign-material",
-            teacherId: "teacher-123",
-          }),
+          success: false,
+          error: expect.stringMatching(/not found|owned|teacher|unauthorized/i),
         }),
       );
+      expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      expect(revalidatePathMock).not.toHaveBeenCalled();
+      expect(storageDeleteMock).not.toHaveBeenCalled();
     });
 
-    it("should return an appropriate error if attempting to delete a material that does not exist", async () => {
-      const invalidMaterialId = "non-existent-mat-404";
-      vi.mocked(prisma.courseMaterial.delete).mockRejectedValue(
-        new Error("Record to delete does not exist"),
+    it("deleteCourseMaterialWithFilesAction delegates ownership and does not clean arbitrary files", async () => {
+      await deleteCourseMaterialWithFilesAction({ materialId: "mat-123" });
+
+      expect(deleteCourseMaterialForTeacherMock).toHaveBeenCalledWith("mat-123", "teacher-123");
+      expect(storageDeleteMock).not.toHaveBeenCalledWith("teacher-2/private.pdf");
+      expectMaterialAudit("COURSE_MATERIAL_DELETED");
+    });
+
+    it("unlinkAttachmentAction audits owned attachment unlink/delete when action exists", async () => {
+      const response = await unlinkAttachmentAction({
+        attachmentId: "attachment-1",
+        storageKey: "uploads/teacher/material-1.pdf",
+      });
+
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "COURSE_MATERIAL_ATTACHMENT_DELETED",
+          actorId: "teacher-123",
+          targetType: "course_material_attachment",
+          targetId: "attachment-1",
+        }),
+        expect.anything(),
+      );
+    });
+  });
+
+  describe("Uploaded file lifecycle", () => {
+    it("create action forwards uploaded attachment metadata and audits the file upload", async () => {
+      createCourseMaterialForTeacherMock.mockResolvedValueOnce(
+        material({
+          attachments: [
+            {
+              id: "attachment-1",
+              filename: "physics.pdf",
+              storageKey: "uploads/teacher/physics.pdf",
+              mimeType: "application/pdf",
+              size: 2048,
+            },
+          ],
+        }),
       );
 
-      const response = await deleteCourseMaterialAction(invalidMaterialId).catch((e: unknown) => e);
+      const response = await submitCourseMaterialAction({
+        ...validMaterialPayload,
+        fileUrl: "/uploads/teacher/physics.pdf",
+        attachment: {
+          filename: "physics.pdf",
+          storageKey: "uploads/teacher/physics.pdf",
+          mimeType: "application/pdf",
+          size: 2048,
+        },
+      });
 
-      expect(response).toBeDefined();
-      // Server action handles "not found" gracefully returning success: false
-      if (response instanceof Error) {
-        expect(response.message).toMatch(/not found|exist/i);
-      } else {
-        expect(response.success).toBe(false);
-        const errorString = JSON.stringify(response.error).toLowerCase();
-        expect(errorString).toMatch(/not found|exist/i);
-      }
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(createCourseMaterialForTeacherMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          teacherId: "teacher-123",
+          attachments: [
+            expect.objectContaining({
+              filename: "physics.pdf",
+              storageKey: "uploads/teacher/physics.pdf",
+              mimeType: "application/pdf",
+              size: 2048,
+            }),
+          ],
+        }),
+      );
+      expectMaterialAudit("COURSE_MATERIAL_CREATED");
+      expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "COURSE_MATERIAL_FILE_UPLOADED",
+          actorId: "teacher-123",
+          targetType: "course_material_attachment",
+          meta: expect.objectContaining({
+            teacherId: "teacher-123",
+            materialId: "mat-123",
+            storageKey: "uploads/teacher/physics.pdf",
+          }),
+        }),
+        expect.anything(),
+      );
+    });
+
+    it("update action can keep the existing file unchanged", async () => {
+      await updateCourseMaterialAction("mat-123", {
+        title: "Metadata only",
+        description: "No file replacement",
+      });
+
+      expect(updateCourseMaterialForTeacherMock).toHaveBeenCalledWith(
+        "mat-123",
+        "teacher-123",
+        expect.not.objectContaining({
+          attachments: expect.anything(),
+        }),
+      );
+      expect(createAdminAuditLogMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: "COURSE_MATERIAL_FILE_REPLACED" }),
+        expect.anything(),
+      );
+    });
+
+    it("update action forwards replacement attachment metadata and audits replacement", async () => {
+      updateCourseMaterialForTeacherMock.mockResolvedValueOnce(
+        material({
+          fileUrl: "/uploads/teacher/replacement.pdf",
+          cleanup: {
+            queued: true,
+            deleted: 1,
+            storageKeys: ["uploads/teacher/old.pdf"],
+          },
+          attachments: [
+            {
+              id: "attachment-new",
+              filename: "replacement.pdf",
+              storageKey: "uploads/teacher/replacement.pdf",
+              mimeType: "application/pdf",
+              size: 4096,
+            },
+          ],
+        }),
+      );
+
+      const response = await updateCourseMaterialAction("mat-123", {
+        title: "Replacement",
+        fileUrl: "/uploads/teacher/replacement.pdf",
+        attachment: {
+          filename: "replacement.pdf",
+          storageKey: "uploads/teacher/replacement.pdf",
+          mimeType: "application/pdf",
+          size: 4096,
+        },
+      });
+
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(updateCourseMaterialForTeacherMock).toHaveBeenCalledWith(
+        "mat-123",
+        "teacher-123",
+        expect.objectContaining({
+          attachments: [
+            expect.objectContaining({
+              storageKey: "uploads/teacher/replacement.pdf",
+            }),
+          ],
+        }),
+      );
+      expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "COURSE_MATERIAL_FILE_REPLACED",
+          actorId: "teacher-123",
+          targetType: "course_material",
+          targetId: "mat-123",
+          meta: expect.objectContaining({
+            teacherId: "teacher-123",
+            materialId: "mat-123",
+            oldStorageKeys: ["uploads/teacher/old.pdf"],
+          }),
+        }),
+        expect.anything(),
+      );
+    });
+
+    it("unlink action accepts materialId and attachmentId only, loads storageKey from repository, and audits", async () => {
+      const response = await unlinkAttachmentAction({
+        materialId: "mat-123",
+        attachmentId: "attachment-1",
+      } as never);
+
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(unlinkCourseMaterialAttachmentForTeacherMock).toHaveBeenCalledWith(
+        "teacher-123",
+        "mat-123",
+        "attachment-1",
+      );
+      expect(storageDeleteMock).toHaveBeenCalledWith("uploads/teacher/material-1.pdf");
+      expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "COURSE_MATERIAL_ATTACHMENT_DELETED",
+          actorId: "teacher-123",
+          targetType: "course_material_attachment",
+          targetId: "attachment-1",
+          meta: expect.objectContaining({
+            teacherId: "teacher-123",
+            materialId: "mat-123",
+          }),
+        }),
+        expect.anything(),
+      );
+      expect(
+        JSON.stringify(unlinkCourseMaterialAttachmentForTeacherMock.mock.calls[0]),
+      ).not.toMatch(/client-private\.pdf/);
+    });
+
+    it("unlink action does not trust client-provided storageKey on ownership failure", async () => {
+      unlinkCourseMaterialAttachmentForTeacherMock.mockRejectedValueOnce(
+        new Error("Material attachment not found or not owned by teacher."),
+      );
+
+      const response = await unlinkAttachmentAction({
+        materialId: "foreign-material",
+        attachmentId: "attachment-1",
+        storageKey: "teacher-2/client-private.pdf",
+      } as never);
+
+      expect(response).toEqual(
+        expect.objectContaining({
+          success: false,
+          error: expect.stringMatching(/not found|owned|teacher|unauthorized/i),
+        }),
+      );
+      expect(storageDeleteMock).not.toHaveBeenCalledWith("teacher-2/client-private.pdf");
+      expect(createAdminAuditLogMock).not.toHaveBeenCalled();
     });
   });
 });
