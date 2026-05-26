@@ -1,4 +1,4 @@
-import { generateTasksForStaleEnquiries } from "@/lib/repositories/automation-repository";
+import { generateRuleBasedAutomationTasks } from "@/lib/repositories/automation-repository";
 import { NextResponse } from "next/server";
 
 function isAuthorized(authHeader: string | null) {
@@ -15,11 +15,11 @@ export async function GET(request: Request) {
   }
 
   try {
-    const tasks = await generateTasksForStaleEnquiries();
+    const tasks = await generateRuleBasedAutomationTasks();
     return NextResponse.json({
       success: true,
       tasksCreated: tasks.length,
-      message: `Generated ${tasks.length} manager tasks for stale enquiries.`,
+      message: `Generated ${tasks.length} manager tasks from rule-based automation.`,
     });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";

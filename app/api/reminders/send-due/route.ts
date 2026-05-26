@@ -16,7 +16,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await processDueReminders();
+    const url = new URL(request.url);
+    const dryRun =
+      url.searchParams.get("dryRun") === "1" || url.searchParams.get("dryRun") === "true";
+    const result = await processDueReminders({ dryRun });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     console.error("Reminder processing failed", error);

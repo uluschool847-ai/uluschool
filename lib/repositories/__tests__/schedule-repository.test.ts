@@ -585,11 +585,11 @@ describe("Admin scheduled class repository contract", () => {
         }),
         include: expect.objectContaining({
           teacher: expect.objectContaining({ select: expect.objectContaining({ id: true }) }),
-          students: { select: { id: true } },
+          students: { select: expect.objectContaining({ id: true }) },
           classGroup: expect.objectContaining({
             select: expect.objectContaining({
               teacher: expect.objectContaining({ select: { id: true } }),
-              students: { select: { id: true } },
+              students: { select: expect.objectContaining({ id: true }) },
             }),
           }),
           reminders: expect.objectContaining({

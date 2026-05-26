@@ -6,10 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireRoleMock = vi.hoisted(() => vi.fn());
 const buildReportPreviewMock = vi.hoisted(() => vi.fn());
+const getTeacherReportOptionsMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({ requireRole: requireRoleMock }));
 vi.mock("@/lib/repositories/report-repository", () => ({
   buildReportPreview: buildReportPreviewMock,
+  getTeacherReportOptions: getTeacherReportOptionsMock,
 }));
 
 type PreviewPageModule = {
@@ -46,6 +48,11 @@ describe("Teacher report preview page", () => {
     vi.clearAllMocks();
     requireRoleMock.mockResolvedValue({ uid: "teacher-1", role: UserRole.TEACHER });
     buildReportPreviewMock.mockResolvedValue(previewData());
+    getTeacherReportOptionsMock.mockResolvedValue({
+      classGroups: [{ id: "group-1", name: "Algebra Group A", students: [] }],
+      students: [{ id: "student-1", fullName: "Amina Yusuf", email: "amina@example.com" }],
+      terms: [{ id: "term-1", name: "Spring 2026" }],
+    });
   });
 
   afterEach(() => cleanup());
@@ -69,9 +76,10 @@ describe("Teacher report preview page", () => {
 
     expect(buildReportPreviewMock).toHaveBeenCalledWith("teacher-1", "student-1", "term-1");
     expect(screen.getByRole("heading", { name: /report preview/i })).toBeDefined();
-    expect(screen.getByText(/amina yusuf/i)).toBeDefined();
+    expect(screen.getByRole("button", { name: /preview report/i })).toBeDefined();
+    expect(screen.getAllByText(/amina yusuf/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/algebra group a/i)).toBeDefined();
-    expect(screen.getByText(/spring 2026/i)).toBeDefined();
+    expect(screen.getAllByText(/spring 2026/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/weighted term average:\s*92/i)).toBeDefined();
     expect(screen.getByText(/present:\s*8/i)).toBeDefined();
     expect(screen.getByText(/late:\s*1/i)).toBeDefined();

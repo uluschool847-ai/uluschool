@@ -103,7 +103,13 @@ describe("Admin billing actions audit logs", () => {
     expect(result).toEqual(expect.objectContaining({ success: true }));
   });
 
-  it("refund action locally marks payment as failed and writes the same payment status audit log", async () => {
+  it("refund action locally marks payment as refunded and writes a refund audit log", async () => {
+    prismaMock.paymentTransaction.findUnique.mockResolvedValueOnce({
+      id: "payment-1",
+      studentId: "student-1",
+      subscriptionId: "subscription-1",
+      status: PaymentStatus.SUCCESS,
+    });
     prismaMock.paymentTransaction.findUnique.mockResolvedValueOnce({
       id: "payment-1",
       studentId: "student-1",
@@ -114,7 +120,7 @@ describe("Admin billing actions audit logs", () => {
       id: "payment-1",
       studentId: "student-1",
       subscriptionId: "subscription-1",
-      status: PaymentStatus.FAILED,
+      status: PaymentStatus.REFUNDED,
     });
 
     const { refundPaymentAction } = await loadBillingActions();
@@ -122,15 +128,15 @@ describe("Admin billing actions audit logs", () => {
 
     expect(prismaMock.paymentTransaction.update).toHaveBeenCalledWith({
       where: { id: "payment-1" },
-      data: { status: PaymentStatus.FAILED },
+      data: expect.objectContaining({ status: PaymentStatus.REFUNDED }),
     });
     expect(createAdminAuditLogMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: "PAYMENT_STATUS_UPDATED",
+        action: "PAYMENT_REFUNDED",
         targetType: "payment_transaction",
         targetId: "payment-1",
         before: { status: PaymentStatus.SUCCESS },
-        after: { status: PaymentStatus.FAILED },
+        after: { status: PaymentStatus.REFUNDED },
         meta: expect.objectContaining({
           paymentId: "payment-1",
           studentId: "student-1",

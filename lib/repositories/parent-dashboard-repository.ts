@@ -235,6 +235,7 @@ function quickLinks(studentId: string) {
     { href: `/portal/parent/progress/${studentId}`, label: "Open progress" },
     { href: `/portal/parent/gradebook/${studentId}`, label: "Open gradebook" },
     { href: `/portal/parent/reports/${studentId}`, label: "Open reports" },
+    { href: `/portal/parent/billing/${studentId}`, label: "Open billing" },
   ];
 }
 

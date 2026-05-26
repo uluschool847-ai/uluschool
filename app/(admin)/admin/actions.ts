@@ -94,15 +94,17 @@ export async function updateContactLeadAction(formData: FormData) {
   return { success: true };
 }
 
-export async function runReminderDispatchAction() {
+export async function runReminderDispatchAction(formData?: FormData) {
   const session = await requireRole([UserRole.ADMIN]);
-  const result = await processDueReminders();
+  const dryRun = formData?.get("dryRun")?.toString() === "true";
+  const result = await processDueReminders({ dryRun });
   console.info("Manual reminder dispatch result", result);
   await createAdminAuditLog({
     adminUserId: session.uid,
-    action: "REMINDER_DISPATCH_MANUAL_RUN",
+    action: dryRun ? "REMINDER_DISPATCH_DRY_RUN" : "REMINDER_DISPATCH_MANUAL_RUN",
     targetType: "ReminderJob",
     meta: result,
   });
   revalidatePath("/admin");
+  revalidatePath("/admin/reminders");
 }

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireRoleMock = vi.hoisted(() => vi.fn());
 const getReportSnapshotForTeacherMock = vi.hoisted(() => vi.fn());
+const listReportCommentDraftsForTeacherMock = vi.hoisted(() => vi.fn());
 const notFoundMock = vi.hoisted(() =>
   vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
@@ -15,6 +16,13 @@ const notFoundMock = vi.hoisted(() =>
 vi.mock("@/lib/auth/session", () => ({ requireRole: requireRoleMock }));
 vi.mock("@/lib/repositories/report-repository", () => ({
   getReportSnapshotForTeacher: getReportSnapshotForTeacherMock,
+}));
+vi.mock("@/lib/repositories/ai-draft-repository", () => ({
+  listReportCommentDraftsForTeacher: listReportCommentDraftsForTeacherMock,
+}));
+vi.mock("@/app/portal/teacher/actions/ai-draft-actions", () => ({
+  generateReportCommentDraftAction: vi.fn(),
+  reviewTeacherAiDraftAction: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({ notFound: notFoundMock }));
 
@@ -53,6 +61,7 @@ describe("Teacher saved report page", () => {
     vi.clearAllMocks();
     requireRoleMock.mockResolvedValue({ uid: "teacher-1", role: UserRole.TEACHER });
     getReportSnapshotForTeacherMock.mockResolvedValue(savedSnapshot());
+    listReportCommentDraftsForTeacherMock.mockResolvedValue([]);
   });
 
   afterEach(() => cleanup());
@@ -62,7 +71,9 @@ describe("Teacher saved report page", () => {
 
     expect(source).toContain("requireRole([UserRole.TEACHER])");
     expect(source).toContain("@/lib/repositories/report-repository");
+    expect(source).toContain("@/lib/repositories/ai-draft-repository");
     expect(source).toContain("getReportSnapshotForTeacher(session.uid");
+    expect(source).toContain("listReportCommentDraftsForTeacher(session.uid");
     expect(source).not.toContain("buildReportPreview");
     expect(source).not.toContain("getTeacherStudentGradebook");
     expect(source).not.toContain("@/lib/prisma");
@@ -75,6 +86,7 @@ describe("Teacher saved report page", () => {
     render(element);
 
     expect(getReportSnapshotForTeacherMock).toHaveBeenCalledWith("teacher-1", "snapshot-1");
+    expect(listReportCommentDraftsForTeacherMock).toHaveBeenCalledWith("teacher-1", "snapshot-1");
     expect(screen.getByRole("heading", { name: /saved report/i })).toBeDefined();
     expect(screen.getByText(/amina yusuf/i)).toBeDefined();
     expect(screen.getByText(/spring 2026/i)).toBeDefined();
@@ -82,6 +94,7 @@ describe("Teacher saved report page", () => {
     expect(screen.getByText(/saved teacher comment/i)).toBeDefined();
     expect(screen.getByText(/snapshot version:\s*1/i)).toBeDefined();
     expect(screen.getByRole("button", { name: /export pdf/i })).toBeDefined();
+    expect(screen.getByRole("heading", { name: /ai draft assistant/i })).toBeDefined();
   });
 
   it("returns notFound for foreign or missing snapshot", async () => {

@@ -13,6 +13,8 @@ const getTeacherStudentGradebookMock = vi.hoisted(() => vi.fn());
 const listAttendanceHistoryForStudentMock = vi.hoisted(() => vi.fn());
 const listProgressNotesForTeacherStudentMock = vi.hoisted(() => vi.fn());
 const renderReportSnapshotPdfMock = vi.hoisted(() => vi.fn());
+const uploadMock = vi.hoisted(() => vi.fn());
+const getURLMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/repositories/gradebook-repository", () => ({
@@ -26,6 +28,12 @@ vi.mock("@/lib/repositories/student-progress-repository", () => ({
 }));
 vi.mock("@/lib/services/report-pdf", () => ({
   renderReportSnapshotPdf: renderReportSnapshotPdfMock,
+}));
+vi.mock("@/lib/storage", () => ({
+  createStorageService: () => ({
+    getURL: getURLMock,
+    upload: uploadMock,
+  }),
 }));
 
 type ReportRepositoryModule = {
@@ -113,6 +121,12 @@ describe("report-repository contract", () => {
     });
     prismaMock.reportSnapshot.create.mockResolvedValue(snapshot());
     prismaMock.reportSnapshot.findFirst.mockResolvedValue(snapshot());
+    prismaMock.reportSnapshot.update.mockResolvedValue(
+      snapshot({
+        pdfGeneratedAt: new Date("2026-05-21T11:00:00.000Z"),
+        pdfStorageKey: "uploads/amina-yusuf-spring-2026.pdf",
+      }),
+    );
     getTeacherStudentGradebookMock.mockResolvedValue(gradebook());
     listAttendanceHistoryForStudentMock.mockResolvedValue([
       { status: "PRESENT" },
@@ -127,6 +141,8 @@ describe("report-repository contract", () => {
       contentType: "application/pdf",
       filename: "amina-yusuf-spring-2026.pdf",
     });
+    uploadMock.mockResolvedValue("uploads/amina-yusuf-spring-2026.pdf");
+    getURLMock.mockReturnValue("/uploads/amina-yusuf-spring-2026.pdf");
   });
 
   it("exports the report repository API", async () => {
@@ -462,7 +478,7 @@ describe("report-repository contract", () => {
 
   it("exports PDF from saved snapshot data without querying live gradebook or attendance", async () => {
     const { exportReportSnapshotPdf } = await loadReportRepository();
-    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+    const result = await exportReportSnapshotPdf("teacher-1", "snapshot-1");
 
     expect(prismaMock.reportSnapshot.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -470,6 +486,20 @@ describe("report-repository contract", () => {
       }),
     );
     expect(renderReportSnapshotPdfMock).toHaveBeenCalledWith(snapshot().snapshotData);
+    expect(uploadMock).toHaveBeenCalledWith(expect.any(Buffer), "amina-yusuf-spring-2026.pdf");
+    expect(prismaMock.reportSnapshot.update).toHaveBeenCalledWith({
+      where: { id: "snapshot-1" },
+      data: {
+        pdfGeneratedAt: expect.any(Date),
+        pdfStorageKey: "uploads/amina-yusuf-spring-2026.pdf",
+      },
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        publicUrl: "/uploads/amina-yusuf-spring-2026.pdf",
+        storageKey: "uploads/amina-yusuf-spring-2026.pdf",
+      }),
+    );
     expect(getTeacherStudentGradebookMock).not.toHaveBeenCalled();
     expect(listAttendanceHistoryForStudentMock).not.toHaveBeenCalled();
   });

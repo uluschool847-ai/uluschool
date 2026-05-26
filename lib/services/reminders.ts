@@ -1,9 +1,13 @@
-import { ReminderChannel, type ReminderDeliveryStatus } from "@prisma/client";
+import { NotificationType, ReminderChannel, type ReminderDeliveryStatus } from "@prisma/client";
 
 import {
   REMINDER_MEETING_LINK_PLACEHOLDER,
   validateLiveLessonUrl,
 } from "@/lib/lessons/live-lesson-url";
+import {
+  createInAppNotification,
+  listNotificationPreferencesByUserIds,
+} from "@/lib/repositories/notification-repository";
 import {
   createReminderLog,
   listUpcomingClassesForReminders,
@@ -154,7 +158,18 @@ function assignmentHref(assignmentId: string) {
   return new URL(`/portal/student/assignments/${assignmentId}`, siteConfig.url).toString();
 }
 
-export async function processDueReminders() {
+type ReminderProcessingOptions = {
+  dryRun?: boolean;
+};
+
+function preferenceFor(
+  preferences: Map<string, { emailEnabled: boolean; whatsappEnabled: boolean }>,
+  userId: string,
+) {
+  return preferences.get(userId) ?? { emailEnabled: true, whatsappEnabled: true };
+}
+
+export async function processDueReminders(options: ReminderProcessingOptions = {}) {
   const now = new Date();
   const windowStart = now;
   const windowEnd = new Date(Date.now() + 1000 * 60 * 60 * 24);
@@ -164,6 +179,7 @@ export async function processDueReminders() {
   let sent = 0;
   let failed = 0;
   let skipped = 0;
+  let wouldSend = 0;
 
   for (const scheduledClass of classes) {
     if (
@@ -193,9 +209,20 @@ export async function processDueReminders() {
     }
     for (const student of scheduledClass.classGroup?.students ?? []) {
       recipientIds.add(student.id);
+      for (const parent of student.parents ?? []) {
+        recipientIds.add(parent.id);
+      }
+    }
+    for (const student of scheduledClass.students ?? []) {
+      for (const parent of student.parents ?? []) {
+        recipientIds.add(parent.id);
+      }
     }
 
     const recipients = await getUsersByIds(Array.from(recipientIds));
+    const preferences = await listNotificationPreferencesByUserIds(
+      recipients.map((recipient) => recipient.id),
+    );
     const liveLessonUrl = reminderLiveLessonUrl(scheduledClass);
     for (const recipient of recipients) {
       if (
@@ -227,30 +254,46 @@ export async function processDueReminders() {
           reminderWindowEnd,
         )
       ) {
-        const emailResult = await sendClassReminderEmail({
-          recipientEmail: recipient.email,
-          recipientName: recipient.fullName,
-          classTitle: scheduledClass.title,
-          startAt: scheduledClass.startAt,
-          endAt: scheduledClass.endAt,
-          liveLessonUrl,
-        });
-
-        await createReminderLog({
-          scheduledClassId: scheduledClass.id,
-          recipientUserId: recipient.id,
-          recipientEmail: recipient.email,
-          channel: "EMAIL",
-          status: emailResult.delivered ? "SENT" : "FAILED",
-          details: emailResult.delivered ? "Email sent." : emailResult.reason,
-          reminderWindowStart,
-          reminderWindowEnd,
-        });
-
-        if (emailResult.delivered) {
-          sent += 1;
+        if (options.dryRun) {
+          wouldSend += 1;
+        } else if (!preferenceFor(preferences, recipient.id).emailEnabled) {
+          await createReminderLog({
+            scheduledClassId: scheduledClass.id,
+            recipientUserId: recipient.id,
+            recipientEmail: recipient.email,
+            channel: "EMAIL",
+            status: "SKIPPED",
+            details: "EMAIL_DISABLED_BY_PREFERENCE",
+            reminderWindowStart,
+            reminderWindowEnd,
+          });
+          skipped += 1;
         } else {
-          failed += 1;
+          const emailResult = await sendClassReminderEmail({
+            recipientEmail: recipient.email,
+            recipientName: recipient.fullName,
+            classTitle: scheduledClass.title,
+            startAt: scheduledClass.startAt,
+            endAt: scheduledClass.endAt,
+            liveLessonUrl,
+          });
+
+          await createReminderLog({
+            scheduledClassId: scheduledClass.id,
+            recipientUserId: recipient.id,
+            recipientEmail: recipient.email,
+            channel: "EMAIL",
+            status: emailResult.delivered ? "SENT" : "FAILED",
+            details: emailResult.delivered ? "Email sent." : emailResult.reason,
+            reminderWindowStart,
+            reminderWindowEnd,
+          });
+
+          if (emailResult.delivered) {
+            sent += 1;
+          } else {
+            failed += 1;
+          }
         }
       }
 
@@ -263,30 +306,61 @@ export async function processDueReminders() {
           reminderWindowEnd,
         )
       ) {
-        const whatsappResult = await sendWhatsAppReminder({
-          phone: recipient.phoneWhatsapp,
-          recipientName: recipient.fullName,
-          classTitle: scheduledClass.title,
-          startAt: scheduledClass.startAt,
-          liveLessonUrl,
-        });
-
-        await createReminderLog({
-          scheduledClassId: scheduledClass.id,
-          recipientUserId: recipient.id,
-          recipientEmail: recipient.email,
-          channel: "WHATSAPP",
-          status: whatsappResult.delivered ? "SENT" : "SKIPPED",
-          details: whatsappResult.delivered ? "WhatsApp reminder sent." : whatsappResult.reason,
-          reminderWindowStart,
-          reminderWindowEnd,
-        });
-
-        if (whatsappResult.delivered) {
-          sent += 1;
-        } else {
+        if (options.dryRun) {
+          wouldSend += 1;
+        } else if (!preferenceFor(preferences, recipient.id).whatsappEnabled) {
+          await createReminderLog({
+            scheduledClassId: scheduledClass.id,
+            recipientUserId: recipient.id,
+            recipientEmail: recipient.email,
+            channel: "WHATSAPP",
+            status: "SKIPPED",
+            details: "WHATSAPP_DISABLED_BY_PREFERENCE",
+            reminderWindowStart,
+            reminderWindowEnd,
+          });
           skipped += 1;
+        } else {
+          const whatsappResult = await sendWhatsAppReminder({
+            phone: recipient.phoneWhatsapp,
+            recipientName: recipient.fullName,
+            classTitle: scheduledClass.title,
+            startAt: scheduledClass.startAt,
+            liveLessonUrl,
+          });
+
+          await createReminderLog({
+            scheduledClassId: scheduledClass.id,
+            recipientUserId: recipient.id,
+            recipientEmail: recipient.email,
+            channel: "WHATSAPP",
+            status: whatsappResult.delivered ? "SENT" : "SKIPPED",
+            details: whatsappResult.delivered ? "WhatsApp reminder sent." : whatsappResult.reason,
+            reminderWindowStart,
+            reminderWindowEnd,
+          });
+
+          if (whatsappResult.delivered) {
+            sent += 1;
+          } else {
+            skipped += 1;
+          }
         }
+      }
+      if (!options.dryRun) {
+        await createInAppNotification({
+          body: `${scheduledClass.title} starts at ${scheduledClass.startAt.toISOString()}.`,
+          dedupeKey: `lesson:${scheduledClass.id}:${reminderWindowStart.toISOString()}`,
+          recipientUserId: recipient.id,
+          relatedHref:
+            recipient.role === "TEACHER"
+              ? `/portal/teacher/lessons/${scheduledClass.id}`
+              : recipient.role === "PARENT"
+                ? "/portal/parent"
+                : "/portal/student/schedule",
+          title: "Upcoming lesson reminder",
+          type: NotificationType.LESSON_REMINDER,
+        });
       }
     }
   }
@@ -300,6 +374,9 @@ export async function processDueReminders() {
     }
 
     const recipients = await getUsersByIds(recipientIds);
+    const preferences = await listNotificationPreferencesByUserIds(
+      recipients.map((recipient) => recipient.id),
+    );
     const href = assignmentHref(assignment.id);
 
     for (const recipient of recipients) {
@@ -332,29 +409,45 @@ export async function processDueReminders() {
           reminderWindowEnd,
         )
       ) {
-        const emailResult = await sendAssignmentReminderEmail({
-          recipientEmail: recipient.email,
-          recipientName: recipient.fullName,
-          assignmentTitle: assignment.title,
-          dueDate: assignment.dueDate,
-          assignmentHref: href,
-        });
-
-        await createAssignmentReminderLog({
-          assignmentId: assignment.id,
-          recipientUserId: recipient.id,
-          recipientEmail: recipient.email,
-          channel: "EMAIL",
-          status: emailResult.delivered ? "SENT" : "FAILED",
-          details: emailResult.delivered ? "Email sent." : emailResult.reason,
-          reminderWindowStart,
-          reminderWindowEnd,
-        });
-
-        if (emailResult.delivered) {
-          sent += 1;
+        if (options.dryRun) {
+          wouldSend += 1;
+        } else if (!preferenceFor(preferences, recipient.id).emailEnabled) {
+          await createAssignmentReminderLog({
+            assignmentId: assignment.id,
+            recipientUserId: recipient.id,
+            recipientEmail: recipient.email,
+            channel: "EMAIL",
+            status: "SKIPPED",
+            details: "EMAIL_DISABLED_BY_PREFERENCE",
+            reminderWindowStart,
+            reminderWindowEnd,
+          });
+          skipped += 1;
         } else {
-          failed += 1;
+          const emailResult = await sendAssignmentReminderEmail({
+            recipientEmail: recipient.email,
+            recipientName: recipient.fullName,
+            assignmentTitle: assignment.title,
+            dueDate: assignment.dueDate,
+            assignmentHref: href,
+          });
+
+          await createAssignmentReminderLog({
+            assignmentId: assignment.id,
+            recipientUserId: recipient.id,
+            recipientEmail: recipient.email,
+            channel: "EMAIL",
+            status: emailResult.delivered ? "SENT" : "FAILED",
+            details: emailResult.delivered ? "Email sent." : emailResult.reason,
+            reminderWindowStart,
+            reminderWindowEnd,
+          });
+
+          if (emailResult.delivered) {
+            sent += 1;
+          } else {
+            failed += 1;
+          }
         }
       }
 
@@ -367,39 +460,70 @@ export async function processDueReminders() {
           reminderWindowEnd,
         )
       ) {
-        const whatsappResult = await sendWhatsAppAssignmentReminder({
-          phone: recipient.phoneWhatsapp,
-          recipientName: recipient.fullName,
-          assignmentTitle: assignment.title,
-          dueDate: assignment.dueDate,
-          assignmentHref: href,
-        });
-
-        await createAssignmentReminderLog({
-          assignmentId: assignment.id,
-          recipientUserId: recipient.id,
-          recipientEmail: recipient.email,
-          channel: "WHATSAPP",
-          status: whatsappResult.delivered ? "SENT" : "SKIPPED",
-          details: whatsappResult.delivered ? "WhatsApp reminder sent." : whatsappResult.reason,
-          reminderWindowStart,
-          reminderWindowEnd,
-        });
-
-        if (whatsappResult.delivered) {
-          sent += 1;
-        } else {
+        if (options.dryRun) {
+          wouldSend += 1;
+        } else if (!preferenceFor(preferences, recipient.id).whatsappEnabled) {
+          await createAssignmentReminderLog({
+            assignmentId: assignment.id,
+            recipientUserId: recipient.id,
+            recipientEmail: recipient.email,
+            channel: "WHATSAPP",
+            status: "SKIPPED",
+            details: "WHATSAPP_DISABLED_BY_PREFERENCE",
+            reminderWindowStart,
+            reminderWindowEnd,
+          });
           skipped += 1;
+        } else {
+          const whatsappResult = await sendWhatsAppAssignmentReminder({
+            phone: recipient.phoneWhatsapp,
+            recipientName: recipient.fullName,
+            assignmentTitle: assignment.title,
+            dueDate: assignment.dueDate,
+            assignmentHref: href,
+          });
+
+          await createAssignmentReminderLog({
+            assignmentId: assignment.id,
+            recipientUserId: recipient.id,
+            recipientEmail: recipient.email,
+            channel: "WHATSAPP",
+            status: whatsappResult.delivered ? "SENT" : "SKIPPED",
+            details: whatsappResult.delivered ? "WhatsApp reminder sent." : whatsappResult.reason,
+            reminderWindowStart,
+            reminderWindowEnd,
+          });
+
+          if (whatsappResult.delivered) {
+            sent += 1;
+          } else {
+            skipped += 1;
+          }
         }
+      }
+      if (!options.dryRun) {
+        await createInAppNotification({
+          body: `Assignment "${assignment.title}" is overdue.`,
+          dedupeKey: `assignment:${assignment.id}:${reminderWindowStart.toISOString()}`,
+          recipientUserId: recipient.id,
+          relatedHref:
+            recipient.role === "PARENT"
+              ? "/portal/parent"
+              : `/portal/student/assignments/${assignment.id}`,
+          title: "Overdue assignment reminder",
+          type: NotificationType.ASSIGNMENT_OVERDUE,
+        });
       }
     }
   }
 
   return {
+    dryRun: Boolean(options.dryRun),
     scannedAssignments: assignments.length,
     scannedClasses: classes.length,
     sent,
     failed,
     skipped,
+    wouldSend,
   };
 }

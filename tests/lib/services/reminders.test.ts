@@ -5,6 +5,8 @@ const listUpcomingClassesForRemindersMock = vi.hoisted(() => vi.fn());
 const listMissingAssignmentsForRemindersMock = vi.hoisted(() => vi.fn());
 const createReminderLogMock = vi.hoisted(() => vi.fn());
 const createAssignmentReminderLogMock = vi.hoisted(() => vi.fn());
+const createInAppNotificationMock = vi.hoisted(() => vi.fn());
+const listNotificationPreferencesByUserIdsMock = vi.hoisted(() => vi.fn());
 const getUsersByIdsMock = vi.hoisted(() => vi.fn());
 const sendClassReminderEmailMock = vi.hoisted(() => vi.fn());
 const sendAssignmentReminderEmailMock = vi.hoisted(() => vi.fn());
@@ -21,6 +23,11 @@ vi.mock("@/lib/repositories/user-repository", () => ({
 vi.mock("@/lib/repositories/submission-repository", () => ({
   createAssignmentReminderLog: createAssignmentReminderLogMock,
   listMissingAssignmentsForReminders: listMissingAssignmentsForRemindersMock,
+}));
+
+vi.mock("@/lib/repositories/notification-repository", () => ({
+  createInAppNotification: createInAppNotificationMock,
+  listNotificationPreferencesByUserIds: listNotificationPreferencesByUserIdsMock,
 }));
 
 vi.mock("@/lib/services/email", () => ({
@@ -88,12 +95,14 @@ function assignmentReminderFixture(overrides: Record<string, unknown> = {}) {
 async function loadReminderService() {
   const specifier = "@/lib/services/reminders";
   return import(/* @vite-ignore */ specifier) as Promise<{
-    processDueReminders: () => Promise<{
+    processDueReminders: (options?: { dryRun?: boolean }) => Promise<{
+      dryRun?: boolean;
       scannedClasses: number;
       scannedAssignments: number;
       sent: number;
       failed: number;
       skipped: number;
+      wouldSend?: number;
     }>;
   }>;
 }
@@ -108,6 +117,8 @@ describe("reminder lifecycle for scheduled lessons", () => {
     sendAssignmentReminderEmailMock.mockResolvedValue({ delivered: true });
     createReminderLogMock.mockResolvedValue({});
     createAssignmentReminderLogMock.mockResolvedValue({});
+    createInAppNotificationMock.mockResolvedValue({});
+    listNotificationPreferencesByUserIdsMock.mockResolvedValue(new Map());
     getUsersByIdsMock.mockImplementation((ids: string[]) => Promise.resolve(ids.map(userFixture)));
   });
 
@@ -354,6 +365,54 @@ describe("reminder lifecycle for scheduled lessons", () => {
         reminderWindowStart: new Date("2026-06-01T00:00:00.000Z"),
         reminderWindowEnd: new Date("2026-06-01T23:59:59.999Z"),
       }),
+    );
+    expect(createInAppNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientUserId: expect.stringMatching(/student-/),
+        title: "Overdue assignment reminder",
+        type: "ASSIGNMENT_OVERDUE",
+      }),
+    );
+  });
+
+  it("supports dry-run mode without sending or writing reminder logs", async () => {
+    listUpcomingClassesForRemindersMock.mockResolvedValue([lessonFixture()]);
+    listMissingAssignmentsForRemindersMock.mockResolvedValue([assignmentReminderFixture()]);
+
+    const { processDueReminders } = await loadReminderService();
+    const result = await processDueReminders({ dryRun: true });
+
+    expect(result.dryRun).toBe(true);
+    expect(result.wouldSend).toBeGreaterThan(0);
+    expect(sendClassReminderEmailMock).not.toHaveBeenCalled();
+    expect(sendAssignmentReminderEmailMock).not.toHaveBeenCalled();
+    expect(createReminderLogMock).not.toHaveBeenCalled();
+    expect(createAssignmentReminderLogMock).not.toHaveBeenCalled();
+    expect(createInAppNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it("respects reminder channel preferences while keeping in-app notifications", async () => {
+    listUpcomingClassesForRemindersMock.mockResolvedValue([]);
+    listMissingAssignmentsForRemindersMock.mockResolvedValue([assignmentReminderFixture()]);
+    listNotificationPreferencesByUserIdsMock.mockResolvedValue(
+      new Map([["student-direct", { emailEnabled: false, whatsappEnabled: false }]]),
+    );
+
+    const { processDueReminders } = await loadReminderService();
+    await processDueReminders();
+
+    expect(sendAssignmentReminderEmailMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ recipientEmail: "student-direct@example.com" }),
+    );
+    expect(createAssignmentReminderLogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: "EMAIL_DISABLED_BY_PREFERENCE",
+        recipientUserId: "student-direct",
+        status: "SKIPPED",
+      }),
+    );
+    expect(createInAppNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ recipientUserId: "student-direct" }),
     );
   });
 

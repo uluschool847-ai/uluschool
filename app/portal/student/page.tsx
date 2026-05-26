@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/session";
+import { countUnreadNotificationsForUser } from "@/lib/repositories/notification-repository";
 import { getStudentDashboardData } from "@/lib/repositories/student-dashboard-repository";
 
 export const metadata: Metadata = {
@@ -12,7 +13,12 @@ export const metadata: Metadata = {
 };
 
 type DashboardData = Awaited<ReturnType<typeof getStudentDashboardData>>;
-type QuickLink = DashboardData["quickLinks"][number];
+type QuickLink =
+  | DashboardData["quickLinks"][number]
+  | {
+      href: string;
+      label: string;
+    };
 
 const fallbackQuickLinks: QuickLink[] = [
   { href: "/portal/student/schedule", label: "Open schedule" },
@@ -83,8 +89,16 @@ function EmptyStatus({ label, children }: { label: string; children: ReactNode }
 
 export default async function StudentPortalDashboard() {
   const session = await requireRole([UserRole.STUDENT]);
-  const dashboard = await getStudentDashboardData(session.uid);
-  const quickLinks = dashboard.quickLinks ?? fallbackQuickLinks;
+  const [dashboard, unreadNotifications] = await Promise.all([
+    getStudentDashboardData(session.uid),
+    countUnreadNotificationsForUser(session.uid),
+  ]);
+  const quickLinks: QuickLink[] = [
+    ...((dashboard.quickLinks ?? fallbackQuickLinks) as QuickLink[]),
+  ];
+  if (!quickLinks.some((link) => link.href === "/portal/student/notifications")) {
+    quickLinks.push({ href: "/portal/student/notifications", label: "Open notifications" });
+  }
   const attendanceSummary = dashboard.attendanceSummary ?? {
     absentCount: 0,
     attendanceRate: null,
@@ -265,6 +279,14 @@ export default async function StudentPortalDashboard() {
               <p>Review your student account and class membership.</p>
             )}
           </div>
+        </SummaryCard>
+
+        <SummaryCard heading="Notifications" link={sectionLink(quickLinks, "Open notifications")}>
+          {unreadNotifications > 0 ? (
+            <p>Unread notifications: {unreadNotifications}</p>
+          ) : (
+            <EmptyStatus label="Notifications">No unread notifications.</EmptyStatus>
+          )}
         </SummaryCard>
       </div>
     </main>

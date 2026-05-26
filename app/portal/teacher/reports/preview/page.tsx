@@ -1,6 +1,6 @@
 import { saveReportSnapshotAction } from "@/app/portal/teacher/actions/report-actions";
 import { requireRole } from "@/lib/auth/session";
-import { buildReportPreview } from "@/lib/repositories/report-repository";
+import { buildReportPreview, getTeacherReportOptions } from "@/lib/repositories/report-repository";
 import { UserRole } from "@prisma/client";
 
 type PageProps = {
@@ -20,6 +20,7 @@ function getRecord(value: unknown): Record<string, unknown> {
 export default async function TeacherReportPreviewPage({ searchParams }: PageProps) {
   const session = await requireRole([UserRole.TEACHER]);
   const params = await resolveParams(searchParams);
+  const options = await getTeacherReportOptions(session.uid);
   const preview =
     params.studentId && params.termId
       ? await buildReportPreview(session.uid, params.studentId, params.termId)
@@ -29,6 +30,31 @@ export default async function TeacherReportPreviewPage({ searchParams }: PagePro
     return (
       <main>
         <h1>Report Preview</h1>
+        <form aria-label="Generate report preview">
+          <label>
+            Student
+            <select name="studentId" defaultValue={params.studentId ?? ""}>
+              <option value="">Select student</option>
+              {options.students.map((student) => (
+                <option key={student.id} value={student.id}>
+                  {student.fullName || student.email}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Academic term
+            <select name="termId" defaultValue={params.termId ?? ""}>
+              <option value="">Select term</option>
+              {options.terms.map((term) => (
+                <option key={term.id} value={term.id}>
+                  {term.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="submit">Preview report</button>
+        </form>
         <p>Report preview is not available.</p>
       </main>
     );
@@ -45,6 +71,29 @@ export default async function TeacherReportPreviewPage({ searchParams }: PagePro
   return (
     <main>
       <h1>Report Preview</h1>
+      <form aria-label="Generate report preview">
+        <label>
+          Student
+          <select name="studentId" defaultValue={preview.student.id}>
+            {options.students.map((student) => (
+              <option key={student.id} value={student.id}>
+                {student.fullName || student.email}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Academic term
+          <select name="termId" defaultValue={preview.academicTerm.id}>
+            {options.terms.map((term) => (
+              <option key={term.id} value={term.id}>
+                {term.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="submit">Preview report</button>
+      </form>
       <p>{preview.student.fullName}</p>
       <p>{String(classGroup.name ?? "")}</p>
       <p>{preview.academicTerm.name}</p>

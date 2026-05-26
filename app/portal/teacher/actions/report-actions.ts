@@ -61,6 +61,14 @@ function revalidateReportPaths(studentId?: string) {
   revalidatePath("/portal/parent");
 }
 
+function revalidateReportSnapshotPaths(snapshotId: string, studentId?: string) {
+  revalidateReportPaths(studentId);
+  revalidatePath(`/portal/teacher/reports/${snapshotId}`);
+  if (studentId) {
+    revalidatePath(`/portal/student/reports/${snapshotId}`);
+  }
+}
+
 export async function buildReportPreviewAction(payload: unknown): Promise<ReportActionResult> {
   const session = await requireRole([UserRole.TEACHER]);
   const parsed = previewSchema.safeParse(payloadToObject(payload));
@@ -160,10 +168,14 @@ export async function exportReportSnapshotPdfAction(
         meta: {
           teacherId: session.uid,
           reportSnapshotId: snapshotId,
+          storageKey: exported.storageKey,
+          pdfStorageKey: exported.snapshot.pdfStorageKey,
+          pdfGeneratedAt: exported.snapshot.pdfGeneratedAt,
         },
       } as Parameters<typeof createAdminAuditLog>[0] & { actorId: string },
       prisma,
     );
+    revalidateReportSnapshotPaths(snapshotId, exported.snapshot.studentId);
     return { success: true, data: exported };
   } catch (error) {
     return { success: false, error: errorMessage(error) };

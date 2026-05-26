@@ -87,10 +87,10 @@ async function setPortalSession(
   ]);
 }
 
-function formatUsd(amount: number) {
+function formatKes(amount: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency: "KES",
     maximumFractionDigits: 2,
   }).format(amount);
 }
@@ -170,7 +170,7 @@ async function createAnalyticsFixtures() {
         studentId: student.id,
         subscriptionId: activeSubscription.id,
         amount: 777,
-        currency: "USD",
+        currency: "KES",
         status: PaymentStatus.SUCCESS,
         paymentDate: PAYMENT_DATE,
       },
@@ -180,7 +180,7 @@ async function createAnalyticsFixtures() {
         studentId: student.id,
         subscriptionId: cancelledSubscription.id,
         amount: 333,
-        currency: "USD",
+        currency: "KES",
         status: PaymentStatus.PENDING,
         paymentDate: PAYMENT_DATE,
       },
@@ -190,7 +190,7 @@ async function createAnalyticsFixtures() {
         studentId: student.id,
         subscriptionId: pastDueSubscription.id,
         amount: 222,
-        currency: "USD",
+        currency: "KES",
         status: PaymentStatus.FAILED,
         paymentDate: PAYMENT_DATE,
       },
@@ -230,7 +230,9 @@ async function visiblePageText(page: Page) {
 }
 
 async function expectAnalyticsTotalRevenue(page: Page, expectedAmount: number) {
-  await expect(page.getByText(formatUsd(expectedAmount))).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: formatKes(expectedAmount) }).first(),
+  ).toBeVisible();
 }
 
 test.describe("Admin BI Analytics", () => {
@@ -261,12 +263,17 @@ test.describe("Admin BI Analytics", () => {
 
     await expect(page.getByRole("heading", { name: "Business Intelligence" })).toBeVisible();
     await expect(page.getByText(/track lifetime value/i)).toBeVisible();
+    await expect(page.getByText(/KES revenue/i)).toBeVisible();
     await expect(page.getByText("Total Revenue")).toBeVisible();
     await expect(page.getByText("Average LTV")).toBeVisible();
     await expect(page.getByText("Retention Rate", { exact: true })).toBeVisible();
     await expect(page.getByText("Active Subscriptions")).toBeVisible();
     await expect(page.getByText("Traffic Channels & Conversion")).toBeVisible();
     await expect(page.getByText("Monthly Revenue Trend")).toBeVisible();
+    await expect(page.getByRole("link", { name: /export csv/i })).toHaveAttribute(
+      "href",
+      "/admin/analytics/export",
+    );
     await expect(page.getByText(TRAFFIC_SOURCE)).toBeVisible();
     await expect(page.getByText(PAYMENT_MONTH)).toBeVisible();
     await expectAnalyticsTotalRevenue(page, initialMetrics.totalRevenue);

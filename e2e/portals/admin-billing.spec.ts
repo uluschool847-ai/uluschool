@@ -209,6 +209,10 @@ function paymentTable(page: Page) {
   return page.getByRole("table", { name: /payment transactions/i });
 }
 
+function billingFilterForm(page: Page) {
+  return page.locator('form[action="/admin/billing"]').first();
+}
+
 function subscriptionCard(page: Page, planName: string) {
   return page.locator("article").filter({ hasText: planName });
 }
@@ -238,7 +242,7 @@ test.describe("Admin Billing", () => {
 
     await page.goto("/admin/billing");
     await expect(page.getByRole("heading", { name: "Billing", exact: true })).toBeVisible();
-    await expect(page.getByText(/inspect local payments and subscriptions/i)).toBeVisible();
+    await expect(page.getByText(/Kenya-ready local ledger/i)).toBeVisible();
     await expect(page.getByRole("heading", { name: "Payments" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Subscriptions" })).toBeVisible();
     await expect(page.getByRole("table", { name: /payment transactions/i })).toBeVisible();
@@ -249,28 +253,30 @@ test.describe("Admin Billing", () => {
     await page.setViewportSize({ width: 1280, height: 900 });
 
     await page.goto("/admin/billing?status=SUCCESS");
-    await expect(page.locator('select[name="status"]')).toHaveValue("SUCCESS");
+    await expect(billingFilterForm(page).locator('select[name="status"]')).toHaveValue("SUCCESS");
     await expect(paymentTable(page).getByText(ACTIVE_PLAN)).toBeVisible();
     await expect(paymentTable(page).getByText(PAST_DUE_PLAN)).toHaveCount(0);
 
     await page.goto("/admin/billing?status=FAILED");
-    await expect(page.locator('select[name="status"]')).toHaveValue("FAILED");
+    await expect(billingFilterForm(page).locator('select[name="status"]')).toHaveValue("FAILED");
     await expect(paymentTable(page).getByText(PAST_DUE_PLAN)).toBeVisible();
     await expect(paymentTable(page).getByText(ACTIVE_PLAN)).toHaveCount(0);
 
     await page.goto("/admin/billing?status=PENDING");
-    await expect(page.locator('select[name="status"]')).toHaveValue("PENDING");
+    await expect(billingFilterForm(page).locator('select[name="status"]')).toHaveValue("PENDING");
     await expect(paymentTable(page).getByText(CANCELLED_PLAN)).toBeVisible();
 
     await page.goto("/admin/billing?status=NOT_A_STATUS");
     await expect(page.getByRole("heading", { name: "Billing", exact: true })).toBeVisible();
-    await expect(page.locator('select[name="status"]')).toHaveValue("");
+    await expect(billingFilterForm(page).locator('select[name="status"]')).toHaveValue("");
 
     await page.goto(
       `/admin/billing?subscriptionStatus=ACTIVE&plan=${encodeURIComponent(REFUND_PLAN)}`,
     );
-    await expect(page.locator('select[name="subscriptionStatus"]')).toHaveValue("ACTIVE");
-    await expect(page.locator('input[name="plan"]')).toHaveValue(REFUND_PLAN);
+    await expect(billingFilterForm(page).locator('select[name="subscriptionStatus"]')).toHaveValue(
+      "ACTIVE",
+    );
+    await expect(billingFilterForm(page).locator('input[name="plan"]')).toHaveValue(REFUND_PLAN);
     await expect(subscriptionCard(page, REFUND_PLAN)).toBeVisible();
     await expect(subscriptionCard(page, CANCELLED_PLAN)).toHaveCount(0);
 
@@ -284,7 +290,9 @@ test.describe("Admin Billing", () => {
 
     await page.goto("/admin/billing?subscriptionStatus=NOT_A_STATUS");
     await expect(page.getByRole("heading", { name: "Billing", exact: true })).toBeVisible();
-    await expect(page.locator('select[name="subscriptionStatus"]')).toHaveValue("");
+    await expect(billingFilterForm(page).locator('select[name="subscriptionStatus"]')).toHaveValue(
+      "",
+    );
 
     await page.goto("/admin/billing?plan=NO_SUCH_QA_BILLING_PLAN");
     await expect(page.getByText("No subscriptions found.")).toBeVisible();
@@ -324,17 +332,17 @@ test.describe("Admin Billing", () => {
     await expect(refundRow).toBeVisible();
     await refundRow.getByRole("button", { name: /local refund/i }).click();
     await expect(page.getByText(/local refund marker applied/i)).toBeVisible();
-    await expect(refundRow.locator("select")).toHaveValue(PaymentStatus.FAILED);
+    await expect(refundRow.locator("select")).toHaveValue(PaymentStatus.REFUNDED);
     await expect(
       prisma.paymentTransaction.findUnique({
         where: { id: refundPaymentId },
         select: { status: true },
       }),
-    ).resolves.toEqual({ status: PaymentStatus.FAILED });
+    ).resolves.toEqual({ status: PaymentStatus.REFUNDED });
 
     const auditLogs = await prisma.adminAuditLog.findMany({
       where: {
-        action: "PAYMENT_STATUS_UPDATED",
+        action: { in: ["PAYMENT_STATUS_UPDATED", "PAYMENT_REFUNDED"] },
         targetType: "payment_transaction",
         targetId: { in: [pendingPaymentId, refundPaymentId] },
       },
@@ -342,7 +350,7 @@ test.describe("Admin Billing", () => {
     });
     const serializedLogs = JSON.stringify(auditLogs);
     expect(auditLogs.some((log) => log.targetId === refundPaymentId)).toBe(true);
-    expect(serializedLogs).toContain(PaymentStatus.FAILED);
+    expect(serializedLogs).toContain(PaymentStatus.REFUNDED);
     expect(serializedLogs).not.toMatch(/password|token|secret/i);
 
     await page.goto("/admin/analytics");

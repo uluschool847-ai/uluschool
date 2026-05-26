@@ -5,6 +5,8 @@ const listUpcomingClassesForRemindersMock = vi.hoisted(() => vi.fn());
 const listMissingAssignmentsForRemindersMock = vi.hoisted(() => vi.fn());
 const createReminderLogMock = vi.hoisted(() => vi.fn());
 const createAssignmentReminderLogMock = vi.hoisted(() => vi.fn());
+const createInAppNotificationMock = vi.hoisted(() => vi.fn());
+const listNotificationPreferencesByUserIdsMock = vi.hoisted(() => vi.fn());
 const getUsersByIdsMock = vi.hoisted(() => vi.fn());
 const sendClassReminderEmailMock = vi.hoisted(() => vi.fn());
 const sendAssignmentReminderEmailMock = vi.hoisted(() => vi.fn());
@@ -21,6 +23,11 @@ vi.mock("@/lib/repositories/user-repository", () => ({
 vi.mock("@/lib/repositories/submission-repository", () => ({
   createAssignmentReminderLog: createAssignmentReminderLogMock,
   listMissingAssignmentsForReminders: listMissingAssignmentsForRemindersMock,
+}));
+
+vi.mock("@/lib/repositories/notification-repository", () => ({
+  createInAppNotification: createInAppNotificationMock,
+  listNotificationPreferencesByUserIds: listNotificationPreferencesByUserIdsMock,
 }));
 
 vi.mock("@/lib/services/email", () => ({
@@ -89,6 +96,8 @@ describe("reminder live lesson URL content safety", () => {
     listMissingAssignmentsForRemindersMock.mockResolvedValue([]);
     sendClassReminderEmailMock.mockResolvedValue({ delivered: true });
     sendAssignmentReminderEmailMock.mockResolvedValue({ delivered: true });
+    createInAppNotificationMock.mockResolvedValue({});
+    listNotificationPreferencesByUserIdsMock.mockResolvedValue(new Map());
     createReminderLogMock.mockResolvedValue({});
     createAssignmentReminderLogMock.mockResolvedValue({});
     getUsersByIdsMock.mockResolvedValue([userFixture()]);

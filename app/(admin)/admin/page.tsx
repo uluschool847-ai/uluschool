@@ -209,6 +209,9 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               <Button asChild variant="secondary" size="sm">
                 <Link href="/admin/analytics">BI Analytics</Link>
               </Button>
+              <Button asChild variant="secondary" size="sm">
+                <Link href="/admin/ai-drafts">AI Drafts</Link>
+              </Button>
             </div>
             <AdminCrmListControls
               basePath="/admin"
@@ -227,6 +230,15 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                   Run Reminder Job Now
                 </Button>
               </form>
+              <form action={runReminderDispatchAction} className="mt-2">
+                <input type="hidden" name="dryRun" value="true" />
+                <Button type="submit" size="sm" variant="secondary">
+                  Dry Run Reminder Job
+                </Button>
+              </form>
+              <Button asChild className="mt-2" size="sm" variant="secondary">
+                <Link href="/admin/reminders">View Reminder Logs</Link>
+              </Button>
             </div>
           </CardContent>
         </Card>

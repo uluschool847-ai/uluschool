@@ -5,11 +5,13 @@ import { listAttendanceHistoryForStudent } from "@/lib/repositories/attendance-r
 import { getTeacherStudentGradebook } from "@/lib/repositories/gradebook-repository";
 import { listProgressNotesForTeacherStudent } from "@/lib/repositories/student-progress-repository";
 import { renderReportSnapshotPdf } from "@/lib/services/report-pdf";
+import { createStorageService } from "@/lib/storage";
 
 type ReportDatabase = typeof prisma | Prisma.TransactionClient;
 
 type ReportFilters = {
   classGroupId?: string;
+  pdf?: string;
   search?: string;
   sort?: string;
   studentId?: string;
@@ -102,6 +104,7 @@ function mapSnapshot(snapshot: Record<string, unknown>, baseHref: string) {
     weightedTermAverage,
     generatedAt: asDate(snapshot.generatedAt),
     pdfAvailable: Boolean(snapshot.pdfStorageKey),
+    pdfStorageKey: typeof snapshot.pdfStorageKey === "string" ? snapshot.pdfStorageKey : null,
     pdfGeneratedAt,
     href: `${baseHref}/${snapshot.id}`,
   };
@@ -145,6 +148,16 @@ function sortReportRows(rows: ReportSnapshotRow[], sort?: string) {
     default:
       return sorted.sort((left, right) => right.generatedAt.getTime() - left.generatedAt.getTime());
   }
+}
+
+function filterPdf(rows: ReportSnapshotRow[], pdf?: string) {
+  if (pdf === "available") {
+    return rows.filter((row) => row.pdfAvailable);
+  }
+  if (pdf === "missing") {
+    return rows.filter((row) => !row.pdfAvailable);
+  }
+  return rows;
 }
 
 async function assertTeacherOwnsStudent(
@@ -192,6 +205,53 @@ export async function buildReportPreview(teacherId: string, studentId: string, t
     generatedByTeacherId: teacherId,
     generatedAt: new Date(),
     snapshotVersion: 1,
+  };
+}
+
+export async function getTeacherReportOptions(
+  teacherId: string,
+  database: ReportDatabase = prisma,
+) {
+  const [terms, classGroups, students] = await Promise.all([
+    database.academicTerm.findMany({
+      where: { isActive: true },
+      orderBy: [{ startDate: "desc" }],
+      select: { id: true, name: true, startDate: true, endDate: true },
+    }),
+    database.classGroup.findMany({
+      where: { teacherId },
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true,
+        subject: { select: { name: true } },
+        students: {
+          select: { id: true, fullName: true, email: true },
+          orderBy: { fullName: "asc" },
+        },
+      },
+    }),
+    database.appUser.findMany({
+      where: {
+        OR: [
+          { enrolledClasses: { some: { teacherId } } },
+          { classGroups: { some: { teacherId } } },
+        ],
+      } as Prisma.AppUserWhereInput,
+      orderBy: { fullName: "asc" },
+      select: { id: true, fullName: true, email: true },
+    }),
+  ]);
+
+  return {
+    terms,
+    classGroups: classGroups.map((group) => ({
+      id: group.id,
+      name: group.name,
+      subjectName: group.subject?.name ?? "",
+      students: group.students,
+    })),
+    students,
   };
 }
 
@@ -268,8 +328,15 @@ export async function listReportSnapshotsForTeacher(
     where,
     orderBy: { generatedAt: "desc" },
   });
-  return snapshots.map((snapshot) =>
+  const rows = snapshots.map((snapshot) =>
     mapSnapshot(snapshot as Record<string, unknown>, "/portal/teacher/reports"),
+  );
+  return sortReportRows(
+    filterPdf(
+      rows.filter((snapshot) => matchesReportSearch(snapshot, filters.search)),
+      filters.pdf,
+    ),
+    filters.sort,
   );
 }
 
@@ -290,9 +357,12 @@ export async function listReportSnapshotsForStudent(
     mapSnapshot(snapshot as Record<string, unknown>, "/portal/student/reports"),
   );
   return sortReportRows(
-    rows.filter(
-      (snapshot) =>
-        snapshot.student.id === studentId && matchesReportSearch(snapshot, filters.search),
+    filterPdf(
+      rows.filter(
+        (snapshot) =>
+          snapshot.student.id === studentId && matchesReportSearch(snapshot, filters.search),
+      ),
+      filters.pdf,
     ),
     filters.sort,
   );
@@ -322,9 +392,12 @@ export async function listReportSnapshotsForParentChild(
     mapSnapshot(snapshot as Record<string, unknown>, `/portal/parent/reports/${studentId}`),
   );
   return sortReportRows(
-    rows.filter(
-      (snapshot) =>
-        snapshot.student.id === studentId && matchesReportSearch(snapshot, filters.search),
+    filterPdf(
+      rows.filter(
+        (snapshot) =>
+          snapshot.student.id === studentId && matchesReportSearch(snapshot, filters.search),
+      ),
+      filters.pdf,
     ),
     filters.sort,
   );
@@ -336,5 +409,18 @@ export async function exportReportSnapshotPdf(teacherId: string, snapshotId: str
     throw new Error("Report snapshot not found.");
   }
   const rendered = await renderReportSnapshotPdf(snapshot.snapshotData as Record<string, unknown>);
-  return { ...rendered, snapshot };
+  const storage = createStorageService({ runtimeRole: "TEACHER" });
+  const storageKey = await storage.upload(Buffer.from(rendered.bytes), rendered.filename);
+  const pdfGeneratedAt = new Date();
+  const updatedSnapshot = await prisma.reportSnapshot.update({
+    where: { id: snapshot.id },
+    data: { pdfGeneratedAt, pdfStorageKey: storageKey },
+  });
+
+  return {
+    ...rendered,
+    publicUrl: storage.getURL(storageKey),
+    snapshot: updatedSnapshot,
+    storageKey,
+  };
 }

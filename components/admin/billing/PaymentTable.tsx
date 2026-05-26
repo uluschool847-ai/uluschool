@@ -8,15 +8,26 @@ import {
 } from "@/app/(admin)/admin/billing/actions";
 import { normalizeActionResult } from "@/lib/action-result";
 
-type PaymentStatus = "SUCCESS" | "PENDING" | "FAILED";
+type PaymentStatus =
+  | "SUCCESS"
+  | "SUCCEEDED"
+  | "PENDING"
+  | "PROCESSING"
+  | "FAILED"
+  | "CANCELLED"
+  | "REFUNDED"
+  | "PARTIALLY_REFUNDED";
 
 export type BillingPayment = {
   id: string;
   amount: number;
   currency: string;
   status: PaymentStatus;
+  amountMinor?: number;
   paymentDate: Date | string;
+  provider?: string;
   student?: { fullName: string; email: string } | null;
+  payer?: { fullName: string; email: string } | null;
   subscription?: { planName: string } | null;
 };
 
@@ -97,10 +108,10 @@ export function PaymentTable({ payments }: { payments: BillingPayment[] }) {
       if (!result.success) {
         setFeedback({ type: "error", message: result.message });
       } else {
-        updateLocalStatus(paymentId, "FAILED");
+        updateLocalStatus(paymentId, "REFUNDED");
         setFeedback({
           type: "success",
-          message: result.message || "Local refund marker applied. Payment status set to FAILED.",
+          message: result.message || "Local refund marker applied. Payment status set to REFUNDED.",
         });
       }
     } catch {
@@ -186,7 +197,15 @@ export function PaymentTable({ payments }: { payments: BillingPayment[] }) {
                   {payment.subscription?.planName ?? "No subscription"}
                 </td>
                 <td className="px-4 py-3 font-semibold text-slate-950">
-                  {formatCurrency(payment.amount, payment.currency)}
+                  {formatCurrency(
+                    payment.amountMinor ? payment.amountMinor / 100 : payment.amount,
+                    payment.currency,
+                  )}
+                  {payment.provider ? (
+                    <span className="ml-2 text-xs font-normal text-slate-500">
+                      {payment.provider}
+                    </span>
+                  ) : null}
                 </td>
                 <td className="px-4 py-3">
                   <label className="sr-only" htmlFor={`payment-status-${payment.id}`}>
@@ -202,18 +221,23 @@ export function PaymentTable({ payments }: { payments: BillingPayment[] }) {
                     className="rounded-md border border-slate-300 px-2 py-1"
                   >
                     <option value="SUCCESS">SUCCESS</option>
+                    <option value="SUCCEEDED">SUCCEEDED</option>
                     <option value="PENDING">PENDING</option>
+                    <option value="PROCESSING">PROCESSING</option>
                     <option value="FAILED">FAILED</option>
+                    <option value="CANCELLED">CANCELLED</option>
+                    <option value="REFUNDED">REFUNDED</option>
+                    <option value="PARTIALLY_REFUNDED">PARTIALLY_REFUNDED</option>
                   </select>
                 </td>
                 <td className="px-4 py-3 text-slate-700">{formatDate(payment.paymentDate)}</td>
                 <td className="px-4 py-3">
-                  {payment.status === "SUCCESS" ? (
+                  {payment.status === "SUCCESS" || payment.status === "SUCCEEDED" ? (
                     <button
                       type="button"
                       onClick={() => void refundPayment(payment.id)}
                       disabled={disabled}
-                      aria-label={`Local refund payment for ${payment.student?.fullName ?? "Unknown student"} (marks status failed)`}
+                      aria-label={`Local refund payment for ${payment.student?.fullName ?? "Unknown student"} (marks status refunded)`}
                       className="rounded-md border border-slate-300 px-3 py-1.5 font-semibold text-slate-900 disabled:opacity-60"
                     >
                       {refundPending ? "Updating..." : "Local Refund"}

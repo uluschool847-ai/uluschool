@@ -400,6 +400,7 @@ export async function listUpcomingClassesForReminders(windowStart: Date, windowE
       students: {
         select: {
           id: true,
+          parents: { select: { id: true } },
         },
       },
       classGroup: {
@@ -413,6 +414,7 @@ export async function listUpcomingClassesForReminders(windowStart: Date, windowE
           students: {
             select: {
               id: true,
+              parents: { select: { id: true } },
             },
           },
         },

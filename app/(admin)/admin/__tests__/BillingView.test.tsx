@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const findAllPaymentsMock = vi.hoisted(() => vi.fn());
 const findAllSubscriptionsMock = vi.hoisted(() => vi.fn());
 const getAnalyticsInputsMock = vi.hoisted(() => vi.fn());
+const listAdminBillingDataMock = vi.hoisted(() => vi.fn());
 const requireRoleMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({
@@ -14,6 +15,11 @@ vi.mock("@/lib/repositories/analytics-repository", () => ({
   findAllPayments: findAllPaymentsMock,
   findAllSubscriptions: findAllSubscriptionsMock,
   getAnalyticsInputs: getAnalyticsInputsMock,
+}));
+
+vi.mock("@/lib/repositories/billing-repository", () => ({
+  formatMoneyMinor: (amountMinor: number, currency = "KES") => `${currency} ${amountMinor / 100}`,
+  listAdminBillingData: listAdminBillingDataMock,
 }));
 
 type PageModule = {
@@ -70,6 +76,30 @@ describe("Admin billing and analytics visibility pages", () => {
       totalPages: 1,
     });
 
+    listAdminBillingDataMock.mockResolvedValueOnce({
+      invoices: [],
+      payments: [
+        {
+          amount: 1500,
+          amountMinor: 150000,
+          currency: "KES",
+          id: "pay-1",
+          paymentDate: new Date("2026-05-01T10:00:00.000Z"),
+          status: "SUCCEEDED",
+          student: { fullName: "Alice Student", email: "alice@example.com" },
+        },
+      ],
+      plans: [],
+      subscriptions: [
+        {
+          id: "sub-1",
+          planName: "IGCSE Monthly",
+          status: "ACTIVE",
+          student: { fullName: "Alice Student", email: "alice@example.com" },
+        },
+      ],
+    });
+
     const page = await loadBillingPage();
     const element = await page.default({
       searchParams: { status: "SUCCESS", subscriptionStatus: "ACTIVE" },
@@ -77,11 +107,8 @@ describe("Admin billing and analytics visibility pages", () => {
 
     render(element);
 
-    expect(findAllPaymentsMock).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "SUCCESS" }),
-    );
-    expect(findAllSubscriptionsMock).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "ACTIVE" }),
+    expect(listAdminBillingDataMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "SUCCESS", subscriptionStatus: "ACTIVE" }),
     );
     expect(screen.getAllByText(/alice student/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/igcse monthly/i)).toBeDefined();
@@ -89,33 +116,38 @@ describe("Admin billing and analytics visibility pages", () => {
   });
 
   it("Billing page formats payment amount and currency", async () => {
-    findAllPaymentsMock.mockResolvedValueOnce({
-      items: [
+    listAdminBillingDataMock.mockResolvedValueOnce({
+      invoices: [],
+      payments: [
         {
-          id: "pay-1",
           amount: 1234.5,
-          currency: "USD",
-          status: "SUCCESS",
+          amountMinor: 123450,
+          currency: "KES",
+          id: "pay-1",
           paymentDate: new Date("2026-05-01T10:00:00.000Z"),
+          status: "SUCCEEDED",
           student: { fullName: "Alice Student", email: "alice@example.com" },
         },
       ],
-      totalCount: 1,
-      totalPages: 1,
+      plans: [],
+      subscriptions: [],
     });
-    findAllSubscriptionsMock.mockResolvedValueOnce({ items: [], totalCount: 0, totalPages: 0 });
 
     const page = await loadBillingPage();
     const element = await page.default({ searchParams: {} });
 
     render(element);
 
-    expect(screen.getByText(/\$1,234\.50|USD\s*1,234\.50|1,234\.50\s*USD/i)).toBeDefined();
+    expect(screen.getByText(/KES 1234\.5|KES\s*1,234\.50|1,234\.50\s*KES/i)).toBeDefined();
   });
 
   it("Billing page handles empty payment history", async () => {
-    findAllPaymentsMock.mockResolvedValueOnce({ items: [], totalCount: 0, totalPages: 0 });
-    findAllSubscriptionsMock.mockResolvedValueOnce({ items: [], totalCount: 0, totalPages: 0 });
+    listAdminBillingDataMock.mockResolvedValueOnce({
+      invoices: [],
+      payments: [],
+      plans: [],
+      subscriptions: [],
+    });
 
     const page = await loadBillingPage();
     const element = await page.default({ searchParams: {} });

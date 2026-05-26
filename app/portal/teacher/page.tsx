@@ -15,6 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { requireRole } from "@/lib/auth/session";
 import { LESSON_STATUS_LABELS, parseLessonStatus } from "@/lib/lessons/lesson-status";
+import { countUnreadNotificationsForUser } from "@/lib/repositories/notification-repository";
 import { getTeacherDashboardData } from "@/lib/repositories/portal-repository";
 
 export const metadata: Metadata = {
@@ -213,7 +214,10 @@ function LessonCard({
 
 export default async function TeacherPortalDashboard() {
   const session = await requireRole([UserRole.TEACHER]);
-  const dashboard = await getTeacherDashboardData(session.uid);
+  const [dashboard, unreadNotifications] = await Promise.all([
+    getTeacherDashboardData(session.uid),
+    countUnreadNotificationsForUser(session.uid),
+  ]);
   const now = new Date();
   const metrics = dashboard.metrics;
 
@@ -662,6 +666,11 @@ export default async function TeacherPortalDashboard() {
           </Button>
           <Button asChild variant="secondary" size="sm">
             <Link href="/portal/teacher/materials">Materials</Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm">
+            <Link href="/portal/teacher/notifications">
+              Notifications ({unreadNotifications} unread)
+            </Link>
           </Button>
         </div>
       </section>

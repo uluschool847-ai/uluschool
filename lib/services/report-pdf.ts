@@ -18,24 +18,77 @@ function getRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function getRows(value: unknown) {
+  return Array.isArray(value) ? value.map(getRecord) : [];
+}
+
+function formatScore(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(1) : "N/A";
+}
+
 export async function renderReportSnapshotPdf(snapshotData: Record<string, unknown>) {
   const student = getRecord(snapshotData.student);
   const term = getRecord(snapshotData.academicTerm ?? snapshotData.term);
   const grades = getRecord(snapshotData.grades);
   const attendance = getRecord(snapshotData.attendance);
+  const classGroup = getRecord(snapshotData.classGroup);
+  const categoryRows = getRows(grades.categories);
+  const homeworkRows = getRows(grades.homeworkGrades);
+  const manualRows = getRows(grades.manualGrades);
+  const attendanceHistory = getRows(snapshotData.attendanceHistory);
   const progressNotes = Array.isArray(snapshotData.progressNotes) ? snapshotData.progressNotes : [];
   const lines = [
+    "ULU Online School",
+    "Academic Progress Report",
+    "----------------------------------------",
     `Report for ${student.fullName ?? "Student"}`,
+    `Class/group: ${classGroup.name ?? "Class group"}`,
     `Term: ${term.name ?? "Academic term"}`,
-    `Weighted term average: ${grades.weightedTermAverage ?? "No average"}`,
+    `Generated: ${new Date().toISOString().slice(0, 10)}`,
+    "",
+    "Grade summary",
+    `Weighted term average: ${formatScore(grades.weightedTermAverage)}`,
+    ...categoryRows.map(
+      (row) => `Category: ${row.label ?? row.category ?? "Category"} - ${formatScore(row.average)}`,
+    ),
+    "",
+    "Homework grades",
+    ...(homeworkRows.length
+      ? homeworkRows
+          .slice(0, 12)
+          .map(
+            (row) =>
+              `${row.assignmentTitle ?? row.title ?? "Homework"} - ${formatScore(row.score)}`,
+          )
+      : ["No homework grades recorded."]),
+    "",
+    "Manual grades",
+    ...(manualRows.length
+      ? manualRows
+          .slice(0, 12)
+          .map((row) => `${row.title ?? "Manual grade"} - ${formatScore(row.score)}`)
+      : ["No manual grades recorded."]),
+    "",
+    "Attendance summary",
     `Attendance: Present ${attendance.present ?? 0}, Late ${attendance.late ?? 0}, Absent ${
       attendance.absent ?? 0
     }`,
-    `Teacher comment: ${snapshotData.teacherComment ?? "No comment"}`,
-    ...progressNotes.slice(0, 4).map((note) => {
+    ...attendanceHistory
+      .slice(0, 8)
+      .map(
+        (row) =>
+          `Attendance row: ${row.lessonTitle ?? row.title ?? "Lesson"} - ${row.status ?? ""}`,
+      ),
+    "",
+    "Progress notes",
+    ...(progressNotes.length ? [] : ["No progress notes recorded."]),
+    ...progressNotes.slice(0, 8).map((note) => {
       const record = getRecord(note);
       return `Progress: ${record.content ?? record.teacherNotes ?? ""}`;
     }),
+    "",
+    "Teacher comment",
+    `Teacher comment: ${snapshotData.teacherComment ?? "No comment"}`,
   ];
 
   const streamLines = lines.map(

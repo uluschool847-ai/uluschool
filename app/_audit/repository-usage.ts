@@ -1,3 +1,5 @@
+import { NotificationType } from "@prisma/client";
+
 import {
   createLog,
   getLogs,
@@ -50,6 +52,10 @@ import {
   listHomeworkAssignmentsForTeacher,
   listHomeworkAssignmentsForTeacherClass as listScopedHomeworkAssignmentsForTeacherClass,
 } from "@/lib/repositories/homework-repository";
+import {
+  createInAppNotification,
+  listNotificationPreferencesByUserIds,
+} from "@/lib/repositories/notification-repository";
 import {
   archiveHomeworkAssignment,
   archiveProgressNote,
@@ -187,6 +193,14 @@ export async function auditRepositoryUsageConnections() {
     channel: "EMAIL",
     status: "SKIPPED",
   });
+  await createInAppNotification({
+    body: "Audit notification",
+    dedupeKey: "audit-notification",
+    recipientUserId: "student-1",
+    title: "Audit notification",
+    type: NotificationType.SYSTEM_NOTICE,
+  });
+  await listNotificationPreferencesByUserIds(["student-1"]);
   await getSubmissionForTeacher("teacher-1", "submission-1");
   await listScopedSubmissionsForAssignmentByTeacher("teacher-1", "assignment-1");
   await createStudentSubmission({

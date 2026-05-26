@@ -69,22 +69,80 @@ enum ReminderDeliveryStatus {
   SKIPPED
 }
 
+enum NotificationType {
+  LESSON_REMINDER
+  ASSIGNMENT_OVERDUE
+  SYSTEM_NOTICE
+  GRADE_FEEDBACK
+  ATTENDANCE_ALERT
+  REPORT_READY
+}
+
 enum TaskStatus {
   PENDING
   IN_PROGRESS
   COMPLETED
 }
 
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AiDraftType {
+  REPORT_COMMENT
+  CRM_FOLLOW_UP
+  PARENT_SUMMARY
+  MESSAGE_COPY
+}
+
+enum AiDraftStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+}
+
 enum SubscriptionStatus {
+  TRIAL
   ACTIVE
+  PAUSED
   CANCELLED
   PAST_DUE
+  EXPIRED
 }
 
 enum PaymentStatus {
   SUCCESS
   FAILED
   PENDING
+  PROCESSING
+  SUCCEEDED
+  CANCELLED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum BillingCycle {
+  MONTHLY
+  TERMLY
+  ONE_TIME
+}
+
+enum PaymentProvider {
+  MPESA
+  MANUAL_BANK_TRANSFER
+  CASH
+  PAYPAL
+  OTHER
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  OVERDUE
+  VOID
 }
 
 enum PerformanceLevel {
@@ -227,6 +285,8 @@ model AppUser {
   adminAuditLogs     AdminAuditLog[]
   attendanceRecords  AttendanceRecord[] @relation("StudentAttendanceRecords")
   markedAttendanceRecords AttendanceRecord[] @relation("AttendanceMarkedBy")
+  inAppNotifications InAppNotification[] @relation("UserInAppNotifications")
+  notificationPreference NotificationPreference? @relation("UserNotificationPreference")
 
   // Educational Model Relations
   children           AppUser[]          @relation("ParentChildren")
@@ -247,13 +307,52 @@ model AppUser {
   reportSnapshotsAsTeacher ReportSnapshot[] @relation("ReportSnapshotTeacher")
   courseMaterials      CourseMaterial[]
   cabinetTeacher       Teacher?         @relation("TeacherCabinetAccess")
+  aiDraftsCreated      AiDraft[]        @relation("AiDraftCreatedBy")
+  aiDraftsReviewed     AiDraft[]        @relation("AiDraftReviewedBy")
 
   // Automation Relations
   assignedTasks ManagerTask[]
 
   // BI Relations
-  subscriptions StudentSubscription[]
-  payments      PaymentTransaction[]
+  subscriptions     StudentSubscription[] @relation("StudentSubscriptions")
+  paidSubscriptions StudentSubscription[] @relation("PayerSubscriptions")
+  payments          PaymentTransaction[]  @relation("StudentPayments")
+  paidPayments      PaymentTransaction[]  @relation("PayerPayments")
+  billingInvoices   BillingInvoice[]      @relation("StudentBillingInvoices")
+  payerInvoices     BillingInvoice[]      @relation("PayerBillingInvoices")
+}
+
+model InAppNotification {
+  id                  String                 @id @default(cuid())
+  recipientUserId     String
+  recipient           AppUser                @relation("UserInAppNotifications", fields: [recipientUserId], references: [id], onDelete: Cascade)
+  type                NotificationType
+  title               String
+  body                String
+  relatedHref         String?
+  deliveryStatus      ReminderDeliveryStatus @default(SENT)
+  details             String?
+  dedupeKey           String
+  sourceReminderLogId String?
+  createdAt           DateTime               @default(now())
+  readAt              DateTime?
+
+  @@unique([recipientUserId, dedupeKey])
+  @@index([recipientUserId, readAt, createdAt])
+  @@index([type, createdAt])
+  @@index([deliveryStatus, createdAt])
+}
+
+model NotificationPreference {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            AppUser  @relation("UserNotificationPreference", fields: [userId], references: [id], onDelete: Cascade)
+  emailEnabled    Boolean  @default(true)
+  whatsappEnabled Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model ScheduledClass {
@@ -476,6 +575,7 @@ model Level {
   enquiries     Enquiry[]
   levelSubjects LevelSubject[]
   classGroups   ClassGroup[]
+  billingPlans  BillingPlan[]
 }
 
 model LevelSubject {
@@ -731,47 +831,149 @@ model ManagerTask {
   assignedTo       AppUser?   @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
   dueDate          DateTime
   status           TaskStatus @default(PENDING)
+  priority         TaskPriority @default(MEDIUM)
   relatedEnquiryId String?
   relatedEnquiry   Enquiry?   @relation(fields: [relatedEnquiryId], references: [id], onDelete: SetNull)
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
   @@index([assignedToId, status])
+  @@index([priority, status])
   @@index([dueDate])
+}
+
+model AiDraft {
+  id                      String          @id @default(cuid())
+  type                    AiDraftType
+  status                  AiDraftStatus   @default(DRAFT)
+  inputSnapshot           Json
+  outputText              String
+  createdById             String
+  createdBy               AppUser         @relation("AiDraftCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  reviewedById            String?
+  reviewedBy              AppUser?        @relation("AiDraftReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  relatedStudentId        String?
+  relatedReportSnapshotId String?
+  relatedEnquiryId        String?
+  provider                String          @default("mock")
+  model                   String          @default("local-deterministic")
+  createdAt               DateTime        @default(now())
+  reviewedAt              DateTime?
+  updatedAt               DateTime        @updatedAt
+
+  @@index([createdById, type, status])
+  @@index([relatedStudentId])
+  @@index([relatedReportSnapshotId])
+  @@index([relatedEnquiryId])
 }
 
 // ==========================================
 // NEW MODELS: BI Dashboards & Payments
 // ==========================================
 
+model BillingPlan {
+  id           String       @id @default(cuid())
+  name         String
+  description  String?
+  levelId      String?
+  level        Level?       @relation(fields: [levelId], references: [id], onDelete: SetNull)
+  cycle        BillingCycle @default(MONTHLY)
+  amountMinor  Int
+  currency     String       @default("KES")
+  isActive     Boolean      @default(true)
+  displayOrder Int          @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  subscriptions StudentSubscription[]
+  invoices      BillingInvoice[]
+
+  @@index([isActive, displayOrder, name])
+  @@index([levelId])
+}
+
 model StudentSubscription {
-  id        String               @id @default(cuid())
-  studentId String
-  student   AppUser              @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  planName  String
-  status    SubscriptionStatus   @default(ACTIVE)
-  startDate DateTime             @default(now())
-  endDate   DateTime?
-  createdAt DateTime             @default(now())
-  updatedAt DateTime             @updatedAt
-  payments  PaymentTransaction[]
+  id          String             @id @default(cuid())
+  studentId   String
+  student     AppUser            @relation("StudentSubscriptions", fields: [studentId], references: [id], onDelete: Cascade)
+  payerUserId String?
+  payer       AppUser?           @relation("PayerSubscriptions", fields: [payerUserId], references: [id], onDelete: SetNull)
+  planId      String?
+  plan        BillingPlan?       @relation(fields: [planId], references: [id], onDelete: SetNull)
+  planName    String
+  status      SubscriptionStatus @default(ACTIVE)
+  startDate   DateTime           @default(now())
+  endDate     DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  payments    PaymentTransaction[]
+  invoices    BillingInvoice[]
 
   @@index([studentId, status])
+  @@index([payerUserId, status])
+  @@index([planId])
 }
 
 model PaymentTransaction {
+  id                        String               @id @default(cuid())
+  subscriptionId            String?
+  subscription              StudentSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  invoiceId                 String?
+  invoice                   BillingInvoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  studentId                 String
+  student                   AppUser              @relation("StudentPayments", fields: [studentId], references: [id], onDelete: Cascade)
+  payerUserId               String?
+  payer                     AppUser?             @relation("PayerPayments", fields: [payerUserId], references: [id], onDelete: SetNull)
+  amount                    Float
+  amountMinor               Int                  @default(0)
+  currency                  String               @default("KES")
+  provider                  PaymentProvider      @default(MANUAL_BANK_TRANSFER)
+  status                    PaymentStatus        @default(PENDING)
+  paymentDate               DateTime             @default(now())
+  providerCheckoutRequestId String?
+  providerMerchantRequestId String?
+  mpesaReceiptNumber        String?
+  phoneNumber               String?
+  accountReference          String?
+  callbackPayload           Json?
+  refundedAt                DateTime?
+  createdAt                 DateTime             @default(now())
+  updatedAt                 DateTime             @updatedAt
+
+  @@index([studentId])
+  @@index([payerUserId, paymentDate])
+  @@index([invoiceId])
+  @@index([provider, status, paymentDate])
+  @@index([status, paymentDate])
+}
+
+model BillingInvoice {
   id             String               @id @default(cuid())
+  invoiceNumber  String               @unique
+  studentId      String
+  student        AppUser              @relation("StudentBillingInvoices", fields: [studentId], references: [id], onDelete: Cascade)
+  payerUserId    String?
+  payer          AppUser?             @relation("PayerBillingInvoices", fields: [payerUserId], references: [id], onDelete: SetNull)
   subscriptionId String?
   subscription   StudentSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
-  studentId      String
-  student        AppUser              @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  amount         Float
-  currency       String               @default("USD")
-  status         PaymentStatus        @default(PENDING)
-  paymentDate    DateTime             @default(now())
+  planId         String?
+  plan           BillingPlan?         @relation(fields: [planId], references: [id], onDelete: SetNull)
+  title          String
+  description    String?
+  amountMinor    Int
+  currency       String               @default("KES")
+  status         InvoiceStatus        @default(ISSUED)
+  dueDate        DateTime?
+  issuedAt       DateTime             @default(now())
+  paidAt         DateTime?
+  voidedAt       DateTime?
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
-  @@index([studentId])
-  @@index([status, paymentDate])
+  payments PaymentTransaction[]
+
+  @@index([studentId, status, issuedAt])
+  @@index([payerUserId, status, issuedAt])
+  @@index([subscriptionId])
+  @@index([planId])
 }

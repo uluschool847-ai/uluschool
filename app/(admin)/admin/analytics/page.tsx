@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/session";
 import {
+  ANALYTICS_BASE_CURRENCY,
   getAdminAnalyticsOverview,
   getAdvancedBIMetrics,
 } from "@/lib/repositories/analytics-repository";
@@ -12,12 +13,58 @@ export const metadata: Metadata = {
   title: "BI Analytics - Admin",
 };
 
+type SearchParams = Record<string, string | undefined>;
+
+type PageProps = {
+  searchParams?: Promise<SearchParams> | SearchParams;
+};
+
+function parseDate(value?: string) {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+async function resolveParams(searchParams: PageProps["searchParams"]) {
+  return searchParams ? await searchParams : {};
+}
+
+function pickFilters(params: SearchParams) {
+  return {
+    ...(parseDate(params.from) ? { from: parseDate(params.from) } : {}),
+    ...(parseDate(params.to) ? { to: parseDate(params.to) } : {}),
+    ...(params.levelId ? { levelId: params.levelId } : {}),
+    ...(params.planId ? { planId: params.planId } : {}),
+    ...(params.subjectId ? { subjectId: params.subjectId } : {}),
+    ...(params.teacherId ? { teacherId: params.teacherId } : {}),
+    ...(params.trafficSource ? { trafficSource: params.trafficSource } : {}),
+  };
+}
+
+function exportHref(params: SearchParams) {
+  const next = new URLSearchParams();
+  for (const key of [
+    "from",
+    "to",
+    "levelId",
+    "planId",
+    "subjectId",
+    "teacherId",
+    "trafficSource",
+  ]) {
+    const value = params[key];
+    if (value) next.set(key, value);
+  }
+  const query = next.toString();
+  return query ? `/admin/analytics/export?${query}` : "/admin/analytics/export";
+}
+
 function formatCurrency(amount: number) {
   const safeAmount = Number.isFinite(amount) ? amount : 0;
 
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency: ANALYTICS_BASE_CURRENCY,
     maximumFractionDigits: 2,
   }).format(safeAmount);
 }
@@ -30,12 +77,14 @@ function calculateBarWidth(value: number, maxValue: number, minimumWidth = 2) {
   return Math.min(100, Math.max(minimumWidth, (value / maxValue) * 100));
 }
 
-export default async function AnalyticsDashboardPage() {
+export default async function AnalyticsDashboardPage({ searchParams }: PageProps = {}) {
   await requireRole([UserRole.ADMIN]);
+  const params = await resolveParams(searchParams);
+  const filters = pickFilters(params);
 
   const [basicAnalytics, advancedMetrics] = await Promise.all([
-    getAdminAnalyticsOverview(),
-    getAdvancedBIMetrics(),
+    getAdminAnalyticsOverview(filters),
+    getAdvancedBIMetrics(filters),
   ]);
   const maxTrafficCount = Math.max(
     ...basicAnalytics.trafficSources.map((source) => source.count),
@@ -51,9 +100,84 @@ export default async function AnalyticsDashboardPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Business Intelligence</h1>
         <p className="text-muted-foreground mt-2">
-          Track Lifetime Value (LTV), retention rates, and revenue.
+          Track Lifetime Value (LTV), retention rates, and KES revenue.
         </p>
       </div>
+
+      <form
+        aria-label="Analytics filters"
+        className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 md:grid-cols-4"
+      >
+        <label className="text-sm">
+          From
+          <input
+            className="mt-1 w-full rounded border p-2"
+            name="from"
+            type="date"
+            defaultValue={params.from ?? ""}
+          />
+        </label>
+        <label className="text-sm">
+          To
+          <input
+            className="mt-1 w-full rounded border p-2"
+            name="to"
+            type="date"
+            defaultValue={params.to ?? ""}
+          />
+        </label>
+        <label className="text-sm">
+          Plan ID
+          <input
+            className="mt-1 w-full rounded border p-2"
+            name="planId"
+            defaultValue={params.planId ?? ""}
+          />
+        </label>
+        <label className="text-sm">
+          Traffic source
+          <input
+            className="mt-1 w-full rounded border p-2"
+            name="trafficSource"
+            defaultValue={params.trafficSource ?? ""}
+          />
+        </label>
+        <label className="text-sm">
+          Level ID
+          <input
+            className="mt-1 w-full rounded border p-2"
+            name="levelId"
+            defaultValue={params.levelId ?? ""}
+          />
+        </label>
+        <label className="text-sm">
+          Subject ID
+          <input
+            className="mt-1 w-full rounded border p-2"
+            name="subjectId"
+            defaultValue={params.subjectId ?? ""}
+          />
+        </label>
+        <label className="text-sm">
+          Teacher ID
+          <input
+            className="mt-1 w-full rounded border p-2"
+            name="teacherId"
+            defaultValue={params.teacherId ?? ""}
+          />
+        </label>
+        <div className="flex items-end gap-2">
+          <button
+            className="rounded bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+            type="submit"
+          >
+            Apply
+          </button>
+          <a className="rounded border px-4 py-2 text-sm font-semibold" href={exportHref(params)}>
+            Export CSV
+          </a>
+        </div>
+      </form>
 
       <div className="grid gap-6 md:grid-cols-4">
         <Card>

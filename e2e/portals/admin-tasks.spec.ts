@@ -1,5 +1,5 @@
 import { type Page, expect, test } from "@playwright/test";
-import { TaskStatus, UserRole } from "@prisma/client";
+import { TaskPriority, TaskStatus, UserRole } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 
@@ -145,6 +145,7 @@ async function createTasksFixtures() {
         description:
           "A long pending manager task description that should wrap cleanly without breaking the card layout.",
         dueDate: new Date("2099-01-01T09:00:00.000Z"),
+        priority: TaskPriority.HIGH,
         status: TaskStatus.PENDING,
       },
     }),

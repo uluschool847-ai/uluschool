@@ -10,6 +10,7 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 
 vi.mock("@/lib/repositories/analytics-repository", () => ({
+  ANALYTICS_BASE_CURRENCY: "KES",
   getAdminAnalyticsOverview: getAdminAnalyticsOverviewMock,
   getAdvancedBIMetrics: getAdvancedBIMetricsMock,
 }));

@@ -2,12 +2,30 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const prismaMock = vi.hoisted(() => ({
   managerTask: {
+    create: vi.fn(),
     findMany: vi.fn(),
+    findFirst: vi.fn(),
     update: vi.fn(),
     findUnique: vi.fn(),
   },
   appUser: {
     findFirst: vi.fn(),
+    findMany: vi.fn(),
+  },
+  academicTerm: {
+    findMany: vi.fn(),
+  },
+  assignment: {
+    findMany: vi.fn(),
+  },
+  attendanceRecord: {
+    groupBy: vi.fn(),
+  },
+  classGroup: {
+    findMany: vi.fn(),
+  },
+  studentSubscription: {
+    findMany: vi.fn(),
   },
 }));
 
@@ -50,7 +68,7 @@ describe("automation-repository ManagerTask operations", () => {
     vi.clearAllMocks();
   });
 
-  it("findAllTasks should filter by status and assigned admin while treating priority as unsupported", async () => {
+  it("findAllTasks should filter by status, priority, and assigned admin", async () => {
     prismaMock.managerTask.findMany.mockResolvedValueOnce([
       {
         id: "task-1",
@@ -74,6 +92,7 @@ describe("automation-repository ManagerTask operations", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           status: "IN_PROGRESS",
+          priority: "HIGH",
           assignedToId: "admin-1",
         }),
         include: expect.objectContaining({
@@ -83,7 +102,6 @@ describe("automation-repository ManagerTask operations", () => {
         orderBy: expect.any(Array),
       }),
     );
-    expect(prismaMock.managerTask.findMany.mock.calls[0][0].where).not.toHaveProperty("priority");
     expect(result).toHaveLength(1);
   });
 
@@ -189,5 +207,60 @@ describe("automation-repository ManagerTask operations", () => {
 
     await expect(repo.assignTask("task-1", "student-1")).rejects.toThrow(/active admin/i);
     expect(prismaMock.managerTask.update).not.toHaveBeenCalled();
+  });
+
+  it("generateRuleBasedAutomationTasks creates deduped high-priority overdue payment follow-up tasks", async () => {
+    vi.setSystemTime(new Date("2026-05-01T10:00:00.000Z"));
+    prismaMock.studentSubscription.findMany.mockResolvedValueOnce([
+      {
+        id: "sub-1",
+        planName: "IGCSE Monthly",
+        payer: { email: "parent@example.test", fullName: "Parent One" },
+        student: { email: "student@example.test", fullName: "Amina Yusuf" },
+      },
+    ]);
+    prismaMock.attendanceRecord.groupBy.mockResolvedValueOnce([]);
+    prismaMock.appUser.findMany.mockResolvedValueOnce([]);
+    prismaMock.assignment.findMany.mockResolvedValueOnce([]);
+    prismaMock.academicTerm.findMany.mockResolvedValueOnce([]);
+    prismaMock.classGroup.findMany.mockResolvedValueOnce([]);
+    prismaMock.managerTask.findFirst.mockResolvedValueOnce(null);
+    prismaMock.managerTask.create.mockResolvedValueOnce({
+      id: "task-1",
+      title: "Follow up overdue payment: Amina Yusuf",
+      description: "Subscription IGCSE Monthly is past due.",
+      priority: "HIGH",
+      status: "PENDING",
+    });
+
+    const database = { ...prismaMock };
+    const result = await automationRepository.generateRuleBasedAutomationTasks(
+      database as unknown as Parameters<
+        typeof automationRepository.generateRuleBasedAutomationTasks
+      >[0],
+    );
+
+    expect(prismaMock.studentSubscription.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { status: "PAST_DUE" },
+      }),
+    );
+    expect(prismaMock.managerTask.findFirst).toHaveBeenCalledWith({
+      where: {
+        status: { in: ["PENDING", "IN_PROGRESS"] },
+        title: "Follow up overdue payment: Amina Yusuf",
+      },
+      select: { id: true },
+    });
+    expect(prismaMock.managerTask.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          priority: "HIGH",
+          title: "Follow up overdue payment: Amina Yusuf",
+        }),
+      }),
+    );
+    expect(result).toHaveLength(1);
+    vi.useRealTimers();
   });
 });

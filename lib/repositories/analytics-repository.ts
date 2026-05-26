@@ -1,14 +1,23 @@
-import { EnquiryStatus, PaymentStatus, type Prisma, type SubscriptionStatus } from "@prisma/client";
+import { EnquiryStatus, PaymentStatus, type Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 
-export const ANALYTICS_BASE_CURRENCY = "USD";
+export const ANALYTICS_BASE_CURRENCY = "KES";
+const SUCCESSFUL_PAYMENT_STATUSES = [PaymentStatus.SUCCESS, PaymentStatus.SUCCEEDED];
 
 type DateRange = {
   from?: Date;
   to?: Date;
   startDate?: Date;
   endDate?: Date;
+};
+
+export type AdminAnalyticsFilters = DateRange & {
+  levelId?: string;
+  planId?: string;
+  subjectId?: string;
+  teacherId?: string;
+  trafficSource?: string;
 };
 
 function buildPaymentDateFilter(dateRange?: DateRange) {
@@ -25,100 +34,49 @@ function buildPaymentDateFilter(dateRange?: DateRange) {
   };
 }
 
-export async function findAllPayments(
-  filters: {
-    status?: PaymentStatus;
-    dateRange?: DateRange;
-    page?: number;
-    limit?: number;
-  } = {},
-) {
-  const page = Math.max(1, filters.page ?? 1);
-  const limit = Math.max(1, filters.limit ?? 20);
-  const where: Prisma.PaymentTransactionWhereInput = {};
-  const paymentDate = buildPaymentDateFilter(filters.dateRange);
-
-  if (filters.status) {
-    where.status = filters.status;
-  }
-
-  if (paymentDate) {
-    where.paymentDate = paymentDate;
-  }
-
-  const [totalCount, items] = await Promise.all([
-    prisma.paymentTransaction.count({ where }),
-    prisma.paymentTransaction.findMany({
-      where,
-      include: {
-        student: { select: { id: true, fullName: true, email: true } },
-        subscription: { select: { id: true, planName: true } },
-      },
-      orderBy: { paymentDate: "desc" },
-      skip: (page - 1) * limit,
-      take: limit,
-    }),
-  ]);
-
-  return {
-    items,
-    totalCount,
-    totalPages: totalCount === 0 ? 0 : Math.ceil(totalCount / limit),
-  };
+function clean(value?: string) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
-export async function findAllSubscriptions(
-  filters: {
-    plan?: string;
-    status?: SubscriptionStatus;
-    page?: number;
-    limit?: number;
-  } = {},
-) {
-  const page = Math.max(1, filters.page ?? 1);
-  const limit = Math.max(1, filters.limit ?? 20);
-  const where: Prisma.StudentSubscriptionWhereInput = {};
-  const plan = filters.plan?.trim();
-
-  if (plan) {
-    where.planName = { contains: plan, mode: "insensitive" };
-  }
-
-  if (filters.status) {
-    where.status = filters.status;
-  }
-
-  const [totalCount, items] = await Promise.all([
-    prisma.studentSubscription.count({ where }),
-    prisma.studentSubscription.findMany({
-      where,
-      include: {
-        student: { select: { id: true, fullName: true, email: true } },
-        payments: {
-          orderBy: { paymentDate: "desc" },
-          take: 3,
-        },
-      },
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * limit,
-      take: limit,
-    }),
-  ]);
-
-  return {
-    items,
-    totalCount,
-    totalPages: totalCount === 0 ? 0 : Math.ceil(totalCount / limit),
-  };
-}
-
-export async function getRevenueMetrics(dateRange?: DateRange) {
-  const paymentDate = buildPaymentDateFilter(dateRange);
+function buildPaymentWhere(
+  filters: AdminAnalyticsFilters = {},
+): Prisma.PaymentTransactionWhereInput {
+  const paymentDate = buildPaymentDateFilter(filters);
   const where: Prisma.PaymentTransactionWhereInput = {
-    status: PaymentStatus.SUCCESS,
+    status: { in: SUCCESSFUL_PAYMENT_STATUSES },
     currency: ANALYTICS_BASE_CURRENCY,
     ...(paymentDate ? { paymentDate } : {}),
   };
+  const planId = clean(filters.planId);
+  const levelId = clean(filters.levelId);
+  if (planId || levelId) {
+    where.subscription = {
+      ...(planId ? { planId } : {}),
+      ...(levelId ? { plan: { levelId } } : {}),
+    };
+  }
+
+  const subjectId = clean(filters.subjectId);
+  const teacherId = clean(filters.teacherId);
+  if (subjectId || teacherId) {
+    where.student = {
+      is: {
+        enrolledClassGroups: {
+          some: {
+            ...(subjectId ? { subjectId } : {}),
+            ...(teacherId ? { teacherId } : {}),
+          },
+        },
+      },
+    };
+  }
+
+  return where;
+}
+
+export async function getRevenueMetrics(dateRange?: DateRange) {
+  const where = buildPaymentWhere(dateRange);
 
   const [aggregate, payments] = await Promise.all([
     prisma.paymentTransaction.aggregate({
@@ -152,9 +110,9 @@ export async function getRevenueMetrics(dateRange?: DateRange) {
   };
 }
 
-export async function getAnalyticsInputs(dateRange?: DateRange) {
-  const createdAt = buildPaymentDateFilter(dateRange);
-  const paymentDate = buildPaymentDateFilter(dateRange);
+export async function getAnalyticsInputs(filters: AdminAnalyticsFilters = {}) {
+  const createdAt = buildPaymentDateFilter(filters);
+  const paymentWhere = buildPaymentWhere(filters);
 
   const [signupRows, payments] = await Promise.all([
     prisma.appUser.groupBy({
@@ -163,11 +121,7 @@ export async function getAnalyticsInputs(dateRange?: DateRange) {
       _count: { _all: true },
     }),
     prisma.paymentTransaction.findMany({
-      where: {
-        status: PaymentStatus.SUCCESS,
-        currency: ANALYTICS_BASE_CURRENCY,
-        ...(paymentDate ? { paymentDate } : {}),
-      },
+      where: paymentWhere,
       select: { amount: true, currency: true, paymentDate: true },
       orderBy: { paymentDate: "asc" },
     }),
@@ -201,7 +155,10 @@ export async function getAnalyticsInputs(dateRange?: DateRange) {
   };
 }
 
-export async function getAdminAnalyticsOverview() {
+export async function getAdminAnalyticsOverview(filters: AdminAnalyticsFilters = {}) {
+  const createdAt = buildPaymentDateFilter(filters);
+  const source = clean(filters.trafficSource);
+  const sourceWhere = source ? { utmSource: source } : {};
   const [
     totalApplications,
     acceptedApplications,
@@ -209,15 +166,23 @@ export async function getAdminAnalyticsOverview() {
     enquiriesBySource,
     contactBySource,
   ] = await Promise.all([
-    prisma.enquiry.count(),
-    prisma.enquiry.count({ where: { status: EnquiryStatus.CONVERTED } }),
-    prisma.contactLead.count(),
+    prisma.enquiry.count({ where: { ...(createdAt ? { createdAt } : {}), ...sourceWhere } }),
+    prisma.enquiry.count({
+      where: {
+        status: EnquiryStatus.CONVERTED,
+        ...(createdAt ? { createdAt } : {}),
+        ...sourceWhere,
+      },
+    }),
+    prisma.contactLead.count({ where: { ...(createdAt ? { createdAt } : {}), ...sourceWhere } }),
     prisma.enquiry.groupBy({
       by: ["utmSource"],
+      where: { ...(createdAt ? { createdAt } : {}), ...sourceWhere },
       _count: { _all: true },
     }),
     prisma.contactLead.groupBy({
       by: ["utmSource"],
+      where: { ...(createdAt ? { createdAt } : {}), ...sourceWhere },
       _count: { _all: true },
     }),
   ]);
@@ -248,15 +213,16 @@ export async function getAdminAnalyticsOverview() {
   };
 }
 
-export async function getAdvancedBIMetrics() {
+export async function getAdvancedBIMetrics(filters: AdminAnalyticsFilters = {}) {
+  const paymentWhere = buildPaymentWhere(filters);
   const [totalPayments, allPayments, activeSubscriptions, cancelledSubscriptions] =
     await Promise.all([
       prisma.paymentTransaction.aggregate({
         _sum: { amount: true },
-        where: { status: PaymentStatus.SUCCESS, currency: ANALYTICS_BASE_CURRENCY },
+        where: paymentWhere,
       }),
       prisma.paymentTransaction.findMany({
-        where: { status: PaymentStatus.SUCCESS, currency: ANALYTICS_BASE_CURRENCY },
+        where: paymentWhere,
         orderBy: { paymentDate: "asc" },
         select: { amount: true, paymentDate: true },
       }),
@@ -269,7 +235,7 @@ export async function getAdvancedBIMetrics() {
   // Calculate LTV (Average revenue per active/past student)
   const totalStudentsWithPayments = await prisma.paymentTransaction.groupBy({
     by: ["studentId"],
-    where: { status: PaymentStatus.SUCCESS, currency: ANALYTICS_BASE_CURRENCY },
+    where: paymentWhere,
   });
   const ltv =
     totalStudentsWithPayments.length > 0 ? totalRevenue / totalStudentsWithPayments.length : 0;
@@ -296,4 +262,27 @@ export async function getAdvancedBIMetrics() {
     retentionRate,
     revenueChartData,
   };
+}
+
+export async function getAnalyticsCsvRows(filters: AdminAnalyticsFilters = {}) {
+  const [overview, metrics, inputs] = await Promise.all([
+    getAdminAnalyticsOverview(filters),
+    getAdvancedBIMetrics(filters),
+    getAnalyticsInputs(filters),
+  ]);
+
+  return [
+    ["metric", "value", "currency"],
+    ["totalRevenue", metrics.totalRevenue.toFixed(2), ANALYTICS_BASE_CURRENCY],
+    ["averageLtv", metrics.ltv.toFixed(2), ANALYTICS_BASE_CURRENCY],
+    ["retentionRate", metrics.retentionRate.toFixed(2), "percent"],
+    ["activeSubscriptions", String(metrics.activeSubscriptions), ""],
+    ["conversionRate", overview.conversionRate.toFixed(2), "percent"],
+    ...inputs.dailyRevenue.map((row) => [
+      `dailyRevenue:${row.date}`,
+      row.amount.toFixed(2),
+      row.currency,
+    ]),
+    ...inputs.dailySignups.map((row) => [`dailySignups:${row.date}`, String(row.count), "count"]),
+  ];
 }

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const generateTasksForStaleEnquiriesMock = vi.hoisted(() => vi.fn());
+const generateRuleBasedAutomationTasksMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/repositories/automation-repository", () => ({
-  generateTasksForStaleEnquiries: generateTasksForStaleEnquiriesMock,
+  generateRuleBasedAutomationTasks: generateRuleBasedAutomationTasksMock,
 }));
 
 vi.mock("next/server", () => ({
@@ -61,7 +61,10 @@ describe("app/api/cron/automation/route.ts env enforcement", () => {
 
   it("returns success when token matches CRON_SECRET", async () => {
     process.env.CRON_SECRET = "expected-secret";
-    generateTasksForStaleEnquiriesMock.mockResolvedValueOnce([{ id: "task-1" }, { id: "task-2" }]);
+    generateRuleBasedAutomationTasksMock.mockResolvedValueOnce([
+      { id: "task-1" },
+      { id: "task-2" },
+    ]);
     const { GET } = await import("../../../../app/api/cron/automation/route");
 
     const response = await GET(
@@ -74,7 +77,7 @@ describe("app/api/cron/automation/route.ts env enforcement", () => {
     expect(await response.json()).toEqual({
       success: true,
       tasksCreated: 2,
-      message: "Generated 2 manager tasks for stale enquiries.",
+      message: "Generated 2 manager tasks from rule-based automation.",
     });
   });
 });

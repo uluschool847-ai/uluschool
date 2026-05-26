@@ -94,9 +94,9 @@ type AssignmentReminderRecord = {
     classGroup?: {
       id: string;
       name: string;
-      students?: { id: string }[];
+      students?: { id: string; parents?: { id: string }[] }[];
     } | null;
-    students?: { id: string }[];
+    students?: { id: string; parents?: { id: string }[] }[];
   };
   submissions: { studentId: string }[];
   assignmentReminders?: {
@@ -310,18 +310,39 @@ function uniqueStudentRecipients(assignment: AssignmentReminderRecord) {
     assignment.submissions.map((submission) => submission.studentId),
   );
   const enrolledStudentIds = new Set<string>();
+  const parentIdsByStudent = new Map<string, Set<string>>();
 
   for (const student of assignment.scheduledClass.students ?? []) {
     enrolledStudentIds.add(student.id);
+    const parentIds = parentIdsByStudent.get(student.id) ?? new Set<string>();
+    for (const parent of student.parents ?? []) {
+      parentIds.add(parent.id);
+    }
+    parentIdsByStudent.set(student.id, parentIds);
   }
   for (const student of assignment.scheduledClass.classGroup?.students ?? []) {
     enrolledStudentIds.add(student.id);
+    const parentIds = parentIdsByStudent.get(student.id) ?? new Set<string>();
+    for (const parent of student.parents ?? []) {
+      parentIds.add(parent.id);
+    }
+    parentIdsByStudent.set(student.id, parentIds);
   }
 
-  return [...enrolledStudentIds]
+  const missingStudentIds = [...enrolledStudentIds]
     .filter((studentId) => !submittedStudentIds.has(studentId))
-    .sort()
-    .map((id) => ({ id }));
+    .sort();
+  const parentIds = new Set<string>();
+  for (const studentId of missingStudentIds) {
+    for (const parentId of parentIdsByStudent.get(studentId) ?? []) {
+      parentIds.add(parentId);
+    }
+  }
+  const missingStudents = missingStudentIds.map((id) => ({ id }));
+
+  if (missingStudents.length === 0) return [];
+
+  return [...missingStudents, ...[...parentIds].sort().map((id) => ({ id }))];
 }
 
 function studentAssignmentWhere(studentId: string, filters: StudentAssignmentFilters = {}) {
@@ -773,10 +794,10 @@ export async function listMissingAssignmentsForReminders(
             select: {
               id: true,
               name: true,
-              students: { select: { id: true } },
+              students: { select: { id: true, parents: { select: { id: true } } } },
             },
           },
-          students: { select: { id: true } },
+          students: { select: { id: true, parents: { select: { id: true } } } },
           courseMaterials: false,
         },
       },

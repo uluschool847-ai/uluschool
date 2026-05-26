@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { requireRole } from "@/lib/auth/session";
+import { countUnreadNotificationsForUser } from "@/lib/repositories/notification-repository";
 import { getParentDashboardData } from "@/lib/repositories/parent-dashboard-repository";
 
 type DashboardData = Awaited<ReturnType<typeof getParentDashboardData>>;
@@ -39,7 +40,7 @@ function EmptyStatus({ label, children }: { label: string; children: ReactNode }
   );
 }
 
-function ProfileCard() {
+function ProfileCard({ unreadNotifications }: { unreadNotifications: number }) {
   return (
     <section
       aria-label="Parent profile"
@@ -55,6 +56,13 @@ function ProfileCard() {
         </Link>
       </div>
       <p className="text-sm text-gray-700">Account and linked children overview.</p>
+      <p className="text-sm text-gray-700">Unread notifications: {unreadNotifications}</p>
+      <Link
+        className="text-sm font-medium text-blue-700 hover:underline"
+        href="/portal/parent/notifications"
+      >
+        Open notifications
+      </Link>
     </section>
   );
 }
@@ -255,6 +263,14 @@ function ChildDashboard({ child }: { child: DashboardChild }) {
             <EmptyStatus label="Reports">No reports available yet.</EmptyStatus>
           )}
         </SummaryCard>
+
+        <SummaryCard
+          childName={childName}
+          heading="Billing"
+          link={sectionLink(quickLinks, "Open billing")}
+        >
+          <p>View KES invoices, receipts, subscriptions, and M-Pesa payment status.</p>
+        </SummaryCard>
       </div>
     </section>
   );
@@ -262,13 +278,16 @@ function ChildDashboard({ child }: { child: DashboardChild }) {
 
 export default async function ParentPortalPage() {
   const session = await requireRole([UserRole.PARENT]);
-  const dashboard = await getParentDashboardData(session.uid);
+  const [dashboard, unreadNotifications] = await Promise.all([
+    getParentDashboardData(session.uid),
+    countUnreadNotificationsForUser(session.uid),
+  ]);
 
   if (dashboard.children.length === 0) {
     return (
       <main className="mx-auto max-w-5xl space-y-6 p-8 text-center">
         <h1 className="text-2xl font-bold">Parent Dashboard</h1>
-        <ProfileCard />
+        <ProfileCard unreadNotifications={unreadNotifications} />
         <output className="block text-gray-500">
           No linked students found. Please contact administration.
         </output>
@@ -286,7 +305,7 @@ export default async function ParentPortalPage() {
         </p>
       </header>
 
-      <ProfileCard />
+      <ProfileCard unreadNotifications={unreadNotifications} />
 
       {dashboard.children.map((child) => (
         <ChildDashboard key={child.id} child={child} />
