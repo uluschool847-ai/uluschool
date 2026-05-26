@@ -1,133 +1,295 @@
 import { UserRole } from "@prisma/client";
+import Link from "next/link";
+import type { ReactNode } from "react";
 
 import { requireRole } from "@/lib/auth/session";
-import { getParentDashboardData } from "@/lib/repositories/portal-repository";
+import { getParentDashboardData } from "@/lib/repositories/parent-dashboard-repository";
+
+type DashboardData = Awaited<ReturnType<typeof getParentDashboardData>>;
+type DashboardChild = DashboardData["children"][number];
+type QuickLink = DashboardChild["quickLinks"][number];
+
+function formatDate(date: Date | string | null | undefined) {
+  if (!date) return null;
+  const value = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(value.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).formatToParts(value);
+
+  const day = parts.find((part) => part.type === "day")?.value ?? "";
+  const month = parts.find((part) => part.type === "month")?.value ?? "";
+  const year = parts.find((part) => part.type === "year")?.value ?? "";
+
+  return `${day} ${month} ${year}`;
+}
+
+function sectionLink(links: QuickLink[], label: QuickLink["label"]) {
+  return links.find((link) => link.label === label) ?? null;
+}
+
+function EmptyStatus({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <output aria-label={label} className="text-sm text-gray-500">
+      {children}
+    </output>
+  );
+}
+
+function ProfileCard() {
+  return (
+    <section
+      aria-label="Parent profile"
+      className="space-y-3 rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h2 className="text-xl font-semibold text-gray-900">Profile</h2>
+        <Link
+          className="text-sm font-medium text-blue-700 hover:underline"
+          href="/portal/parent/profile"
+        >
+          Open profile
+        </Link>
+      </div>
+      <p className="text-sm text-gray-700">Account and linked children overview.</p>
+    </section>
+  );
+}
+
+function SummaryCard({
+  childName,
+  children,
+  heading,
+  link,
+}: {
+  childName: string;
+  children: ReactNode;
+  heading: string;
+  link: QuickLink | null;
+}) {
+  return (
+    <section
+      aria-label={`${childName} ${heading}`}
+      className="space-y-3 rounded-lg border border-gray-200 bg-white p-5 shadow-sm"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h2 className="text-xl font-semibold text-gray-900">{heading}</h2>
+        {link ? (
+          <Link className="text-sm font-medium text-blue-700 hover:underline" href={link.href}>
+            {link.label}
+          </Link>
+        ) : null}
+      </div>
+      <div className="space-y-2 text-sm text-gray-700">{children}</div>
+    </section>
+  );
+}
+
+function ChildDashboard({ child }: { child: DashboardChild }) {
+  const childName = child.childName ?? child.fullName;
+  const quickLinks = child.quickLinks ?? [];
+  const nextLessonDate = formatDate(child.scheduleSummary.nextLesson?.startAt);
+  const nextAssignmentDate = formatDate(child.assignmentsSummary.nextPending?.dueDate);
+  const progressDate = formatDate(child.progressSummary.latestNote?.recordedAt);
+  const reportDate = formatDate(child.reportsSummary.latestReport?.generatedAt);
+
+  return (
+    <section
+      aria-label={`Dashboard for ${childName}`}
+      className="space-y-6 border-b border-gray-100 pb-10 last:border-0"
+    >
+      <header className="space-y-1">
+        <h2 className="text-2xl font-bold tracking-tight text-gray-900">{childName}</h2>
+        <p className="text-sm text-gray-500">Linked child academic summary</p>
+      </header>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <SummaryCard
+          childName={childName}
+          heading="Schedule"
+          link={sectionLink(quickLinks, "Open schedule")}
+        >
+          {child.scheduleSummary.nextLesson ? (
+            <>
+              <p>
+                Next lesson:{" "}
+                <span className="font-medium">{child.scheduleSummary.nextLesson.title}</span>
+              </p>
+              {nextLessonDate ? <p>Lesson date: {nextLessonDate}</p> : null}
+              {child.scheduleSummary.nextLesson.subjectName ? (
+                <p>Subject: {child.scheduleSummary.nextLesson.subjectName}</p>
+              ) : null}
+              {child.scheduleSummary.nextLesson.classGroupName ? (
+                <p>Group: {child.scheduleSummary.nextLesson.classGroupName}</p>
+              ) : null}
+              <p>Upcoming lessons: {child.scheduleSummary.upcomingCount}</p>
+            </>
+          ) : (
+            <EmptyStatus label="Schedule">No upcoming lessons.</EmptyStatus>
+          )}
+        </SummaryCard>
+
+        <SummaryCard
+          childName={childName}
+          heading="Assignments"
+          link={sectionLink(quickLinks, "Open assignments")}
+        >
+          {child.assignmentsSummary.pendingCount > 0 ? (
+            <>
+              <p>Pending assignments: {child.assignmentsSummary.pendingCount}</p>
+              <p>Recently graded: {child.assignmentsSummary.recentGradedCount}</p>
+              {child.assignmentsSummary.nextPending ? (
+                <>
+                  <p>
+                    Next assignment:{" "}
+                    <span className="font-medium">
+                      {child.assignmentsSummary.nextPending.title}
+                    </span>
+                  </p>
+                  {nextAssignmentDate ? <p>Due date: {nextAssignmentDate}</p> : null}
+                </>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <p>Recently graded: {child.assignmentsSummary.recentGradedCount}</p>
+              {child.assignmentsSummary.latestGraded ? (
+                <p>
+                  Recently graded assignment:{" "}
+                  <span className="font-medium">{child.assignmentsSummary.latestGraded.title}</span>
+                </p>
+              ) : null}
+              <EmptyStatus label="Assignments">No pending assignments.</EmptyStatus>
+            </>
+          )}
+        </SummaryCard>
+
+        <SummaryCard
+          childName={childName}
+          heading="Materials"
+          link={sectionLink(quickLinks, "Open materials")}
+        >
+          {child.materialsSummary.totalCount > 0 ? (
+            <>
+              <p>Materials: {child.materialsSummary.totalCount}</p>
+              {child.materialsSummary.latestMaterial ? (
+                <p>
+                  Latest material:{" "}
+                  <span className="font-medium">{child.materialsSummary.latestMaterial.title}</span>
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <EmptyStatus label="Materials">No materials available yet.</EmptyStatus>
+          )}
+        </SummaryCard>
+
+        <SummaryCard
+          childName={childName}
+          heading="Attendance"
+          link={sectionLink(quickLinks, "Open attendance")}
+        >
+          {child.attendanceSummary && child.attendanceSummary.totalCount > 0 ? (
+            <p>
+              Attendance rate:{" "}
+              {child.attendanceSummary.attendanceRate === null
+                ? "No attendance rate yet"
+                : `${child.attendanceSummary.attendanceRate}%`}
+              {"; "}Present: {child.attendanceSummary.presentCount}; Late:{" "}
+              {child.attendanceSummary.lateCount}
+              {"; "}Absent: {child.attendanceSummary.absentCount}
+            </p>
+          ) : (
+            <EmptyStatus label="Attendance">No attendance records yet.</EmptyStatus>
+          )}
+        </SummaryCard>
+
+        <SummaryCard
+          childName={childName}
+          heading="Progress"
+          link={sectionLink(quickLinks, "Open progress")}
+        >
+          {child.progressSummary.latestNote ? (
+            <>
+              {child.progressSummary.latestNote.subjectName ? (
+                <p>Subject: {child.progressSummary.latestNote.subjectName}</p>
+              ) : null}
+              <p>Latest note: {child.progressSummary.latestNote.content}</p>
+              {progressDate ? <p>Recorded date: {progressDate}</p> : null}
+            </>
+          ) : (
+            <EmptyStatus label="Progress">No progress notes yet.</EmptyStatus>
+          )}
+        </SummaryCard>
+
+        <SummaryCard
+          childName={childName}
+          heading="Gradebook"
+          link={sectionLink(quickLinks, "Open gradebook")}
+        >
+          {child.gradebookSummary.currentTermAverage === null ? (
+            <EmptyStatus label="Gradebook">No grade average yet.</EmptyStatus>
+          ) : (
+            <p>Grade average: {child.gradebookSummary.currentTermAverage}</p>
+          )}
+        </SummaryCard>
+
+        <SummaryCard
+          childName={childName}
+          heading="Reports"
+          link={sectionLink(quickLinks, "Open reports")}
+        >
+          {child.reportsSummary.latestReport ? (
+            <>
+              <p>Latest report: {child.reportsSummary.latestReport.termName}</p>
+              <p>
+                Report average:{" "}
+                {child.reportsSummary.latestReport.weightedTermAverage ?? "No report average"}
+              </p>
+              {reportDate ? <p>Report date: {reportDate}</p> : null}
+            </>
+          ) : (
+            <EmptyStatus label="Reports">No reports available yet.</EmptyStatus>
+          )}
+        </SummaryCard>
+      </div>
+    </section>
+  );
+}
 
 export default async function ParentPortalPage() {
   const session = await requireRole([UserRole.PARENT]);
+  const dashboard = await getParentDashboardData(session.uid);
 
-  const childrenData = await getParentDashboardData(session.uid);
-
-  if (!childrenData || childrenData.length === 0) {
+  if (dashboard.children.length === 0) {
     return (
-      <main className="p-8 text-center">
+      <main className="mx-auto max-w-5xl space-y-6 p-8 text-center">
         <h1 className="text-2xl font-bold">Parent Dashboard</h1>
-        <output>
-          <p className="text-gray-500 mt-2">
-            No linked students found. Please contact administration.
-          </p>
+        <ProfileCard />
+        <output className="block text-gray-500">
+          No linked students found. Please contact administration.
         </output>
       </main>
     );
   }
 
   return (
-    <main className="p-8 max-w-5xl mx-auto space-y-16">
-      <header>
+    <main className="mx-auto max-w-5xl space-y-10 p-8">
+      <header className="space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">Parent Dashboard</h1>
-        <p className="mt-2 text-gray-500">
-          Track your child&apos;s classes, homework, grades, and overall progress.
+        <p className="text-gray-500">
+          Track linked child classes, assignments, materials, attendance, progress, grades, and
+          reports.
         </p>
       </header>
 
-      {childrenData.map((child) => (
-        <section
-          key={child.id}
-          aria-label={`Dashboard for ${child.childName}`}
-          className="space-y-10 border-b border-gray-100 pb-16 last:border-0"
-        >
-          <header>
-            <h2 className="text-4xl font-extrabold text-gray-900 tracking-tight">
-              {child.childName}
-            </h2>
-            <p className="text-blue-600 font-semibold mt-1">Student Performance Dashboard</p>
-          </header>
+      <ProfileCard />
 
-          <section aria-label={`Upcoming classes for ${child.childName}`}>
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">Upcoming Classes</h2>
-            <div className="grid gap-4 md:grid-cols-3">
-              {child.upcomingClasses.map((scheduledClass) => (
-                <div
-                  key={scheduledClass.id}
-                  className="p-5 bg-white border border-gray-200 rounded-2xl shadow-sm"
-                >
-                  <h3 className="font-bold text-gray-900">{scheduledClass.title}</h3>
-                  <p className="text-gray-500 text-sm">
-                    Subject: {scheduledClass.subject?.name ?? "General"}
-                  </p>
-                  {scheduledClass.classGroup ? (
-                    <p className="text-gray-500 text-sm">Group: {scheduledClass.classGroup.name}</p>
-                  ) : null}
-                  <p className="text-gray-500 text-sm">{scheduledClass.teacher}</p>
-                  <p className="text-blue-600 font-bold mt-3 text-xs uppercase">
-                    {scheduledClass.time}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section aria-label={`Homework status for ${child.childName}`}>
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">Homework Status</h2>
-            <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
-              <div className="grid grid-cols-2 bg-gray-50 p-4 border-b border-gray-200 text-xs font-bold text-gray-500 uppercase">
-                <div>Assignment</div>
-                <div>Status</div>
-              </div>
-              {child.homeworkStatus.map((homework) => (
-                <div
-                  key={homework.id}
-                  className="grid grid-cols-2 p-4 border-b border-gray-100 last:border-0 items-center"
-                >
-                  <div className="font-medium text-gray-800">{homework.title}</div>
-                  <div>
-                    <span className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-xs font-bold">
-                      {homework.status}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section aria-label={`Recent grades for ${child.childName}`}>
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">Recent Grades</h2>
-            <div className="grid gap-4 sm:grid-cols-2">
-              {child.recentGrades.map((grade) => (
-                <div
-                  key={grade.id}
-                  className="p-6 bg-slate-50 border border-slate-200 rounded-2xl flex gap-6"
-                >
-                  <div className="text-3xl font-black text-blue-600">{grade.grade}</div>
-                  <div>
-                    <h3 className="font-bold text-gray-900">{grade.subject}</h3>
-                    <p className="text-sm text-gray-600 mt-1 italic">"{grade.feedback}"</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section aria-label={`Overall progress for ${child.childName}`}>
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">Overall Progress</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="p-8 bg-gray-900 text-white rounded-3xl text-center">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">
-                  Attendance
-                </p>
-                <p className="text-4xl font-black mt-2">{child.structuredProgress.attendance}</p>
-              </div>
-              <div className="p-8 bg-blue-600 text-white rounded-3xl text-center">
-                <p className="text-xs font-bold text-blue-200 uppercase tracking-widest">
-                  Completed Tasks
-                </p>
-                <p className="text-4xl font-black mt-2">
-                  {child.structuredProgress.completedAssignments}
-                </p>
-              </div>
-            </div>
-          </section>
-        </section>
+      {dashboard.children.map((child) => (
+        <ChildDashboard key={child.id} child={child} />
       ))}
     </main>
   );

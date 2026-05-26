@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { type Prisma, UserRole } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { listAttendanceHistoryForStudent } from "@/lib/repositories/attendance-repository";
@@ -245,7 +245,7 @@ export async function getReportSnapshotForParent(
   database: ReportDatabase = prisma,
 ) {
   const parent = await database.appUser.findFirst({
-    where: { id: parentId, children: { some: { id: studentId } } },
+    where: { id: parentId, role: UserRole.PARENT, children: { some: { id: studentId } } },
     select: { id: true },
   });
   if (!parent) return null;
@@ -301,11 +301,11 @@ export async function listReportSnapshotsForStudent(
 export async function listReportSnapshotsForParentChild(
   parentId: string,
   studentId: string,
-  filters: { termId?: string } = {},
+  filters: ReportFilters = {},
   database: ReportDatabase = prisma,
 ) {
   const parent = await database.appUser.findFirst({
-    where: { id: parentId, children: { some: { id: studentId } } },
+    where: { id: parentId, role: UserRole.PARENT, children: { some: { id: studentId } } },
     select: { id: true },
   });
   if (!parent) return [];
@@ -313,12 +313,20 @@ export async function listReportSnapshotsForParentChild(
   const snapshots = await database.reportSnapshot.findMany({
     where: {
       studentId,
+      ...(filters.classGroupId ? { classGroupId: filters.classGroupId } : {}),
       ...(filters.termId ? { academicTermId: filters.termId } : {}),
     },
     orderBy: { generatedAt: "desc" },
   });
-  return snapshots.map((snapshot) =>
+  const rows = snapshots.map((snapshot) =>
     mapSnapshot(snapshot as Record<string, unknown>, `/portal/parent/reports/${studentId}`),
+  );
+  return sortReportRows(
+    rows.filter(
+      (snapshot) =>
+        snapshot.student.id === studentId && matchesReportSearch(snapshot, filters.search),
+    ),
+    filters.sort,
   );
 }
 

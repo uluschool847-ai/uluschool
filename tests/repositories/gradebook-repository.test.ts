@@ -257,6 +257,148 @@ describe("gradebook-repository contract", () => {
     );
   });
 
+  it("returns null for unlinked parent child gradebooks before reading grades", async () => {
+    prismaMock.appUser.findFirst.mockResolvedValueOnce(null);
+
+    const { getParentChildGradebook } = await loadGradebookRepository();
+    const result = await getParentChildGradebook("parent-1", "foreign-student", "term-1");
+
+    expect(result).toBeNull();
+    expect(prismaMock.appUser.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "parent-1",
+          role: UserRole.PARENT,
+          children: { some: { id: "foreign-student" } },
+        }),
+      }),
+    );
+    expect(prismaMock.submission.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.manualGradeEntry.findMany).not.toHaveBeenCalled();
+  });
+
+  it("does not expose foreign homework or manual grades through the parent child gradebook", async () => {
+    prismaMock.appUser.findFirst.mockResolvedValueOnce({ id: "parent-1", role: UserRole.PARENT });
+    prismaMock.appUser.findFirst.mockResolvedValueOnce({
+      email: "amina@example.com",
+      fullName: "Amina Yusuf",
+      id: "student-1",
+      role: UserRole.STUDENT,
+    });
+    prismaMock.submission.findMany.mockResolvedValueOnce([
+      homeworkSubmission(),
+      homeworkSubmission({
+        id: "foreign-submission",
+        grade: 100,
+        student: { id: "student-2", fullName: "Foreign Student", email: "foreign@example.com" },
+        assignment: {
+          id: "foreign-assignment",
+          title: "Foreign homework should stay hidden",
+          subjectId: "subject-1",
+          scheduledClass: {
+            id: "foreign-lesson",
+            teacherId: "teacher-1",
+            classGroupId: "group-1",
+            classGroup: { id: "group-1", teacherId: "teacher-1", name: "Algebra Group A" },
+          },
+        },
+      }),
+    ]);
+    prismaMock.manualGradeEntry.findMany.mockResolvedValueOnce([
+      manualGrade(),
+      manualGrade({
+        id: "foreign-manual",
+        score: 100,
+        student: { id: "student-2", fullName: "Foreign Student", email: "foreign@example.com" },
+        title: "Foreign manual grade should stay hidden",
+      }),
+    ]);
+    prismaMock.manualGradeEntry.findMany.mockResolvedValueOnce([]);
+
+    const { getParentChildGradebook } = await loadGradebookRepository();
+    const result = (await getParentChildGradebook(
+      "parent-1",
+      "student-1",
+      "term-1",
+    )) as StudentGradebookResult;
+    const serialized = JSON.stringify(result);
+
+    expect(serialized).toContain("Quadratics homework");
+    expect(serialized).toContain("Oral checkpoint");
+    expect(serialized).not.toContain("Foreign Student");
+    expect(serialized).not.toContain("Foreign homework should stay hidden");
+    expect(serialized).not.toContain("Foreign manual grade should stay hidden");
+  });
+
+  it("returns linked parent gradebook with selected term dates weights grades feedback and archived history", async () => {
+    prismaMock.appUser.findFirst.mockResolvedValueOnce({ id: "parent-1", role: UserRole.PARENT });
+    prismaMock.appUser.findFirst.mockResolvedValueOnce({
+      email: "amina@example.com",
+      fullName: "Amina Yusuf",
+      id: "student-1",
+      role: UserRole.STUDENT,
+    });
+    prismaMock.submission.findMany.mockResolvedValueOnce([
+      homeworkSubmission({
+        feedback: "Clear method and correct final answer.",
+        grade: 82,
+      }),
+    ]);
+    prismaMock.manualGradeEntry.findMany.mockResolvedValueOnce([
+      manualGrade({
+        description: "Confident oral explanation.",
+        score: 91,
+      }),
+    ]);
+    prismaMock.manualGradeEntry.findMany.mockResolvedValueOnce([
+      manualGrade({
+        archivedAt: new Date("2026-03-14T10:00:00.000Z"),
+        id: "manual-archived",
+        score: 50,
+        title: "Archived oral checkpoint",
+      }),
+    ]);
+
+    const { getParentChildGradebook } = await loadGradebookRepository();
+    const result = (await getParentChildGradebook(
+      "parent-1",
+      "student-1",
+      "term-1",
+    )) as StudentGradebookResult;
+
+    expect(prismaMock.academicTerm.findFirst).toHaveBeenCalledWith({ where: { id: "term-1" } });
+    expect(result).toEqual(
+      expect.objectContaining({
+        categoryWeights: { HOMEWORK: 70, MANUAL: 30 },
+        student: { email: "amina@example.com", fullName: "Amina Yusuf", id: "student-1" },
+        term: expect.objectContaining({
+          endDate: new Date("2026-06-30T23:59:59.999Z"),
+          id: "term-1",
+          name: "Spring 2026",
+          startDate: new Date("2026-01-01T00:00:00.000Z"),
+        }),
+        termAverage: 84.7,
+      }),
+    );
+    expect(result.homeworkGrades).toEqual([
+      expect.objectContaining({
+        feedback: "Clear method and correct final answer.",
+        score: 82,
+        title: "Quadratics homework",
+      }),
+    ]);
+    expect(result.manualGrades).toEqual([
+      expect.objectContaining({
+        description: "Confident oral explanation.",
+        score: 91,
+        title: "Oral checkpoint",
+      }),
+    ]);
+    expect(result.manualGradeHistory).toEqual([
+      expect.objectContaining({ id: "manual-archived", title: "Archived oral checkpoint" }),
+    ]);
+  });
+
   it("uses the active academic term by default and returns the student gradebook UI contract", async () => {
     prismaMock.appUser.findFirst.mockResolvedValueOnce({
       id: "student-1",

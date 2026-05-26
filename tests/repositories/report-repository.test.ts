@@ -35,6 +35,11 @@ type ReportRepositoryModule = {
     studentId: string,
     filters?: Record<string, unknown>,
   ) => Promise<unknown[]>;
+  listReportSnapshotsForParentChild: (
+    parentId: string,
+    studentId: string,
+    filters?: Record<string, unknown>,
+  ) => Promise<unknown[]>;
   getReportSnapshotForTeacher: (teacherId: string, snapshotId: string) => Promise<unknown>;
   getReportSnapshotForStudent: (studentId: string, snapshotId: string) => Promise<unknown>;
   getReportSnapshotForParent: (
@@ -135,6 +140,7 @@ describe("report-repository contract", () => {
         getReportSnapshotForTeacher: expect.any(Function),
         getReportSnapshotForStudent: expect.any(Function),
         getReportSnapshotForParent: expect.any(Function),
+        listReportSnapshotsForParentChild: expect.any(Function),
         exportReportSnapshotPdf: expect.any(Function),
       }),
     );
@@ -254,10 +260,115 @@ describe("report-repository contract", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           id: "parent-1",
+          role: "PARENT",
           children: { some: { id: "student-1" } },
         }),
       }),
     );
+  });
+
+  it("lists parent child report snapshots with ownership, filters, sorting, and UI-ready rows", async () => {
+    prismaMock.reportSnapshot.findMany.mockResolvedValueOnce([
+      snapshot(),
+      snapshot({
+        id: "older-snapshot",
+        generatedAt: new Date("2026-04-20T10:00:00.000Z"),
+        snapshotData: {
+          student: { id: "student-1", fullName: "Amina Yusuf" },
+          academicTerm: { id: "term-1", name: "Spring 2026" },
+          classGroup: { id: "group-1", name: "Algebra Group A" },
+          grades: { weightedTermAverage: 88 },
+          teacherComment: "Older report",
+        },
+      }),
+      snapshot({
+        id: "foreign-snapshot",
+        studentId: "student-2",
+        snapshotData: {
+          student: { id: "student-2", fullName: "Foreign Student" },
+          academicTerm: { id: "term-1", name: "Spring 2026" },
+          classGroup: { id: "group-1", name: "Algebra Group A" },
+          grades: { weightedTermAverage: 100 },
+          teacherComment: "Hidden parent report",
+        },
+      }),
+    ]);
+
+    const { listReportSnapshotsForParentChild } = await loadReportRepository();
+    const result = await listReportSnapshotsForParentChild("parent-1", "student-1", {
+      classGroupId: "group-1",
+      search: "practice",
+      sort: "generatedAtAsc",
+      termId: "term-1",
+    });
+
+    expect(prismaMock.appUser.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "parent-1",
+          role: "PARENT",
+          children: { some: { id: "student-1" } },
+        }),
+      }),
+    );
+    expect(prismaMock.reportSnapshot.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: expect.anything(),
+        where: expect.objectContaining({
+          academicTermId: "term-1",
+          classGroupId: "group-1",
+          studentId: "student-1",
+        }),
+      }),
+    );
+    expect(result).toEqual([
+      expect.objectContaining({
+        academicTermName: "Spring 2026",
+        childName: "Amina Yusuf",
+        classGroupName: "Algebra Group A",
+        generatedAt: new Date("2026-05-20T10:00:00.000Z"),
+        href: "/portal/parent/reports/student-1/snapshot-1",
+        id: "snapshot-1",
+        pdfAvailable: true,
+        teacherCommentPreview: "Keep practicing",
+        weightedTermAverage: 90,
+      }),
+    ]);
+  });
+
+  it("returns no parent report rows for unlinked children", async () => {
+    prismaMock.appUser.findFirst.mockResolvedValueOnce(null);
+
+    const { listReportSnapshotsForParentChild } = await loadReportRepository();
+    const result = await listReportSnapshotsForParentChild("parent-1", "foreign-student", {
+      termId: "term-1",
+    });
+
+    expect(result).toEqual([]);
+    expect(prismaMock.reportSnapshot.findMany).not.toHaveBeenCalled();
+  });
+
+  it("returns null for parent report detail when the child is unlinked", async () => {
+    prismaMock.appUser.findFirst.mockResolvedValueOnce(null);
+
+    const { getReportSnapshotForParent } = await loadReportRepository();
+    const result = await getReportSnapshotForParent(
+      "parent-1",
+      "foreign-student",
+      "foreign-snapshot",
+    );
+
+    expect(result).toBeNull();
+    expect(prismaMock.appUser.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          children: { some: { id: "foreign-student" } },
+          id: "parent-1",
+          role: "PARENT",
+        }),
+      }),
+    );
+    expect(prismaMock.reportSnapshot.findFirst).not.toHaveBeenCalled();
   });
 
   it("lists student report snapshots with filters, sorting, PDF metadata, and UI-ready rows", async () => {

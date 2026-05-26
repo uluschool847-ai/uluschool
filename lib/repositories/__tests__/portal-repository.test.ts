@@ -231,26 +231,6 @@ type PortalRepositoryModule = {
   } | null>;
   linkParentStudent: (parentId: string, studentId: string) => Promise<unknown>;
   unlinkParentStudent: (parentId: string, studentId: string) => Promise<unknown>;
-  getParentDashboardData: (parentId: string) => Promise<
-    Array<{
-      id: string;
-      childName: string;
-      enrolledClasses: unknown[];
-      recentSubmissions: unknown[];
-      upcomingClasses: unknown[];
-      homeworkStatus: unknown[];
-      recentGrades: unknown[];
-      structuredProgress: {
-        attendance: string;
-        completedAssignments: string;
-      };
-    }> & {
-      children: Array<{
-        id: string;
-        childName: string;
-      }>;
-    }
-  >;
   getParentScopedStudentData: (params: { parentId: string; childId: string }) => Promise<{
     childId: string;
     childName: string;
@@ -2432,83 +2412,6 @@ describe("portal-repository teacher portal visibility", () => {
 describe("portal-repository parent portal visibility", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-  });
-
-  it("getParentDashboardData returns only children linked to the parent relation", async () => {
-    const futureClassTime = new Date("2026-06-10T09:00:00.000Z");
-    prismaMock.appUser.findUnique.mockResolvedValueOnce({
-      id: "parent-1",
-      role: "PARENT",
-      children: [
-        {
-          id: "student-1",
-          fullName: "Sofia Shevchenko",
-          enrolledClasses: [
-            {
-              id: "class-1",
-              title: "Cambridge Mathematics",
-              startAt: futureClassTime,
-              teacher: { fullName: "Jane Doe" },
-            },
-          ],
-          submissions: [
-            {
-              id: "submission-1",
-              grade: "A",
-              feedback: "Strong work",
-              assignment: {
-                title: "Algebra Homework",
-                dueDate: new Date("2026-06-01T09:00:00.000Z"),
-              },
-            },
-          ],
-          studentProgresses: [],
-        },
-        {
-          id: "student-2",
-          fullName: "Mark Shevchenko",
-          enrolledClasses: [],
-          submissions: [],
-          studentProgresses: [],
-        },
-      ],
-    });
-
-    const { getParentDashboardData } = await loadPortalRepository();
-    const result = await getParentDashboardData("parent-1");
-
-    expect(prismaMock.appUser.findUnique).toHaveBeenCalledWith({
-      where: { id: "parent-1" },
-      include: {
-        children: expect.objectContaining({
-          include: expect.objectContaining({
-            enrolledClasses: expect.any(Object),
-            submissions: expect.any(Object),
-            studentProgresses: expect.any(Object),
-          }),
-        }),
-      },
-    });
-    expect(result.children.map((child) => child.id)).toEqual(["student-1", "student-2"]);
-    expect(result.children.map((child) => child.childName)).toEqual([
-      "Sofia Shevchenko",
-      "Mark Shevchenko",
-    ]);
-    expect(result.children.map((child) => child.childName)).not.toContain("Unlinked Student");
-  });
-
-  it("getParentDashboardData returns a safe empty children collection for a parent with no links", async () => {
-    prismaMock.appUser.findUnique.mockResolvedValueOnce({
-      id: "parent-empty",
-      role: "PARENT",
-      children: [],
-    });
-
-    const { getParentDashboardData } = await loadPortalRepository();
-    const result = await getParentDashboardData("parent-empty");
-
-    expect(result).toHaveLength(0);
-    expect(result.children).toHaveLength(0);
   });
 
   it("getParentScopedStudentData requires the requested child to belong to the parent", async () => {

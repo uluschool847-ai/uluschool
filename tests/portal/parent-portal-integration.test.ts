@@ -1,13 +1,18 @@
 import { prisma } from "@/lib/prisma";
-import * as portalRepository from "@/lib/repositories/portal-repository";
+import * as parentDashboardRepository from "@/lib/repositories/parent-dashboard-repository";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const DB_INTEGRATION_TIMEOUT_MS = 15_000;
 
 type ParentDashboardChild = {
   id: string;
-  enrolledClasses: unknown[];
-  recentSubmissions: Array<{ id: string; assignment: unknown }>;
+  assignmentsSummary: unknown;
+  attendanceSummary: unknown;
+  gradebookSummary: unknown;
+  materialsSummary: unknown;
+  progressSummary: unknown;
+  reportsSummary: unknown;
+  scheduleSummary: unknown;
 };
 
 describe("Parent Portal Integration & Database Seed Tests", () => {
@@ -63,7 +68,7 @@ describe("Parent Portal Integration & Database Seed Tests", () => {
         const parentId = parent ? parent.id : "mock-parent-id";
         const expectedChildIds = parent ? parent.children.map((c) => c.id) : [];
 
-        const dashboardData = await portalRepository.getParentDashboardData(parentId);
+        const dashboardData = await parentDashboardRepository.getParentDashboardData(parentId);
 
         expect(dashboardData).toBeDefined();
         expect(dashboardData).toHaveProperty("children");
@@ -77,22 +82,14 @@ describe("Parent Portal Integration & Database Seed Tests", () => {
           // Must be a truly linked student
           expect(expectedChildIds).toContain(child.id);
 
-          // 2. Data Hydration Check: Deep relational fetch for classes and submissions
-          expect(child).toHaveProperty("enrolledClasses");
-          expect(Array.isArray(child.enrolledClasses)).toBe(true);
-
-          expect(child).toHaveProperty("recentSubmissions");
-          expect(Array.isArray(child.recentSubmissions)).toBe(true);
-
-          // Ensure classes/submissions are not just dummy mock strings but valid hydrated objects
-          if (child.enrolledClasses.length > 0) {
-            expect(child.enrolledClasses[0]).toHaveProperty("id");
-            expect(child.enrolledClasses[0]).toHaveProperty("title");
-          }
-          if (child.recentSubmissions.length > 0) {
-            expect(child.recentSubmissions[0]).toHaveProperty("id");
-            expect(child.recentSubmissions[0]).toHaveProperty("assignment");
-          }
+          // 2. Data Hydration Check: dedicated dashboard repository returns real summaries.
+          expect(child).toHaveProperty("scheduleSummary");
+          expect(child).toHaveProperty("assignmentsSummary");
+          expect(child).toHaveProperty("materialsSummary");
+          expect(child).toHaveProperty("attendanceSummary");
+          expect(child).toHaveProperty("progressSummary");
+          expect(child).toHaveProperty("gradebookSummary");
+          expect(child).toHaveProperty("reportsSummary");
         }
       },
       DB_INTEGRATION_TIMEOUT_MS,
