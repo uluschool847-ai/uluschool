@@ -1,13 +1,20 @@
 import { UserRole } from "@prisma/client";
 
 import {
-  generateCrmFollowUpDraftAction,
-  reviewAdminAiDraftAction,
+  generateCrmFollowUpDraftFormAction,
+  reviewAdminAiDraftFormAction,
 } from "@/app/(admin)/admin/actions/ai-draft-actions";
 import { requireRole } from "@/lib/auth/session";
 import { listAdminAiDrafts } from "@/lib/repositories/ai-draft-repository";
 
-export default async function AdminAiDraftsPage() {
+type AdminAiDraftsPageProps = {
+  searchParams?: Promise<Record<string, string | undefined>> | Record<string, string | undefined>;
+};
+
+export default async function AdminAiDraftsPage({
+  searchParams = {},
+}: AdminAiDraftsPageProps = {}) {
+  const resolvedSearchParams = await searchParams;
   const session = await requireRole([UserRole.ADMIN]);
   const drafts = await listAdminAiDrafts(session.uid);
 
@@ -20,16 +27,23 @@ export default async function AdminAiDraftsPage() {
         </p>
       </header>
 
+      {resolvedSearchParams.aiDraftMessage ? (
+        <p className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          {resolvedSearchParams.aiDraftMessage}
+        </p>
+      ) : null}
+
+      {resolvedSearchParams.aiDraftError ? (
+        <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {resolvedSearchParams.aiDraftError}
+        </p>
+      ) : null}
+
       <section className="rounded-lg border p-4" aria-label="Generate CRM follow-up draft">
         <h2 className="text-xl font-semibold">CRM follow-up draft</h2>
         <form
           className="mt-3 flex flex-wrap items-end gap-3"
-          action={async (formData: FormData) => {
-            "use server";
-            await generateCrmFollowUpDraftAction({
-              enquiryId: formData.get("enquiryId")?.toString() ?? "",
-            });
-          }}
+          action={generateCrmFollowUpDraftFormAction}
         >
           <label className="grid gap-1 text-sm">
             Enquiry ID
@@ -52,28 +66,16 @@ export default async function AdminAiDraftsPage() {
               <p>Status: {draft.status}</p>
               {draft.status === "DRAFT" ? (
                 <div className="mt-3 flex gap-2">
-                  <form
-                    action={async () => {
-                      "use server";
-                      await reviewAdminAiDraftAction({
-                        draftId: draft.id,
-                        status: "APPROVED",
-                      });
-                    }}
-                  >
+                  <form action={reviewAdminAiDraftFormAction}>
+                    <input name="draftId" type="hidden" value={draft.id} />
+                    <input name="status" type="hidden" value="APPROVED" />
                     <button className="rounded-md border px-3 py-2 text-sm" type="submit">
                       Approve draft
                     </button>
                   </form>
-                  <form
-                    action={async () => {
-                      "use server";
-                      await reviewAdminAiDraftAction({
-                        draftId: draft.id,
-                        status: "REJECTED",
-                      });
-                    }}
-                  >
+                  <form action={reviewAdminAiDraftFormAction}>
+                    <input name="draftId" type="hidden" value={draft.id} />
+                    <input name="status" type="hidden" value="REJECTED" />
                     <button className="rounded-md border px-3 py-2 text-sm" type="submit">
                       Reject draft
                     </button>

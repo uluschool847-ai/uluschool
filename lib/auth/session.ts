@@ -216,6 +216,14 @@ export async function clearSession() {
   cookieStore.delete(SESSION_COOKIE);
 }
 
+function deleteSessionCookieIfWritable(cookieStore: Awaited<ReturnType<typeof cookies>>) {
+  try {
+    cookieStore.delete(SESSION_COOKIE);
+  } catch {
+    // Layouts and other Server Component reads can detect invalid sessions but cannot mutate cookies.
+  }
+}
+
 async function revalidateSessionPayload(payload: SessionPayload): Promise<SessionPayload | null> {
   const dbUser = await findUserById(payload.uid);
   if (!dbUser?.isActive || dbUser.role !== payload.role) {
@@ -239,18 +247,18 @@ async function readSessionFromCookie(): Promise<SessionReadResult> {
 
   const payload = await decodeSignedPayload<SessionPayload>(token);
   if (!payload) {
-    cookieStore.delete(SESSION_COOKIE);
+    deleteSessionCookieIfWritable(cookieStore);
     return { session: null, reason: "invalid" };
   }
 
   if (!isNotExpired(payload.exp)) {
-    cookieStore.delete(SESSION_COOKIE);
+    deleteSessionCookieIfWritable(cookieStore);
     return { session: null, reason: "expired" };
   }
 
   const session = await revalidateSessionPayload(payload);
   if (!session) {
-    cookieStore.delete(SESSION_COOKIE);
+    deleteSessionCookieIfWritable(cookieStore);
     return { session: null, reason: "invalid" };
   }
 

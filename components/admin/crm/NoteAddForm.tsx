@@ -48,6 +48,12 @@ export function NoteAddForm({ entityType, entityId }: NoteAddFormProps) {
     }
   }
 
+  function handleCancel() {
+    setContent("");
+    setError("");
+    setMessage("");
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       <label className="block text-sm font-medium text-slate-700" htmlFor={`note-${entityId}`}>
@@ -69,6 +75,14 @@ export function NoteAddForm({ entityType, entityId }: NoteAddFormProps) {
         className="min-h-10 rounded-md bg-slate-900 px-4 text-sm font-semibold text-white disabled:opacity-60"
       >
         {isPending ? "Saving..." : "Add note"}
+      </button>
+      <button
+        type="button"
+        disabled={isPending || content.length === 0}
+        onClick={handleCancel}
+        className="ml-2 min-h-10 rounded-md border border-slate-300 px-4 text-sm font-semibold text-slate-900 disabled:opacity-50"
+      >
+        Cancel
       </button>
     </form>
   );

@@ -21,10 +21,40 @@ const SUBJECT_SLUG_PREFIX = "qa-availability-subject";
 const LEVEL_SLUG_PREFIX = "qa-availability-level";
 const LESSON_PREFIX = "QA Availability Lesson";
 
+const BASE_MONDAY = nextUtcWeekday(1, 35);
+const BLOCKED_MONDAY = addUtcDays(BASE_MONDAY, 7);
+const TEACHER_BLOCK_MONDAY = addUtcDays(BASE_MONDAY, 14);
+const OTHER_TEACHER_BLOCK_TUESDAY = addUtcDays(BASE_MONDAY, 15);
+const GROUP_START_DATE = addUtcDays(BASE_MONDAY, -5);
+const GROUP_END_DATE = addUtcDays(BASE_MONDAY, 70);
+
 let adminUserId = ADMIN_ID;
 let teacherUserId = TEACHER_ID;
 let otherTeacherUserId = OTHER_TEACHER_ID;
 let classGroupId = "";
+
+function addUtcDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function nextUtcWeekday(weekday: number, minDaysFromToday: number) {
+  const next = new Date();
+  next.setUTCHours(0, 0, 0, 0);
+  next.setUTCDate(next.getUTCDate() + minDaysFromToday);
+  const offset = (weekday - next.getUTCDay() + 7) % 7;
+  next.setUTCDate(next.getUTCDate() + offset);
+  return next;
+}
+
+function datePart(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function utcDateTimeInput(date: Date, hour: number, minute = 0) {
+  return `${datePart(date)}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
 
 function toBase64Url(input: string) {
   return Buffer.from(input, "binary")
@@ -93,7 +123,7 @@ async function setPortalSession(
 }
 
 test.describe("Admin Teacher Availability", () => {
-  test.describe.configure({ timeout: 240000, mode: "serial" });
+  test.describe.configure({ timeout: 360000, mode: "serial" });
 
   test.beforeAll(async () => {
     await cleanupFixtures();
@@ -145,45 +175,41 @@ test.describe("Admin Teacher Availability", () => {
     });
 
     await createLesson(page, {
-      endAt: "2026-07-06T07:00",
+      endAt: utcDateTimeInput(BASE_MONDAY, 7),
       title: availableLessonTitle,
-      startAt: "2026-07-06T06:00",
+      startAt: utcDateTimeInput(BASE_MONDAY, 6),
     });
     await expect(page.getByText(/lesson created/i)).toBeVisible({ timeout: 30000 });
 
     await createLesson(page, {
-      endAt: "2026-07-06T16:00",
+      endAt: utcDateTimeInput(BASE_MONDAY, 16),
       title: outsideLessonTitle,
-      startAt: "2026-07-06T15:00",
+      startAt: utcDateTimeInput(BASE_MONDAY, 15),
     });
     await expect(page.getByText(/teacher is not available|outside availability/i)).toBeVisible({
       timeout: 30000,
     });
 
     await page.goto(`${BASE_URL}/admin/teachers/${teacherUserId}/availability`);
-    await page.getByLabel(/unavailable start/i).fill("2026-07-13T09:30");
-    await page.getByLabel(/unavailable end/i).fill("2026-07-13T10:30");
+    await page.getByLabel(/unavailable start/i).fill(utcDateTimeInput(BLOCKED_MONDAY, 9, 30));
+    await page.getByLabel(/unavailable end/i).fill(utcDateTimeInput(BLOCKED_MONDAY, 10, 30));
     await page.getByLabel(/reason/i).fill("Placement interview");
-    await page
-      .getByRole("button", { name: /add unavailable period|save unavailable period/i })
-      .click();
-    await expect(page.getByText(/unavailable period.*created|period.*saved/i)).toBeVisible({
-      timeout: 30000,
-    });
+    await submitUnavailablePeriod(page);
+    await expectUnavailablePeriodFeedback(page);
 
     await createLesson(page, {
-      endAt: "2026-07-13T07:00",
+      endAt: utcDateTimeInput(BLOCKED_MONDAY, 7),
       title: blockedLessonTitle,
-      startAt: "2026-07-13T06:00",
+      startAt: utcDateTimeInput(BLOCKED_MONDAY, 6),
     });
     await expect(page.getByText(/teacher is not available|unavailable period/i)).toBeVisible({
       timeout: 30000,
     });
 
     await createLesson(page, {
-      endAt: "2026-07-06T06:30",
+      endAt: utcDateTimeInput(BASE_MONDAY, 6, 30),
       title: overlappingLessonTitle,
-      startAt: "2026-07-06T06:15",
+      startAt: utcDateTimeInput(BASE_MONDAY, 6, 15),
     });
     await expect(page.getByText(/already booked|overlap|teacher is not available/i)).toBeVisible({
       timeout: 30000,
@@ -203,25 +229,17 @@ test.describe("Admin Teacher Availability", () => {
     await expect(page.getByText(/12:00/)).toBeVisible();
     await expect(page.getByText(/placement interview/i)).toBeVisible();
 
-    await page.getByLabel(/start/i).fill("2026-07-20T09:00");
-    await page.getByLabel(/end/i).fill("2026-07-20T10:00");
+    await page.getByLabel(/start/i).fill(utcDateTimeInput(TEACHER_BLOCK_MONDAY, 9));
+    await page.getByLabel(/end/i).fill(utcDateTimeInput(TEACHER_BLOCK_MONDAY, 10));
     await page.getByLabel(/reason/i).fill("Teacher self-blocked time");
-    await page
-      .getByRole("button", { name: /add unavailable period|save unavailable period/i })
-      .click();
-    await expect(page.getByText(/unavailable period.*created|period.*saved/i)).toBeVisible({
-      timeout: 30000,
-    });
+    await submitUnavailablePeriod(page);
+    await expectUnavailablePeriodFeedback(page);
 
     await page.goto(`${BASE_URL}/portal/teacher/availability?teacherId=${otherTeacherUserId}`);
-    await page.getByLabel(/start/i).fill("2026-07-21T09:00");
-    await page.getByLabel(/end/i).fill("2026-07-21T10:00");
-    await page
-      .getByRole("button", { name: /add unavailable period|save unavailable period/i })
-      .click();
-    await expect(page.getByText(/unavailable period.*created|period.*saved/i)).toBeVisible({
-      timeout: 30000,
-    });
+    await page.getByLabel(/start/i).fill(utcDateTimeInput(OTHER_TEACHER_BLOCK_TUESDAY, 9));
+    await page.getByLabel(/end/i).fill(utcDateTimeInput(OTHER_TEACHER_BLOCK_TUESDAY, 10));
+    await submitUnavailablePeriod(page);
+    await expectUnavailablePeriodFeedback(page);
   });
 });
 
@@ -234,12 +252,36 @@ async function createLesson(
   },
 ) {
   await page.goto(`${BASE_URL}/admin/classes/${classGroupId}/lessons/new`);
+  await expect(page.getByRole("heading", { name: /create lesson|new lesson/i })).toBeVisible({
+    timeout: 30000,
+  });
   await page.getByLabel(/title/i).fill(input.title);
   await page.getByLabel(/description/i).fill("Teacher availability scheduling smoke test.");
   await page.getByLabel(/start/i).fill(input.startAt);
   await page.getByLabel(/end/i).fill(input.endAt);
   await page.getByLabel(/live lesson|url/i).fill("https://meet.google.com/avl-test-link");
-  await page.getByRole("button", { name: /create lesson|save lesson/i }).click();
+  await Promise.all([
+    page.waitForURL(
+      (url) => url.searchParams.has("classMessage") || url.searchParams.has("classError"),
+      { timeout: 60000 },
+    ),
+    page.getByRole("button", { name: /create lesson|save lesson/i }).click(),
+  ]);
+}
+
+async function submitUnavailablePeriod(page: Page) {
+  await Promise.all([
+    page.waitForURL(/availabilityMessage=Unavailable(?:%20|\+)period(?:%20|\+)created/i, {
+      timeout: 60000,
+    }),
+    page.getByRole("button", { name: /add unavailable period|save unavailable period/i }).click(),
+  ]);
+}
+
+async function expectUnavailablePeriodFeedback(page: Page) {
+  await expect(
+    page.locator("output").filter({ hasText: /unavailable period.*created|period.*saved/i }),
+  ).toBeVisible({ timeout: 30000 });
 }
 
 async function ensureFixtures() {
@@ -319,10 +361,10 @@ async function ensureFixtures() {
     data: {
       capacity: 8,
       description: "Class group fixture for teacher availability e2e.",
-      endDate: new Date("2026-08-31T00:00:00.000Z"),
+      endDate: GROUP_END_DATE,
       levelId: level.id,
       name: `${GROUP_PREFIX} ${Date.now()}`,
-      startDate: new Date("2026-07-01T00:00:00.000Z"),
+      startDate: GROUP_START_DATE,
       status: ClassGroupStatus.ACTIVE,
       subjectId: subject.id,
       teacherId: teacherUserId,

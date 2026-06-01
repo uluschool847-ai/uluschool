@@ -1,8 +1,10 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { toggleUserStatusAction, updateUserRoleAction } from "@/app/(admin)/admin/users/actions";
+import { ConfirmedSubmit } from "@/components/admin/ConfirmedSubmit";
 import { normalizeActionResult } from "@/lib/action-result";
 
 type UserRole = "ADMIN" | "TEACHER" | "PARENT" | "STUDENT";
@@ -18,15 +20,18 @@ type EditableUser = {
 const ROLES: UserRole[] = ["ADMIN", "TEACHER", "PARENT", "STUDENT"];
 
 export function UserRoleEditor({ user }: { user: EditableUser }) {
+  const router = useRouter();
   const [role, setRole] = useState<UserRole>(user.role);
   const [isActive, setIsActive] = useState(user.isActive);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [isPending, setIsPending] = useState(false);
 
   async function changeRole(nextRole: UserRole) {
     const previousRole = role;
     setRole(nextRole);
     setError("");
+    setSuccessMessage("");
     setIsPending(true);
 
     try {
@@ -37,7 +42,10 @@ export function UserRoleEditor({ user }: { user: EditableUser }) {
       if (!result.success) {
         setRole(previousRole);
         setError(result.message);
+        return;
       }
+      setSuccessMessage("User role updated.");
+      router.refresh();
     } catch {
       setRole(previousRole);
       setError(normalizeActionResult(undefined).message);
@@ -51,6 +59,7 @@ export function UserRoleEditor({ user }: { user: EditableUser }) {
     const previousStatus = isActive;
     setIsActive(nextStatus);
     setError("");
+    setSuccessMessage("");
     setIsPending(true);
 
     try {
@@ -61,7 +70,10 @@ export function UserRoleEditor({ user }: { user: EditableUser }) {
       if (!result.success) {
         setIsActive(previousStatus);
         setError(result.message);
+        return;
       }
+      setSuccessMessage("User status updated.");
+      router.refresh();
     } catch {
       setIsActive(previousStatus);
       setError(normalizeActionResult(undefined).message);
@@ -93,20 +105,46 @@ export function UserRoleEditor({ user }: { user: EditableUser }) {
         </select>
       </label>
 
-      <button
-        type="button"
-        onClick={() => void toggleStatus()}
-        disabled={isPending}
-        className="w-fit rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60"
-      >
-        {isActive ? "Deactivate" : "Activate"}
-      </button>
+      {isActive ? (
+        <ConfirmedSubmit
+          title="Deactivate user account"
+          description={`Deactivate ${user.fullName} (${user.email})? This user will lose portal access until activated again.`}
+          confirmLabel="Confirm deactivation"
+        >
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void toggleStatus();
+            }}
+          >
+            <button
+              type="submit"
+              disabled={isPending}
+              className="w-fit rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60"
+            >
+              Deactivate
+            </button>
+          </form>
+        </ConfirmedSubmit>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void toggleStatus()}
+          disabled={isPending}
+          className="w-fit rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60"
+        >
+          Activate
+        </button>
+      )}
 
       <span className={`text-xs font-semibold ${isActive ? "text-emerald-700" : "text-slate-500"}`}>
         {isActive ? "Active" : "Inactive"}
       </span>
 
       {error ? <p className="text-sm font-medium text-red-700">{error}</p> : null}
+      {successMessage ? (
+        <p className="text-sm font-medium text-emerald-700">{successMessage}</p>
+      ) : null}
     </div>
   );
 }

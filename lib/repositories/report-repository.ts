@@ -168,7 +168,10 @@ async function assertTeacherOwnsStudent(
   const student = await database.appUser.findFirst({
     where: {
       id: studentId,
-      OR: [{ enrolledClasses: { some: { teacherId } } }, { classGroups: { some: { teacherId } } }],
+      OR: [
+        { enrolledClasses: { some: { teacherId } } },
+        { enrolledClassGroups: { some: { teacherId } } },
+      ],
     } as Prisma.AppUserWhereInput,
     select: { id: true },
   });
@@ -235,7 +238,7 @@ export async function getTeacherReportOptions(
       where: {
         OR: [
           { enrolledClasses: { some: { teacherId } } },
-          { classGroups: { some: { teacherId } } },
+          { enrolledClassGroups: { some: { teacherId } } },
         ],
       } as Prisma.AppUserWhereInput,
       orderBy: { fullName: "asc" },

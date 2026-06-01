@@ -1,4 +1,5 @@
 import { UserRole } from "@prisma/client";
+import Link from "next/link";
 
 import { AdminCrmListControls } from "@/components/admin/crm/AdminCrmListControls";
 import { requireRole } from "@/lib/auth/session";
@@ -15,17 +16,35 @@ type SubmissionListItem = {
   email?: string | null;
 };
 
+const PAGE_SIZE = 20;
+
 export default async function AdminSubmissionsPage({ searchParams }: PageProps) {
   await requireRole([UserRole.ADMIN]);
 
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const search = resolvedSearchParams?.search ?? "";
-  const page = Number.parseInt(resolvedSearchParams?.page ?? "1", 10) || 1;
-  const submissions = (await getSubmissions({
+  const parsedPage = Number.parseInt(resolvedSearchParams?.page ?? "1", 10);
+  const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+  let effectivePage = page;
+  let rows = (await getSubmissions({
     entityType: "enquiry",
     search,
-    page,
+    page: effectivePage,
+    limit: PAGE_SIZE + 1,
   })) as SubmissionListItem[];
+
+  if (rows.length === 0 && effectivePage > 1) {
+    effectivePage = 1;
+    rows = (await getSubmissions({
+      entityType: "enquiry",
+      search,
+      page: effectivePage,
+      limit: PAGE_SIZE + 1,
+    })) as SubmissionListItem[];
+  }
+
+  const hasNextPage = rows.length > PAGE_SIZE;
+  const submissions = rows.slice(0, PAGE_SIZE);
 
   return (
     <main className="space-y-6">
@@ -38,8 +57,10 @@ export default async function AdminSubmissionsPage({ searchParams }: PageProps) 
 
       <AdminCrmListControls
         basePath="/admin/submissions"
-        initialPage={page}
+        initialPage={effectivePage}
         initialQuery={search}
+        hasPreviousPage={effectivePage > 1}
+        hasNextPage={hasNextPage}
         queryParam="search"
       />
 
@@ -56,6 +77,12 @@ export default async function AdminSubmissionsPage({ searchParams }: PageProps) 
               {"email" in item ? (
                 <p className="text-sm text-slate-600">{item.email as string}</p>
               ) : null}
+              <Link
+                href={`/admin/enquiries/${item.id}`}
+                className="mt-3 inline-flex text-sm font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Open enquiry details
+              </Link>
             </article>
           ))}
         </div>

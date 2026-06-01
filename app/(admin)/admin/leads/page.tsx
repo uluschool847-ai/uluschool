@@ -16,17 +16,35 @@ type LeadListItem = {
   email?: string | null;
 };
 
+const PAGE_SIZE = 20;
+
 export default async function AdminLeadsPage({ searchParams }: PageProps) {
   await requireRole([UserRole.ADMIN]);
 
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const search = resolvedSearchParams?.search ?? "";
-  const page = Number.parseInt(resolvedSearchParams?.page ?? "1", 10) || 1;
-  const leads = (await getSubmissions({
+  const parsedPage = Number.parseInt(resolvedSearchParams?.page ?? "1", 10);
+  const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+  let effectivePage = page;
+  let rows = (await getSubmissions({
     entityType: "lead",
     search,
-    page,
+    page: effectivePage,
+    limit: PAGE_SIZE + 1,
   })) as LeadListItem[];
+
+  if (rows.length === 0 && effectivePage > 1) {
+    effectivePage = 1;
+    rows = (await getSubmissions({
+      entityType: "lead",
+      search,
+      page: effectivePage,
+      limit: PAGE_SIZE + 1,
+    })) as LeadListItem[];
+  }
+
+  const hasNextPage = rows.length > PAGE_SIZE;
+  const leads = rows.slice(0, PAGE_SIZE);
 
   return (
     <main className="space-y-6">
@@ -39,8 +57,10 @@ export default async function AdminLeadsPage({ searchParams }: PageProps) {
 
       <AdminCrmListControls
         basePath="/admin/leads"
-        initialPage={page}
+        initialPage={effectivePage}
         initialQuery={search}
+        hasPreviousPage={effectivePage > 1}
+        hasNextPage={hasNextPage}
         queryParam="search"
       />
 

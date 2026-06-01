@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { createUserAction } from "@/app/(admin)/admin/users/actions";
@@ -14,6 +15,7 @@ function isValidEmail(email: string) {
 }
 
 export function UserCreateForm({ defaultRole = "STUDENT" }: { defaultRole?: UserRole }) {
+  const router = useRouter();
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<UserRole>(defaultRole);
@@ -64,6 +66,7 @@ export function UserCreateForm({ defaultRole = "STUDENT" }: { defaultRole?: User
       setSuccessMessage(
         `Default password: ${result.data.defaultPassword}. User must change password.`,
       );
+      router.refresh();
     } catch {
       setErrors([normalizeActionResult(undefined).message]);
     } finally {

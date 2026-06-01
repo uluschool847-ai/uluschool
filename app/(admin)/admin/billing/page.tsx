@@ -49,6 +49,8 @@ export default async function AdminBillingPage({ searchParams = {} }: BillingPag
     resolvedSearchParams.invoiceStatus,
   );
   const provider = parseEnumValue(Object.values(PaymentProvider), resolvedSearchParams.provider);
+  const billingMessage = resolvedSearchParams.billingMessage;
+  const billingError = resolvedSearchParams.billingError;
   const { invoices, payments, plans, subscriptions } = await listAdminBillingData({
     invoiceStatus,
     plan: resolvedSearchParams.plan,
@@ -69,6 +71,21 @@ export default async function AdminBillingPage({ searchParams = {} }: BillingPag
           local payments.
         </p>
       </header>
+
+      {billingMessage ? (
+        <output className="block rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-800">
+          {billingMessage}
+        </output>
+      ) : null}
+
+      {billingError ? (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700"
+        >
+          {billingError}
+        </div>
+      ) : null}
 
       <section className="grid gap-4 md:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">

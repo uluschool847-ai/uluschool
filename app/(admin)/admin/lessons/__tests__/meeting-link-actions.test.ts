@@ -59,8 +59,7 @@ type LessonActionsModule = {
 };
 
 async function loadLessonActions() {
-  const specifier = "@/app/(admin)/admin/lessons/actions";
-  return import(/* @vite-ignore */ specifier) as Promise<LessonActionsModule>;
+  return import("@/app/(admin)/admin/lessons/actions") as Promise<LessonActionsModule>;
 }
 
 function lessonRecord(overrides?: Record<string, unknown>) {
@@ -148,6 +147,7 @@ function expectMeetingLinkRevalidation(classGroupId = "group-1", lessonId = "les
 
 describe("Admin lesson meeting link actions", () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.resetAllMocks();
     requireRoleMock.mockResolvedValue({ uid: "admin-1", role: UserRole.ADMIN });
     checkTeacherAvailabilityMock.mockResolvedValue({ available: true });
@@ -177,16 +177,22 @@ describe("Admin lesson meeting link actions", () => {
 
   it("validates lesson id before persistence", async () => {
     const { updateLessonMeetingLinkAction } = await loadLessonActions();
-    const result = await updateLessonMeetingLinkAction(meetingLinkForm({ lessonId: "" }));
+    const cases = [
+      meetingLinkForm({ lessonId: "" }),
+      meetingLinkForm({ id: "lesson-1", lessonId: null }),
+    ];
 
-    expect(result).toEqual(
-      expect.objectContaining({
-        success: false,
-        errors: expect.objectContaining({
-          lessonId: expect.arrayContaining([expect.stringMatching(/lesson id|required/i)]),
+    for (const formData of cases) {
+      const result = await updateLessonMeetingLinkAction(formData);
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: false,
+          errors: expect.objectContaining({
+            lessonId: expect.arrayContaining([expect.stringMatching(/lesson id|required/i)]),
+          }),
         }),
-      }),
-    );
+      );
+    }
     expect(updateLessonMeetingLinkMock).not.toHaveBeenCalled();
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
   });

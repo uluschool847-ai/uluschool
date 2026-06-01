@@ -173,7 +173,7 @@ describe("homework-repository ownership contract", () => {
     expect(prismaMock.assignment.create).not.toHaveBeenCalled();
   });
 
-  it("updates and archives only assignments owned through assignment, scheduledClass, or classGroup scope", async () => {
+  it("updates and archives only assignments owned through scheduledClass or classGroup scope", async () => {
     prismaMock.assignment.findFirst
       .mockResolvedValueOnce(assignment())
       .mockResolvedValueOnce(assignment());
@@ -194,7 +194,6 @@ describe("homework-repository ownership contract", () => {
         where: expect.objectContaining({
           id: "assignment-1",
           OR: expect.arrayContaining([
-            { teacherId: "teacher-1" },
             { scheduledClass: { teacherId: "teacher-1" } },
             { scheduledClass: { classGroup: { teacherId: "teacher-1" } } },
           ]),
@@ -246,7 +245,6 @@ describe("homework-repository ownership contract", () => {
         where: expect.objectContaining({
           archivedAt: null,
           OR: expect.arrayContaining([
-            { teacherId: "teacher-1" },
             { scheduledClass: { teacherId: "teacher-1" } },
             { scheduledClass: { classGroup: { teacherId: "teacher-1" } } },
           ]),

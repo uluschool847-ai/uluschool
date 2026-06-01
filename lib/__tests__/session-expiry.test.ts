@@ -236,6 +236,20 @@ describe("session validation and expiry handling", () => {
     expect(cookieDeleteMock).toHaveBeenCalledWith("ulu_session");
   });
 
+  it("still redirects invalid sessions when the current render context cannot clear cookies", async () => {
+    const dbUser = makeDbUser({ isActive: false });
+    setDbUser(dbUser);
+    const token = await createSignedSessionToken({ uid: dbUser.id, role: UserRole.TEACHER });
+    cookieGetMock.mockReturnValue({ value: token });
+    cookieDeleteMock.mockImplementationOnce(() => {
+      throw new Error("Cookies can only be modified in a Server Action or Route Handler.");
+    });
+
+    await expect(sessionModule.requireRole([UserRole.TEACHER])).rejects.toThrow(
+      "REDIRECT:/portal/login?reason=invalid",
+    );
+  });
+
   it("redirects invalid protected sessions to the invalid-session login reason", async () => {
     setDbUser(null);
     const token = await createSignedSessionToken({

@@ -2,7 +2,7 @@ import { UserRole } from "@prisma/client";
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { runReminderDispatchAction } from "@/app/(admin)/admin/actions";
+import { ReminderDispatchControls } from "@/components/admin/reminders/ReminderDispatchControls";
 import { Button } from "@/components/ui/button";
 import { requireRole } from "@/lib/auth/session";
 import { listAdminReminderLogs } from "@/lib/repositories/notification-repository";
@@ -43,18 +43,8 @@ export default async function AdminReminderLogsPage({
 
       <section className="rounded-lg border border-secondary p-4" aria-label="Reminder controls">
         <h2 className="text-xl font-semibold">Manual run</h2>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <form action={runReminderDispatchAction}>
-            <Button type="submit" size="sm">
-              Run Reminder Job Now
-            </Button>
-          </form>
-          <form action={runReminderDispatchAction}>
-            <input type="hidden" name="dryRun" value="true" />
-            <Button type="submit" size="sm" variant="secondary">
-              Dry Run Reminder Job
-            </Button>
-          </form>
+        <div className="mt-3">
+          <ReminderDispatchControls />
         </div>
       </section>
 

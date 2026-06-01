@@ -126,12 +126,15 @@ async function listBillingPlans(filters: { activeOnly?: boolean } = {}) {
   });
 }
 
-export async function createBillingPlan(input: CreateBillingPlanInput) {
+export async function createBillingPlan(
+  input: CreateBillingPlanInput,
+  database: BillingDatabase = prisma,
+) {
   const name = input.name.trim();
   if (!name) throw new Error("Plan name is required.");
   assertAmountMinor(input.amountMinor);
 
-  return prisma.billingPlan.create({
+  return database.billingPlan.create({
     data: {
       amountMinor: input.amountMinor,
       currency: normalizeCurrency(input.currency),
@@ -145,22 +148,26 @@ export async function createBillingPlan(input: CreateBillingPlanInput) {
   });
 }
 
-export async function createSubscriptionForStudent(input: {
-  studentId: string;
-  payerUserId?: string;
-  planId?: string;
-  planName?: string;
-  status?: SubscriptionStatus;
-  startDate?: Date;
-  endDate?: Date | null;
-}) {
+export async function createSubscriptionForStudent(
+  input: {
+    studentId: string;
+    payerUserId?: string;
+    planId?: string;
+    planName?: string;
+    status?: SubscriptionStatus;
+    startDate?: Date;
+    endDate?: Date | null;
+  },
+  database: BillingDatabase = prisma,
+) {
   const plan = input.planId
-    ? await prisma.billingPlan.findUnique({ where: { id: input.planId } })
+    ? await database.billingPlan.findUnique({ where: { id: input.planId } })
     : null;
-  const planName = (input.planName ?? plan?.name ?? "").trim();
+  const explicitPlanName = input.planName?.trim();
+  const planName = explicitPlanName || plan?.name.trim() || "";
   if (!planName) throw new Error("Plan name is required.");
 
-  return prisma.studentSubscription.create({
+  return database.studentSubscription.create({
     data: {
       endDate: input.endDate ?? null,
       payerUserId: input.payerUserId || null,

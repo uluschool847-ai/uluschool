@@ -6,6 +6,7 @@ import {
   toggleTeacherAvailabilityRuleStatusAction,
   updateTeacherAvailabilityRuleAction,
 } from "@/app/(admin)/admin/teachers/[id]/availability/actions";
+import { ConfirmedSubmit } from "@/components/admin/ConfirmedSubmit";
 import { Button } from "@/components/ui/button";
 
 type Rule = {
@@ -111,31 +112,52 @@ export function TeacherAvailabilityRules({ teacherId, rules, message, error, rea
                           Edit rule
                         </Button>
                       </form>
-                      <form action={toggleRuleFormAction} className="inline">
-                        <input name="id" type="hidden" value={rule.id} />
-                        <input name="teacherId" type="hidden" value={teacherId} />
-                        <input name="weekday" type="hidden" value={rule.weekday} />
-                        <input name="timezone" type="hidden" value={rule.timezone} />
-                        <input
-                          name="status"
-                          type="hidden"
-                          value={rule.status === "ACTIVE" ? "INACTIVE" : "ACTIVE"}
-                        />
-                        <Button size="sm" type="submit" variant="outline">
-                          {rule.status === "ACTIVE" ? "Deactivate" : "Activate"}
-                        </Button>
-                      </form>
-                      <form action={deleteRuleFormAction} className="inline">
-                        <input name="id" type="hidden" value={rule.id} />
-                        <input name="teacherId" type="hidden" value={teacherId} />
-                        <input name="weekday" type="hidden" value={rule.weekday} />
-                        <input name="startTime" type="hidden" value={rule.startTime} />
-                        <input name="endTime" type="hidden" value={rule.endTime} />
-                        <input name="timezone" type="hidden" value={rule.timezone} />
-                        <Button size="sm" type="submit" variant="destructive">
-                          Delete rule
-                        </Button>
-                      </form>
+                      {rule.status === "ACTIVE" ? (
+                        <ConfirmedSubmit
+                          title="Deactivate availability rule"
+                          description={`Deactivate ${weekdayName(rule.weekday)} ${rule.startTime}-${rule.endTime} availability in ${rule.timezone}? This slot will no longer be offered for scheduling.`}
+                          confirmLabel="Confirm deactivation"
+                        >
+                          <form action={toggleRuleFormAction} className="inline">
+                            <input name="id" type="hidden" value={rule.id} />
+                            <input name="teacherId" type="hidden" value={teacherId} />
+                            <input name="weekday" type="hidden" value={rule.weekday} />
+                            <input name="timezone" type="hidden" value={rule.timezone} />
+                            <input name="status" type="hidden" value="INACTIVE" />
+                            <Button size="sm" type="submit" variant="outline">
+                              Deactivate
+                            </Button>
+                          </form>
+                        </ConfirmedSubmit>
+                      ) : (
+                        <form action={toggleRuleFormAction} className="inline">
+                          <input name="id" type="hidden" value={rule.id} />
+                          <input name="teacherId" type="hidden" value={teacherId} />
+                          <input name="weekday" type="hidden" value={rule.weekday} />
+                          <input name="timezone" type="hidden" value={rule.timezone} />
+                          <input name="status" type="hidden" value="ACTIVE" />
+                          <Button size="sm" type="submit" variant="outline">
+                            Activate
+                          </Button>
+                        </form>
+                      )}
+                      <ConfirmedSubmit
+                        title="Delete availability rule"
+                        description={`Delete ${weekdayName(rule.weekday)} ${rule.startTime}-${rule.endTime} availability in ${rule.timezone}? This removes the weekly rule.`}
+                        confirmLabel="Confirm delete"
+                      >
+                        <form action={deleteRuleFormAction} className="inline">
+                          <input name="id" type="hidden" value={rule.id} />
+                          <input name="teacherId" type="hidden" value={teacherId} />
+                          <input name="weekday" type="hidden" value={rule.weekday} />
+                          <input name="startTime" type="hidden" value={rule.startTime} />
+                          <input name="endTime" type="hidden" value={rule.endTime} />
+                          <input name="timezone" type="hidden" value={rule.timezone} />
+                          <Button size="sm" type="submit" variant="destructive">
+                            Delete rule
+                          </Button>
+                        </form>
+                      </ConfirmedSubmit>
                     </td>
                   ) : null}
                 </tr>

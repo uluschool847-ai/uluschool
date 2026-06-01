@@ -142,7 +142,6 @@ function studentAssignmentEnrollmentScope(studentId: string): Prisma.AssignmentW
 
 function teacherSubmissionScope(teacherId: string): Prisma.SubmissionWhereInput[] {
   return [
-    { assignment: { teacherId } },
     { assignment: { scheduledClass: { teacherId } } },
     { assignment: { scheduledClass: { classGroup: { teacherId } } } },
   ];

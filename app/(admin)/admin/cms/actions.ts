@@ -55,6 +55,7 @@ const faqItemSchema = z.object({
   question: z.string().min(1, "Question is required"),
   answer: z.string().min(1, "Answer is required"),
   displayOrder: z.coerce.number().int().default(0),
+  isPublished: z.boolean().default(true),
 });
 
 function cmsPageSnapshot(page: {
@@ -109,6 +110,10 @@ function cmsFaqItemSnapshot(faq: {
     status: faq.status ?? null,
     displayOrder: faq.displayOrder,
   };
+}
+
+function cmsFeedbackUrl(path: string, message: string) {
+  return `${path}?${new URLSearchParams({ cmsMessage: message }).toString()}`;
 }
 
 // --- Page Actions ---
@@ -198,7 +203,7 @@ export async function savePageAction(formData: FormData) {
   revalidatePath("/admin/cms/pages");
   revalidatePath("/pages");
   revalidatePath(`/pages/${slug}`);
-  redirect("/admin/cms/pages");
+  redirect(cmsFeedbackUrl("/admin/cms/pages", id ? "Page updated." : "Page created."));
 }
 
 export async function deletePageAction(formData: FormData) {
@@ -224,6 +229,7 @@ export async function deletePageAction(formData: FormData) {
     revalidatePath("/admin/cms/pages");
     revalidatePath("/pages");
     revalidatePath(`/pages/${deletedPage.slug}`);
+    redirect(cmsFeedbackUrl("/admin/cms/pages", "Page deleted."));
   }
 }
 
@@ -311,7 +317,7 @@ export async function saveBlogPostAction(formData: FormData) {
   if (previousPostSlug && previousPostSlug !== slug) {
     revalidatePath(`/blog/${previousPostSlug}`);
   }
-  redirect("/admin/cms/blog");
+  redirect(cmsFeedbackUrl("/admin/cms/blog", id ? "Blog post updated." : "Blog post created."));
 }
 
 export async function deleteBlogPostAction(formData: FormData) {
@@ -337,6 +343,7 @@ export async function deleteBlogPostAction(formData: FormData) {
     revalidatePath("/admin/cms/blog");
     revalidatePath("/blog");
     revalidatePath(`/blog/${deletedPost.slug}`);
+    redirect(cmsFeedbackUrl("/admin/cms/blog", "Blog post deleted."));
   }
 }
 
@@ -351,6 +358,9 @@ export async function saveFaqItemAction(formData: FormData) {
     question: formData.get("question")?.toString() || "",
     answer: formData.get("answer")?.toString() || "",
     displayOrder: formData.get("displayOrder")?.toString() || "0",
+    isPublished:
+      formData.getAll("isPublished").length === 0 ||
+      formData.getAll("isPublished").some((value) => value.toString() === "true"),
   };
 
   const parsed = faqItemSchema.safeParse(rawInput);
@@ -358,12 +368,17 @@ export async function saveFaqItemAction(formData: FormData) {
     return { success: false, errors: parsed.error.flatten().fieldErrors };
   }
 
-  const { id, category, question, answer, displayOrder } = parsed.data;
+  const { id, category, question, answer, displayOrder, isPublished } = parsed.data;
+  const status = isPublished ? "published" : "draft";
 
   await prisma.$transaction(async (tx) => {
     if (id) {
       const existingFaq = await getFaqItem(id, tx);
-      const updatedFaq = await updateFaqItem(id, { category, question, answer, displayOrder }, tx);
+      const updatedFaq = await updateFaqItem(
+        id,
+        { category, question, answer, displayOrder, status },
+        tx,
+      );
       await createAdminAuditLog(
         {
           adminUserId: session.uid,
@@ -377,7 +392,10 @@ export async function saveFaqItemAction(formData: FormData) {
         tx,
       );
     } else {
-      const createdFaq = await createFaqItem({ category, question, answer, displayOrder }, tx);
+      const createdFaq = await createFaqItem(
+        { category, question, answer, displayOrder, status },
+        tx,
+      );
       await createAdminAuditLog(
         {
           adminUserId: session.uid,
@@ -397,7 +415,7 @@ export async function saveFaqItemAction(formData: FormData) {
   revalidatePath("/");
   revalidatePath("/contact");
   revalidatePath("/faq");
-  redirect("/admin/cms/faq");
+  redirect(cmsFeedbackUrl("/admin/cms/faq", id ? "FAQ item updated." : "FAQ item created."));
 }
 
 export async function deleteFaqItemAction(formData: FormData) {
@@ -423,5 +441,6 @@ export async function deleteFaqItemAction(formData: FormData) {
     revalidatePath("/");
     revalidatePath("/contact");
     revalidatePath("/faq");
+    redirect(cmsFeedbackUrl("/admin/cms/faq", "FAQ item deleted."));
   }
 }

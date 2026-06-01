@@ -366,7 +366,7 @@ async function validateLessonInput(input: LessonInput, database: LessonDatabase)
 
   const classGroup = await getActiveClassGroup(input.classGroupId, database);
   const teacherId = input.teacherId || classGroup.teacherId;
-  const subjectId = input.subjectId === undefined ? classGroup.subjectId : input.subjectId;
+  const subjectId = input.subjectId ?? classGroup.subjectId;
 
   if (!teacherId) {
     throw new Error("Lesson must have a teacher.");

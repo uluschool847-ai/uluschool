@@ -42,6 +42,37 @@ test.describe("Teacher Portal", () => {
     await expect(page.getByRole("main")).toBeVisible();
   });
 
+  test("teacher cabinet top-level routes render without placeholders", async ({ page }) => {
+    test.setTimeout(180000);
+    await loginAsTeacher(page, "fixed.teacher@uluglobalacademy.com");
+
+    const routes = [
+      { heading: /teacher dashboard|dashboard/i, path: "/portal/teacher" },
+      { heading: /teacher schedule/i, path: "/portal/teacher/schedule" },
+      { heading: /my classes/i, path: "/portal/teacher/classes" },
+      { heading: /homework assignments/i, path: "/portal/teacher/assignments" },
+      { heading: /materials/i, path: "/portal/teacher/materials" },
+      { heading: /submissions/i, path: "/portal/teacher/submissions" },
+      { heading: /^students$/i, path: "/portal/teacher/students" },
+      { heading: /^progress$/i, path: "/portal/teacher/progress" },
+      { heading: /^gradebook$/i, path: "/portal/teacher/gradebook" },
+      { heading: /^reports$/i, path: "/portal/teacher/reports" },
+      { heading: /activity log/i, path: "/portal/teacher/activity" },
+      { heading: /^availability$/i, path: "/portal/teacher/availability" },
+      { heading: /teacher notifications/i, path: "/portal/teacher/notifications" },
+    ];
+
+    for (const route of routes) {
+      await test.step(`route ${route.path}`, async () => {
+        await page.goto(route.path, { waitUntil: "domcontentloaded" });
+        await expect(page.getByRole("main")).toBeVisible();
+        await expect(page.getByRole("heading", { name: route.heading }).first()).toBeVisible();
+        await expect(page.getByText(/not implemented/i)).toHaveCount(0);
+        await expect(page.getByRole("heading", { name: /not found/i })).toHaveCount(0);
+      });
+    }
+  });
+
   test("teacher portal shows only assigned classes and enrolled student submissions", async ({
     page,
   }) => {
@@ -159,10 +190,13 @@ test.describe("Teacher Portal", () => {
 
     await loginAsTeacher(page, john.email);
 
-    await expect(page.getByText(johnClass.title).first()).toBeVisible();
-    await expect(page.getByText(johnAssignment.title).first()).toBeVisible();
-    await expect(page.getByText(sofia.fullName)).toBeVisible();
-    await expect(page.getByText(mark.fullName)).toBeVisible();
+    const classesSection = page.getByRole("region", { name: "Classes and history" });
+    const gradingSection = page.getByRole("region", { name: "Assignments and grading" });
+
+    await expect(classesSection.getByText(johnClass.title).first()).toBeVisible();
+    await expect(gradingSection.getByText(johnAssignment.title).first()).toBeVisible();
+    await expect(gradingSection.getByText(sofia.fullName, { exact: true })).toBeVisible();
+    await expect(gradingSection.getByText(mark.fullName, { exact: true })).toBeVisible();
     await expect(page.getByText(otherClass.title)).toHaveCount(0);
     await expect(page.getByText(otherAssignment.title)).toHaveCount(0);
     await expect(page.getByText(otherStudent.fullName)).toHaveCount(0);

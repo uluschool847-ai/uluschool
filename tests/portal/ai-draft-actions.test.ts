@@ -15,6 +15,12 @@ const createReportCommentDraftMock = vi.hoisted(() => vi.fn());
 const createCrmFollowUpDraftMock = vi.hoisted(() => vi.fn());
 const reviewAiDraftMock = vi.hoisted(() => vi.fn());
 const revalidatePathMock = vi.hoisted(() => vi.fn());
+const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
+const prismaMock = vi.hoisted(() => ({
+  aiDraft: {
+    findUnique: vi.fn(),
+  },
+}));
 
 vi.mock("@/lib/repositories/ai-draft-repository", () => ({
   createCrmFollowUpDraft: createCrmFollowUpDraftMock,
@@ -23,6 +29,12 @@ vi.mock("@/lib/repositories/ai-draft-repository", () => ({
 }));
 vi.mock("next/cache", () => ({
   revalidatePath: revalidatePathMock,
+}));
+vi.mock("@/lib/prisma", () => ({
+  prisma: prismaMock,
+}));
+vi.mock("@/lib/repositories/admin-audit-repository", () => ({
+  createAdminAuditLog: createAdminAuditLogMock,
 }));
 
 type TeacherAiActions = {
@@ -50,8 +62,27 @@ describe("AI draft actions", () => {
     vi.clearAllMocks();
     mockSession = { uid: "teacher-1", role: UserRole.TEACHER };
     createReportCommentDraftMock.mockResolvedValue({ id: "draft-1", status: AiDraftStatus.DRAFT });
-    createCrmFollowUpDraftMock.mockResolvedValue({ id: "draft-2", status: AiDraftStatus.DRAFT });
-    reviewAiDraftMock.mockResolvedValue({ id: "draft-1", status: AiDraftStatus.APPROVED });
+    createCrmFollowUpDraftMock.mockResolvedValue({
+      createdById: "admin-1",
+      id: "draft-2",
+      relatedEnquiryId: "enquiry-1",
+      status: AiDraftStatus.DRAFT,
+      type: "CRM_FOLLOW_UP",
+    });
+    prismaMock.aiDraft.findUnique.mockResolvedValue({
+      createdById: "admin-1",
+      id: "draft-2",
+      relatedEnquiryId: "enquiry-1",
+      status: AiDraftStatus.DRAFT,
+      type: "CRM_FOLLOW_UP",
+    });
+    reviewAiDraftMock.mockResolvedValue({
+      createdById: "admin-1",
+      id: "draft-2",
+      reviewedById: "admin-1",
+      status: AiDraftStatus.APPROVED,
+      type: "CRM_FOLLOW_UP",
+    });
   });
 
   it("lets teachers generate report comment drafts without publishing them", async () => {
@@ -106,11 +137,69 @@ describe("AI draft actions", () => {
     const result = await actions.generateCrmFollowUpDraftAction({ enquiryId: "enquiry-1" });
 
     expect(createCrmFollowUpDraftMock).toHaveBeenCalledWith("admin-1", "enquiry-1");
-    expect(revalidatePathMock).toHaveBeenCalledWith("/admin");
+    expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "AI_DRAFT_CREATED",
+        adminUserId: "admin-1",
+        targetId: "draft-2",
+        targetType: "ai_draft",
+      }),
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith("/admin/ai-drafts");
     expect(result).toEqual({
-      data: { id: "draft-2", status: AiDraftStatus.DRAFT },
+      data: expect.objectContaining({ id: "draft-2", status: AiDraftStatus.DRAFT }),
       success: true,
     });
+  });
+
+  it("lets admins approve or reject CRM drafts with audit coverage", async () => {
+    mockSession = { uid: "admin-1", role: UserRole.ADMIN };
+    const actions = await loadAdminActions();
+
+    const result = await actions.reviewAdminAiDraftAction({
+      draftId: "draft-2",
+      status: AiDraftStatus.APPROVED,
+    });
+
+    expect(prismaMock.aiDraft.findUnique).toHaveBeenCalledWith({
+      select: expect.objectContaining({
+        id: true,
+        status: true,
+        type: true,
+      }),
+      where: { id: "draft-2" },
+    });
+    expect(reviewAiDraftMock).toHaveBeenCalledWith("admin-1", "draft-2", AiDraftStatus.APPROVED);
+    expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "AI_DRAFT_REVIEWED",
+        adminUserId: "admin-1",
+        targetId: "draft-2",
+        targetType: "ai_draft",
+      }),
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith("/admin/ai-drafts");
+    expect(result).toEqual({
+      data: expect.objectContaining({ id: "draft-2", status: AiDraftStatus.APPROVED }),
+      success: true,
+    });
+  });
+
+  it("does not write admin AI draft audit logs when generation fails", async () => {
+    mockSession = { uid: "admin-1", role: UserRole.ADMIN };
+    createCrmFollowUpDraftMock.mockRejectedValueOnce(new Error("Enquiry not found."));
+    const actions = await loadAdminActions();
+
+    const result = await actions.generateCrmFollowUpDraftAction({ enquiryId: "missing" });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        error: "Enquiry not found.",
+        success: false,
+      }),
+    );
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
   it("rejects non-admin sessions from admin AI actions", async () => {

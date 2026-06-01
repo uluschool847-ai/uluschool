@@ -4,6 +4,7 @@ import {
   linkParentStudentAction,
   unlinkParentStudentAction,
 } from "@/app/(admin)/admin/parents/actions";
+import { ConfirmedSubmit } from "@/components/admin/ConfirmedSubmit";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -87,24 +88,32 @@ export function ParentStudentLinks({
                   ) : null}
                 </div>
 
-                <form action={unlinkParentStudentAction as unknown as (formData: FormData) => void}>
-                  <input type="hidden" name="parentId" value={parentId} />
-                  <input type="hidden" name="studentId" value={student.id} />
-                  <input type="hidden" name="flash" value="true" />
-                  <input
-                    type="hidden"
-                    name="successRedirect"
-                    value={`/admin/parents/${parentId}/edit`}
-                  />
-                  <input
-                    type="hidden"
-                    name="errorRedirect"
-                    value={`/admin/parents/${parentId}/edit`}
-                  />
-                  <Button type="submit" variant="outline" size="sm">
-                    Remove
-                  </Button>
-                </form>
+                <ConfirmedSubmit
+                  title="Remove student link"
+                  description={`Remove ${student.fullName} from this parent? The parent will no longer see this student in their portal.`}
+                  confirmLabel="Confirm removal"
+                >
+                  <form
+                    action={unlinkParentStudentAction as unknown as (formData: FormData) => void}
+                  >
+                    <input type="hidden" name="parentId" value={parentId} />
+                    <input type="hidden" name="studentId" value={student.id} />
+                    <input type="hidden" name="flash" value="true" />
+                    <input
+                      type="hidden"
+                      name="successRedirect"
+                      value={`/admin/parents/${parentId}/edit`}
+                    />
+                    <input
+                      type="hidden"
+                      name="errorRedirect"
+                      value={`/admin/parents/${parentId}/edit`}
+                    />
+                    <Button type="submit" variant="outline" size="sm">
+                      Remove
+                    </Button>
+                  </form>
+                </ConfirmedSubmit>
               </li>
             ))}
           </ul>

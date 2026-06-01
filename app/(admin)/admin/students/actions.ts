@@ -53,6 +53,8 @@ const studentLearningStatusSchema = z.object({
   }),
 });
 
+const STUDENT_TRANSACTION_OPTIONS = { timeout: 20_000 };
+
 function isRedirectError(error: unknown) {
   return (
     typeof error === "object" &&
@@ -237,7 +239,7 @@ export async function createStudentAction(
         },
         tx,
       );
-    });
+    }, STUDENT_TRANSACTION_OPTIONS);
     revalidatePath("/admin/students");
   } catch (error) {
     const message = buildFailureMessage(error, "Failed to create student account.");
@@ -358,7 +360,7 @@ export async function updateStudentAction(
         },
         tx,
       );
-    });
+    }, STUDENT_TRANSACTION_OPTIONS);
     revalidatePath("/admin/students");
     revalidatePath(`/admin/students/${parsed.data.id}`);
   } catch (error) {
@@ -448,7 +450,7 @@ export async function toggleStudentStatusAction(
         },
         tx,
       );
-    });
+    }, STUDENT_TRANSACTION_OPTIONS);
     revalidatePath("/admin/students");
     revalidatePath(`/admin/students/${id}`);
   } catch (error) {
@@ -553,7 +555,7 @@ export async function updateStudentLearningStatusAction(
         },
         tx,
       );
-    });
+    }, STUDENT_TRANSACTION_OPTIONS);
     revalidatePath("/admin/students");
     revalidatePath(`/admin/students/${parsed.data.id}`);
     revalidatePath(`/admin/students/${parsed.data.id}/edit`);
@@ -667,7 +669,7 @@ export async function linkStudentParentAction(
         },
         tx,
       );
-    });
+    }, STUDENT_TRANSACTION_OPTIONS);
     revalidatePath("/admin/students");
     revalidatePath(`/admin/students/${parsed.data.studentId}`);
     revalidatePath(`/admin/students/${parsed.data.studentId}/edit`);
@@ -784,7 +786,7 @@ export async function unlinkStudentParentAction(
         },
         tx,
       );
-    });
+    }, STUDENT_TRANSACTION_OPTIONS);
     revalidatePath("/admin/students");
     revalidatePath(`/admin/students/${parsed.data.studentId}`);
     revalidatePath(`/admin/students/${parsed.data.studentId}/edit`);
@@ -896,7 +898,7 @@ export async function linkStudentClassAction(
         },
         tx,
       );
-    });
+    }, STUDENT_TRANSACTION_OPTIONS);
     revalidatePath("/admin/students");
     revalidatePath(`/admin/students/${parsed.data.studentId}`);
     revalidatePath(`/admin/students/${parsed.data.studentId}/edit`);
@@ -1017,7 +1019,7 @@ export async function unlinkStudentClassAction(
         },
         tx,
       );
-    });
+    }, STUDENT_TRANSACTION_OPTIONS);
     revalidatePath("/admin/students");
     revalidatePath(`/admin/students/${parsed.data.studentId}`);
     revalidatePath(`/admin/students/${parsed.data.studentId}/edit`);

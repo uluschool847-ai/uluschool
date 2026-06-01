@@ -46,6 +46,7 @@ vi.mock("@/lib/auth/password", () => ({
 }));
 
 type StudentLearningStatus = "TRIAL" | "ACTIVE" | "PAUSED" | "INACTIVE";
+type AdminRegistrySort = "nameAsc" | "nameDesc" | "createdAtDesc" | "createdAtAsc";
 
 type PortalRepositoryModule = {
   findAllUsers: (filters?: {
@@ -53,6 +54,7 @@ type PortalRepositoryModule = {
     limit?: number;
     role?: "ADMIN" | "TEACHER" | "PARENT" | "STUDENT";
     searchQuery?: string;
+    sort?: AdminRegistrySort;
   }) => Promise<{
     items: Array<{
       id: string;
@@ -161,6 +163,7 @@ type PortalRepositoryModule = {
     learningStatus?: StudentLearningStatus;
     parentLinked?: boolean;
     classLinked?: boolean;
+    sort?: AdminRegistrySort;
   }) => Promise<{
     items: Array<{
       id: string;
@@ -194,6 +197,7 @@ type PortalRepositoryModule = {
     searchQuery?: string;
     isActive?: boolean;
     studentLinked?: boolean;
+    sort?: AdminRegistrySort;
   }) => Promise<{
     items: Array<{
       id: string;
@@ -375,6 +379,22 @@ describe("portal-repository admin user management", () => {
       totalCount: 0,
       totalPages: 0,
     });
+  });
+
+  it("findAllUsers applies explicit sort before pagination", async () => {
+    prismaMock.appUser.count.mockResolvedValueOnce(0);
+    prismaMock.appUser.findMany.mockResolvedValueOnce([]);
+
+    const { findAllUsers } = await loadPortalRepository();
+    await findAllUsers({ page: 2, limit: 20, sort: "createdAtDesc" });
+
+    expect(prismaMock.appUser.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ createdAt: "desc" }, { fullName: "asc" }],
+        skip: 20,
+        take: 20,
+      }),
+    );
   });
 
   it("createUser hashes the default credential and creates an active student account with lifecycle status", async () => {
@@ -990,6 +1010,7 @@ describe("portal-repository admin user management", () => {
       isActive: false,
       parentLinked: false,
       classLinked: true,
+      sort: "nameDesc",
     });
 
     expect(prismaMock.appUser.count).toHaveBeenCalledWith({
@@ -1012,7 +1033,7 @@ describe("portal-repository admin user management", () => {
           parents: { none: {} },
           enrolledClasses: { some: {} },
         }),
-        orderBy: expect.arrayContaining([expect.objectContaining({ fullName: "asc" })]),
+        orderBy: [{ fullName: "desc" }, { email: "desc" }],
         skip: 30,
         take: 15,
         include: expect.objectContaining({
@@ -1564,6 +1585,7 @@ describe("portal-repository admin parent management", () => {
       searchQuery: "parent",
       isActive: true,
       studentLinked: true,
+      sort: "createdAtAsc",
     });
 
     expect(prismaMock.appUser.count).toHaveBeenCalledWith({
@@ -1583,7 +1605,7 @@ describe("portal-repository admin parent management", () => {
         include: expect.objectContaining({
           children: expect.any(Object),
         }),
-        orderBy: [{ fullName: "asc" }, { email: "asc" }],
+        orderBy: [{ createdAt: "asc" }, { fullName: "asc" }],
         skip: 10,
         take: 10,
       }),
@@ -2019,7 +2041,6 @@ describe("portal-repository teacher portal visibility", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           OR: expect.arrayContaining([
-            { teacherId: "teacher-john" },
             { scheduledClass: { teacherId: "teacher-john" } },
             { scheduledClass: { classGroup: { teacherId: "teacher-john" } } },
           ]),
@@ -2034,7 +2055,6 @@ describe("portal-repository teacher portal visibility", () => {
           grade: null,
           assignment: expect.objectContaining({
             OR: expect.arrayContaining([
-              { teacherId: "teacher-john" },
               { scheduledClass: { teacherId: "teacher-john" } },
               { scheduledClass: { classGroup: { teacherId: "teacher-john" } } },
             ]),

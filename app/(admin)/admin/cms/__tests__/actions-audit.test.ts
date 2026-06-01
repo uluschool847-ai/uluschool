@@ -268,4 +268,111 @@ describe("CMS admin actions audit trail", () => {
       transactionClient,
     ]);
   });
+
+  it("revalidates admin and public routes only after successful CMS page mutations", async () => {
+    const createdPage = {
+      id: "page-1",
+      slug: "qa-audit-page",
+      title: "QA Audit Page",
+      content: { blocks: [] },
+      isPublished: true,
+    };
+    const beforePage = { ...createdPage, slug: "qa-audit-page-old" };
+    const updatedPage = { ...createdPage, slug: "qa-audit-page-new" };
+    createPageMock.mockResolvedValueOnce(createdPage);
+    getPageMock.mockResolvedValueOnce(beforePage);
+    updatePageMock.mockResolvedValueOnce(updatedPage);
+    deletePageMock.mockResolvedValueOnce(updatedPage);
+
+    const { savePageAction, deletePageAction } = await loadCmsActions();
+    await savePageAction(pageForm());
+    await savePageAction(pageForm({ id: "page-1", slug: "qa-audit-page-new" }));
+    await deletePageAction(idForm("page-1"));
+
+    expect(revalidatePathMock).toHaveBeenCalledWith("/admin/cms/pages");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/pages");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/pages/qa-audit-page");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/pages/qa-audit-page-old");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/pages/qa-audit-page-new");
+    expect(redirectMock).toHaveBeenCalledWith("/admin/cms/pages?cmsMessage=Page+created.");
+    expect(redirectMock).toHaveBeenCalledWith("/admin/cms/pages?cmsMessage=Page+updated.");
+    expect(redirectMock).toHaveBeenCalledWith("/admin/cms/pages?cmsMessage=Page+deleted.");
+  });
+
+  it("revalidates admin and public routes after successful CMS blog mutations", async () => {
+    const createdPost = {
+      id: "blog-1",
+      slug: "qa-audit-blog",
+      title: "QA Audit Blog",
+      content: "Blog body",
+      authorId: "admin-1",
+      isPublished: false,
+      publishedAt: null,
+    };
+    const beforePost = { ...createdPost, slug: "qa-audit-blog-old" };
+    const updatedPost = {
+      ...createdPost,
+      slug: "qa-audit-blog-new",
+      isPublished: true,
+      publishedAt: new Date("2026-05-31T10:00:00.000Z"),
+    };
+    createBlogPostMock.mockResolvedValueOnce(createdPost);
+    getBlogPostMock.mockResolvedValueOnce(beforePost);
+    updateBlogPostMock.mockResolvedValueOnce(updatedPost);
+    deleteBlogPostMock.mockResolvedValueOnce(updatedPost);
+
+    const { saveBlogPostAction, deleteBlogPostAction } = await loadCmsActions();
+    await saveBlogPostAction(blogForm({ isPublished: "" }));
+    await saveBlogPostAction(blogForm({ id: "blog-1", slug: "qa-audit-blog-new" }));
+    await deleteBlogPostAction(idForm("blog-1"));
+
+    expect(revalidatePathMock).toHaveBeenCalledWith("/admin/cms/blog");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/blog");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/blog/qa-audit-blog");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/blog/qa-audit-blog-old");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/blog/qa-audit-blog-new");
+    expect(redirectMock).toHaveBeenCalledWith("/admin/cms/blog?cmsMessage=Blog+post+created.");
+    expect(redirectMock).toHaveBeenCalledWith("/admin/cms/blog?cmsMessage=Blog+post+updated.");
+    expect(redirectMock).toHaveBeenCalledWith("/admin/cms/blog?cmsMessage=Blog+post+deleted.");
+  });
+
+  it("revalidates admin and public FAQ surfaces after successful CMS FAQ mutations", async () => {
+    const createdFaq = {
+      id: "faq-1",
+      category: "QA",
+      question: "Question?",
+      answer: "Answer.",
+      status: "published",
+      displayOrder: 2,
+    };
+    const updatedFaq = { ...createdFaq, question: "Updated question?", status: "draft" };
+    createFaqItemMock.mockResolvedValueOnce(createdFaq);
+    getFaqItemMock.mockResolvedValueOnce(createdFaq);
+    updateFaqItemMock.mockResolvedValueOnce(updatedFaq);
+    deleteFaqItemMock.mockResolvedValueOnce(updatedFaq);
+
+    const { saveFaqItemAction, deleteFaqItemAction } = await loadCmsActions();
+    await saveFaqItemAction(faqForm());
+    await saveFaqItemAction(
+      faqForm({ id: "faq-1", question: "Updated question?", isPublished: "false" }),
+    );
+    await deleteFaqItemAction(idForm("faq-1"));
+
+    expect(createFaqItemMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "published" }),
+      transactionClient,
+    );
+    expect(updateFaqItemMock).toHaveBeenCalledWith(
+      "faq-1",
+      expect.objectContaining({ status: "draft" }),
+      transactionClient,
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith("/admin/cms/faq");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/contact");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/faq");
+    expect(redirectMock).toHaveBeenCalledWith("/admin/cms/faq?cmsMessage=FAQ+item+created.");
+    expect(redirectMock).toHaveBeenCalledWith("/admin/cms/faq?cmsMessage=FAQ+item+updated.");
+    expect(redirectMock).toHaveBeenCalledWith("/admin/cms/faq?cmsMessage=FAQ+item+deleted.");
+  });
 });

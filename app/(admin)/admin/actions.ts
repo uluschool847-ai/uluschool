@@ -23,6 +23,11 @@ const updateReviewSchema = z.object({
   adminNotes: z.string().optional(),
 });
 
+export type ReminderDispatchState = {
+  status: "idle" | "success" | "error";
+  message: string;
+};
+
 export async function updateEnquiryAction(formData: FormData) {
   const session = await requireRole([UserRole.ADMIN]);
 
@@ -94,17 +99,54 @@ export async function updateContactLeadAction(formData: FormData) {
   return { success: true };
 }
 
-export async function runReminderDispatchAction(formData?: FormData) {
+function getReminderDispatchFormData(
+  stateOrFormData?: ReminderDispatchState | FormData,
+  formData?: FormData,
+) {
+  return formData ?? (stateOrFormData instanceof FormData ? stateOrFormData : undefined);
+}
+
+function formatReminderDispatchSuccess(
+  result: Awaited<ReturnType<typeof processDueReminders>>,
+  dryRun: boolean,
+) {
+  const scanned = `${result.scannedClasses} classes and ${result.scannedAssignments} assignments`;
+  if (dryRun) {
+    return `Dry run completed. ${result.wouldSend ?? 0} reminders would be sent after scanning ${scanned}.`;
+  }
+
+  return `Reminder job completed. Sent ${result.sent}, failed ${result.failed}, skipped ${result.skipped} after scanning ${scanned}.`;
+}
+
+export async function runReminderDispatchAction(
+  stateOrFormData?: ReminderDispatchState | FormData,
+  formData?: FormData,
+): Promise<ReminderDispatchState> {
   const session = await requireRole([UserRole.ADMIN]);
-  const dryRun = formData?.get("dryRun")?.toString() === "true";
-  const result = await processDueReminders({ dryRun });
-  console.info("Manual reminder dispatch result", result);
-  await createAdminAuditLog({
-    adminUserId: session.uid,
-    action: dryRun ? "REMINDER_DISPATCH_DRY_RUN" : "REMINDER_DISPATCH_MANUAL_RUN",
-    targetType: "ReminderJob",
-    meta: result,
-  });
-  revalidatePath("/admin");
-  revalidatePath("/admin/reminders");
+  const dispatchFormData = getReminderDispatchFormData(stateOrFormData, formData);
+  const dryRun = dispatchFormData?.get("dryRun")?.toString() === "true";
+
+  try {
+    const result = await processDueReminders({ dryRun });
+    console.info("Manual reminder dispatch result", result);
+    await createAdminAuditLog({
+      adminUserId: session.uid,
+      action: dryRun ? "REMINDER_DISPATCH_DRY_RUN" : "REMINDER_DISPATCH_MANUAL_RUN",
+      targetType: "ReminderJob",
+      meta: result,
+    });
+    revalidatePath("/admin");
+    revalidatePath("/admin/reminders");
+    return {
+      status: "success",
+      message: formatReminderDispatchSuccess(result, dryRun),
+    };
+  } catch (error) {
+    console.error("Manual reminder dispatch failed", error);
+    return {
+      status: "error",
+      message:
+        "Reminder job failed. No success audit was written. Try again or check the server logs.",
+    };
+  }
 }

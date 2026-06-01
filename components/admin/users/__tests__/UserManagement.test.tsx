@@ -5,11 +5,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const createUserActionMock = vi.hoisted(() => vi.fn());
 const updateUserRoleActionMock = vi.hoisted(() => vi.fn());
 const toggleUserStatusActionMock = vi.hoisted(() => vi.fn());
+const routerRefreshMock = vi.hoisted(() => vi.fn());
+const routerPushMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/app/(admin)/admin/users/actions", () => ({
   createUserAction: createUserActionMock,
   updateUserRoleAction: updateUserRoleActionMock,
   toggleUserStatusAction: toggleUserStatusActionMock,
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: routerPushMock,
+    refresh: routerRefreshMock,
+  }),
 }));
 
 type UserCreateFormProps = {
@@ -43,6 +52,8 @@ async function loadUserRoleEditor() {
 describe("Admin user management client interactions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    routerRefreshMock.mockClear();
+    routerPushMock.mockClear();
   });
 
   afterEach(() => {
@@ -171,6 +182,10 @@ describe("Admin user management client interactions", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /deactivate|disable/i }));
+    expect(toggleUserStatusActionMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: /deactivate user account/i })).toBeDefined();
+    expect(screen.getByText(/student user.*student@example\.com/i)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /confirm deactivation/i }));
 
     await waitFor(() => {
       expect(toggleUserStatusActionMock).toHaveBeenCalledWith({
@@ -200,6 +215,7 @@ describe("Admin user management client interactions", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /deactivate|disable/i }));
+    fireEvent.click(screen.getByRole("button", { name: /confirm deactivation/i }));
 
     expect(await screen.findByText(/cannot deactivate|own account|last admin/i)).toBeDefined();
   });

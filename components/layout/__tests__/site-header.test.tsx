@@ -280,6 +280,16 @@ describe("SiteHeader responsive and accessibility behavior", () => {
     expect(screen.getByRole("link", { name: /sign up/i })).not.toBeNull();
   });
 
+  it("does not show public auth links while an admin route session is loading", () => {
+    usePathnameMock.mockReturnValue("/admin/classes");
+    fetchMock.mockImplementation(() => new Promise(() => {}));
+
+    render(<SiteHeader />);
+
+    expect(screen.queryByRole("link", { name: /log in/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /sign up/i })).toBeNull();
+  });
+
   it("shows a Teacher Portal link for authenticated teachers", async () => {
     mockSession({
       authenticated: true,

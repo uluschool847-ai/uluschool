@@ -98,7 +98,7 @@ There is no SQLite fallback in this project.
 | --- | --- | --- |
 | `AUTH_SESSION_SECRET` | `change-this-session-secret` | Signs the custom `ulu_session` cookie |
 | `DEFAULT_PORTAL_PASSWORD` | `ChangeMe123!` | Password assigned to all seeded accounts |
-| `ADMIN_REQUIRE_2FA` | `true` | Enables the admin 2FA gate |
+| `ADMIN_REQUIRE_2FA` | `true` | Enables the admin 2FA gate. Set to `false` only for local/demo password-only admin access. |
 | `ADMIN_2FA_SECRET` | empty or TOTP secret | Preloads TOTP for the main admin account during seeding |
 | `TWO_FACTOR_ISSUER` | `ULU Online School` | Issuer label for authenticator apps |
 | `ADMIN_SSO_ENABLED` | `false` | Enables optional admin SSO callback logic |
@@ -107,7 +107,8 @@ There is no SQLite fallback in this project.
 
 Important local behavior:
 - In development, when `ADMIN_REQUIRE_2FA=true`, admin login uses a controlled dev bypass and redirects to `/admin/security?setup2fa=required`.
-- This is expected local behavior, not a broken redirect.
+- This is expected local behavior, not a broken redirect. The security page explains that 2FA setup is required and points to the setup panel.
+- For demos where setup should be optional, set `ADMIN_REQUIRE_2FA=false` and restart the dev server. Admins can continue to the dashboard, and `/admin/security` remains available for optional setup.
 
 ### Email
 | Variable | Example | Why it matters |
@@ -241,7 +242,7 @@ Check the following:
 - `AUTH_SESSION_SECRET` is present in `.env.local`
 - you are staying on the same origin (`http://localhost:3000` by default)
 - your browser is not blocking cookies
-- for admins, the redirect to `/admin/security?setup2fa=required` is expected in development when `ADMIN_REQUIRE_2FA=true`
+- for admins, the redirect to `/admin/security?setup2fa=required` is expected in development when `ADMIN_REQUIRE_2FA=true`; set `ADMIN_REQUIRE_2FA=false` and restart the dev server for demo/password-only dashboard access
 
 ### Login succeeds but the dashboard is empty
 Use the fixed fixture accounts for data-rich dashboards:

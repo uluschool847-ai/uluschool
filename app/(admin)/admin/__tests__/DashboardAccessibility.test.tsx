@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,6 +31,12 @@ vi.mock("@/app/(admin)/admin/actions", () => ({
 
 vi.mock("@/components/admin/crm/AdminCrmListControls", () => ({
   AdminCrmListControls: () => <div data-testid="admin-crm-list-controls">Search controls</div>,
+}));
+
+vi.mock("@/components/admin/reminders/ReminderDispatchControls", () => ({
+  ReminderDispatchControls: () => (
+    <div data-testid="reminder-dispatch-controls">Reminder dispatch controls</div>
+  ),
 }));
 
 import AdminDashboardPage from "@/app/(admin)/admin/page";
@@ -138,5 +146,32 @@ describe("Admin dashboard accessibility and responsive behavior", () => {
       (node) => node.textContent === "ADMIN_LOGIN_2FA_REQUIRED_DEV_BYPASS",
     );
     expect(auditAction?.className).toContain("break-all");
+  });
+
+  it("keeps standalone admin materials/files intentionally unavailable and documented", async () => {
+    await renderServerComponent(<AdminDashboardPage />);
+
+    expect(screen.queryByRole("link", { name: /^materials$/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /^files$/i })).toBeNull();
+    expect(existsSync(path.join(process.cwd(), "app/(admin)/admin/materials/page.tsx"))).toBe(
+      false,
+    );
+    expect(existsSync(path.join(process.cwd(), "app/(admin)/admin/files/page.tsx"))).toBe(false);
+
+    const knownLimitations = readFileSync(
+      path.join(process.cwd(), "docs/known-limitations.md"),
+      "utf8",
+    );
+    const adminTestPlan = readFileSync(
+      path.join(process.cwd(), "docs/admin-portal-test-plan.md"),
+      "utf8",
+    );
+
+    expect(knownLimitations).toMatch(/no standalone `\/admin\/materials` or `\/admin\/files`/i);
+    expect(knownLimitations).toMatch(/\/portal\/teacher\/materials/i);
+    expect(adminTestPlan).toMatch(/intentionally unavailable/i);
+    expect(adminTestPlan).toMatch(/app\/api\/upload\/__tests__\/route\.test\.ts/i);
+    expect(adminTestPlan).toMatch(/MaterialForm\.test\.tsx/i);
+    expect(adminTestPlan).toMatch(/admin-teachers\.spec\.ts/i);
   });
 });

@@ -2,6 +2,7 @@ import {
   enrollStudentToClassGroupAction,
   unenrollStudentFromClassGroupAction,
 } from "@/app/(admin)/admin/classes/actions";
+import { ConfirmedSubmit } from "@/components/admin/ConfirmedSubmit";
 import { Button } from "@/components/ui/button";
 
 type Student = {
@@ -55,28 +56,34 @@ export function ClassGroupStudentEnrollments({
                 <p className="font-medium">{student.fullName}</p>
                 <p className="text-sm text-muted-foreground">{student.email}</p>
               </div>
-              <form
-                action={
-                  unenrollStudentFromClassGroupAction as unknown as (formData: FormData) => void
-                }
+              <ConfirmedSubmit
+                title="Remove student from class group"
+                description={`Remove ${student.fullName} from this class group? They will no longer see group lessons from this enrollment.`}
+                confirmLabel="Confirm removal"
               >
-                <input type="hidden" name="flash" value="true" />
-                <input type="hidden" name="classGroupId" value={classGroupId} />
-                <input type="hidden" name="studentId" value={student.id} />
-                <input
-                  type="hidden"
-                  name="successRedirect"
-                  value={`/admin/classes/${classGroupId}`}
-                />
-                <input
-                  type="hidden"
-                  name="errorRedirect"
-                  value={`/admin/classes/${classGroupId}`}
-                />
-                <Button type="submit" variant="secondary" size="sm">
-                  Remove
-                </Button>
-              </form>
+                <form
+                  action={
+                    unenrollStudentFromClassGroupAction as unknown as (formData: FormData) => void
+                  }
+                >
+                  <input type="hidden" name="flash" value="true" />
+                  <input type="hidden" name="classGroupId" value={classGroupId} />
+                  <input type="hidden" name="studentId" value={student.id} />
+                  <input
+                    type="hidden"
+                    name="successRedirect"
+                    value={`/admin/classes/${classGroupId}`}
+                  />
+                  <input
+                    type="hidden"
+                    name="errorRedirect"
+                    value={`/admin/classes/${classGroupId}`}
+                  />
+                  <Button type="submit" variant="secondary" size="sm">
+                    Remove
+                  </Button>
+                </form>
+              </ConfirmedSubmit>
             </li>
           ))}
         </ul>

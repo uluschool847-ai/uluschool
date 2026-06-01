@@ -220,6 +220,7 @@ function mapHomeworkGrade(submission: GradebookHomeworkSubmission) {
 }
 
 function buildStudentGradebook(input: {
+  classGroup?: { id: string; name: string } | null;
   student: { id: string; fullName?: string; email?: string };
   term: { id: string; name: string; startDate?: Date; endDate?: Date };
   homeworkSubmissions: GradebookHomeworkSubmission[];
@@ -247,6 +248,7 @@ function buildStudentGradebook(input: {
       fullName: input.student.fullName ?? "Student",
       email: input.student.email ?? "",
     },
+    classGroup: input.classGroup ?? null,
     term: input.term,
     categoryWeights: DEFAULT_GRADEBOOK_WEIGHTS,
     categories: [
@@ -263,6 +265,19 @@ function buildStudentGradebook(input: {
       .map(mapManualGrade),
     termAverage,
   };
+}
+
+function inferStudentClassGroup(input: {
+  homeworkSubmissions: GradebookHomeworkSubmission[];
+  manualGrades: GradebookManualGrade[];
+}) {
+  return (
+    input.manualGrades.find((grade) => grade.classGroup)?.classGroup ??
+    input.homeworkSubmissions.find(
+      (submission) => submission.assignment?.scheduledClass?.classGroup,
+    )?.assignment?.scheduledClass?.classGroup ??
+    null
+  );
 }
 
 export async function listAcademicTerms(
@@ -361,7 +376,10 @@ export async function getTeacherStudentGradebook(
   const teacherStudentWhere = {
     id: studentId,
     role: UserRole.STUDENT,
-    OR: [{ enrolledClasses: { some: { teacherId } } }, { classGroups: { some: { teacherId } } }],
+    OR: [
+      { enrolledClasses: { some: { teacherId } } },
+      { enrolledClassGroups: { some: { teacherId } } },
+    ],
   } as unknown as Prisma.AppUserWhereInput;
   const student = await database.appUser.findFirst({
     where: teacherStudentWhere,
@@ -375,7 +393,6 @@ export async function getTeacherStudentGradebook(
       grade: { not: null },
       submittedAt: normalizeTermRange(term),
       OR: [
-        { assignment: { teacherId } },
         { assignment: { scheduledClass: { teacherId } } },
         { assignment: { scheduledClass: { classGroup: { teacherId } } } },
       ],
@@ -412,6 +429,7 @@ export async function getTeacherStudentGradebook(
   };
 
   return buildStudentGradebook({
+    classGroup: inferStudentClassGroup({ homeworkSubmissions, manualGrades }),
     student: selectedStudent,
     term,
     homeworkSubmissions,
@@ -536,7 +554,10 @@ export async function createManualGradeEntryForTeacher(
   const ownedStudentWhere = {
     id: data.studentId,
     role: UserRole.STUDENT,
-    OR: [{ enrolledClasses: { some: { teacherId } } }, { classGroups: { some: { teacherId } } }],
+    OR: [
+      { enrolledClasses: { some: { teacherId } } },
+      { enrolledClassGroups: { some: { teacherId } } },
+    ],
   } as unknown as Prisma.AppUserWhereInput;
   const student = await database.appUser.findFirst({
     where: ownedStudentWhere,

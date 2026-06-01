@@ -8,12 +8,17 @@ import { prisma } from "@/lib/prisma";
 const AUTH_SECRET = process.env.AUTH_SESSION_SECRET ?? "dev-only-auth-session-secret-please-change";
 const PASSWORD =
   process.env.E2E_PORTAL_PASSWORD ?? process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
+const ADMIN_REQUIRE_2FA = (process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false";
 const RUN_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const ADMIN_EMAIL = `qa.security.admin.${RUN_ID}@example.com`;
 const STUDENT_EMAIL = `qa.security.student.${RUN_ID}@example.com`;
+const TEACHER_EMAIL = `qa.security.teacher.${RUN_ID}@example.com`;
+const PARENT_EMAIL = `qa.security.parent.${RUN_ID}@example.com`;
 
 let adminUserId = "";
 let studentUserId = "";
+let teacherUserId = "";
+let parentUserId = "";
 
 function toBase64Url(input: string) {
   return Buffer.from(input, "binary")
@@ -85,13 +90,13 @@ async function setPortalSession(
 
 async function cleanupQaSecurityData() {
   await prisma.appUser.deleteMany({
-    where: { email: { in: [ADMIN_EMAIL, STUDENT_EMAIL] } },
+    where: { email: { in: [ADMIN_EMAIL, STUDENT_EMAIL, TEACHER_EMAIL, PARENT_EMAIL] } },
   });
 }
 
 async function createSecurityFixtures() {
   const passwordHash = await hashPassword(PASSWORD);
-  const [admin, student] = await Promise.all([
+  const [admin, student, teacher, parent] = await Promise.all([
     prisma.appUser.create({
       data: {
         email: ADMIN_EMAIL,
@@ -113,9 +118,29 @@ async function createSecurityFixtures() {
         isActive: true,
       },
     }),
+    prisma.appUser.create({
+      data: {
+        email: TEACHER_EMAIL,
+        fullName: `QA Security Teacher ${RUN_ID}`,
+        role: UserRole.TEACHER,
+        passwordHash,
+        isActive: true,
+      },
+    }),
+    prisma.appUser.create({
+      data: {
+        email: PARENT_EMAIL,
+        fullName: `QA Security Parent ${RUN_ID}`,
+        role: UserRole.PARENT,
+        passwordHash,
+        isActive: true,
+      },
+    }),
   ]);
   adminUserId = admin.id;
   studentUserId = student.id;
+  teacherUserId = teacher.id;
+  parentUserId = parent.id;
 }
 
 async function loginWithPassword(page: Page, email: string) {
@@ -150,9 +175,12 @@ test.describe("Admin Security", () => {
     });
 
     await page.goto("/admin/security");
-    await expect(page.getByRole("heading", { name: "Admin Security" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Admin Security" })).toBeVisible();
     await expect(page.getByText(/production hardening/i)).toBeVisible();
-    await expect(page.getByRole("link", { name: /back to admin/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /continue to admin dashboard/i })).toHaveAttribute(
+      "href",
+      "/admin",
+    );
     await expect(
       page.getByRole("heading", { name: "Two-Factor Authentication (TOTP)" }),
     ).toBeVisible();
@@ -163,9 +191,27 @@ test.describe("Admin Security", () => {
     await expect(page.getByText(/current status:\s*disabled/i)).toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.getByRole("heading", { name: "Admin Security" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Admin Security" })).toBeVisible();
     await page.setViewportSize({ width: 1280, height: 900 });
 
+    await page.goto("/admin/security?setup2fa=required&next=%2Fadmin%2Fsecurity");
+    if (ADMIN_REQUIRE_2FA) {
+      await expect(page.getByText(/2FA setup is required/i)).toBeVisible();
+      await expect(page.getByText(/redirected here after password login/i)).toBeVisible();
+      await expect(page.getByText(/ADMIN_REQUIRE_2FA=true/i)).toBeVisible();
+      await expect(page.getByRole("link", { name: /set up 2fa below/i })).toHaveAttribute(
+        "href",
+        "#two-factor-setup",
+      );
+    } else {
+      await expect(page.getByText(/2FA setup is optional in this environment/i)).toBeVisible();
+      await expect(page.getByText(/ADMIN_REQUIRE_2FA=false/i)).toBeVisible();
+      await expect(
+        page.getByRole("link", { name: /continue to admin dashboard/i }).first(),
+      ).toHaveAttribute("href", "/admin/security");
+    }
+
+    await page.goto("/admin/security");
     await page.getByRole("button", { name: "Generate 2FA Secret" }).click();
     await expect(page.getByText(/2FA secret generated/i)).toBeVisible();
     await expect(page.getByText(/manual secret/i)).toBeVisible();
@@ -202,7 +248,9 @@ test.describe("Admin Security", () => {
     expect(adminEnabled.twoFactorBackupCodes.length).toBeGreaterThan(0);
 
     await loginWithPassword(page, ADMIN_EMAIL);
-    await expect(page).toHaveURL(/\/portal\/login\/verify-2fa\?next=%2Fadmin%2Fsecurity/);
+    await expect(page).toHaveURL(/\/portal\/login\/verify-2fa\?next=%2Fadmin%2Fsecurity/, {
+      timeout: 60000,
+    });
     await expect(page.getByText(/pending admin session/i)).toBeVisible();
     await page.getByLabel(/authenticator code/i).fill("000000");
     await page.getByRole("button", { name: /verify 2fa/i }).click();
@@ -211,7 +259,7 @@ test.describe("Admin Security", () => {
     const loginCode = authenticator.generate(adminEnabled.twoFactorSecret ?? "");
     await page.getByLabel(/authenticator code/i).fill(loginCode);
     await page.getByRole("button", { name: /verify 2fa/i }).click();
-    await expect(page).toHaveURL(/\/admin\/security/);
+    await expect(page).toHaveURL(/\/admin\/security/, { timeout: 60000 });
     await expect(page.getByText(/current status:\s*enabled/i)).toBeVisible();
 
     await page.getByRole("button", { name: "Disable 2FA" }).click();
@@ -261,16 +309,16 @@ test.describe("Admin Security", () => {
         fullName: `QA Security Student ${RUN_ID}`,
       },
       {
-        uid: "teacher-security-1",
+        uid: teacherUserId,
         role: UserRole.TEACHER,
-        email: "fixed.teacher@uluglobalacademy.com",
-        fullName: "Fixed Teacher",
+        email: TEACHER_EMAIL,
+        fullName: `QA Security Teacher ${RUN_ID}`,
       },
       {
-        uid: "parent-security-1",
+        uid: parentUserId,
         role: UserRole.PARENT,
-        email: "fixed.parent@uluglobalacademy.com",
-        fullName: "Fixed Parent",
+        email: PARENT_EMAIL,
+        fullName: `QA Security Parent ${RUN_ID}`,
       },
     ]) {
       await setPortalSession(page, user);

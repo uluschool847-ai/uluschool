@@ -204,7 +204,7 @@ describe("teacher dashboard repository view model", () => {
     });
   });
 
-  it("scopes lessons, assignments, submissions, and metrics through direct and ClassGroup ownership", async () => {
+  it("scopes lessons, assignments, submissions, and metrics through lesson and ClassGroup ownership", async () => {
     prismaMock.classGroup.count.mockResolvedValueOnce(1);
     mockDashboardQueryResults();
 
@@ -221,7 +221,6 @@ describe("teacher dashboard repository view model", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           OR: expect.arrayContaining([
-            { teacherId: "teacher-1" },
             { scheduledClass: { teacherId: "teacher-1" } },
             { scheduledClass: { classGroup: { teacherId: "teacher-1" } } },
           ]),
@@ -234,7 +233,6 @@ describe("teacher dashboard repository view model", () => {
           grade: null,
           assignment: expect.objectContaining({
             OR: expect.arrayContaining([
-              { teacherId: "teacher-1" },
               { scheduledClass: { teacherId: "teacher-1" } },
               { scheduledClass: { classGroup: { teacherId: "teacher-1" } } },
             ]),
@@ -375,7 +373,6 @@ describe("teacher dashboard repository view model", () => {
     };
     const teacherAssignmentScope = {
       OR: [
-        { teacherId: "teacher-1" },
         { scheduledClass: { teacherId: "teacher-1" } },
         { scheduledClass: { classGroup: { teacherId: "teacher-1" } } },
       ],

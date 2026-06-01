@@ -144,6 +144,13 @@ function LessonActions({ workspace }: { workspace: TeacherLessonWorkspace }) {
             {workspace.navigationHrefs.materials.label ?? "Materials"}
           </Link>
         )}
+        {workspace.navigationHrefs.progress.disabled ? (
+          <p>Progress disabled: {workspace.navigationHrefs.progress.reason}</p>
+        ) : (
+          <Link href={workspace.navigationHrefs.progress.href}>
+            {workspace.navigationHrefs.progress.label ?? "Open Progress"}
+          </Link>
+        )}
         <p>{workspace.attendanceSummary.reason}</p>
       </div>
     </Section>
@@ -362,8 +369,16 @@ function ProgressSection({ workspace }: { workspace: TeacherLessonWorkspace }) {
   return (
     <Section title="Progress Notes">
       <p className="text-sm">Progress notes count: {workspace.progressSummary.count}</p>
-      <p className="text-sm">{workspace.progressSummary.reason}</p>
-      <Link href="/portal/teacher/progress">Open Progress</Link>
+      {workspace.progressSummary.reason ? (
+        <p className="text-sm">{workspace.progressSummary.reason}</p>
+      ) : null}
+      {workspace.progressSummary.disabled || !workspace.progressSummary.href ? (
+        <p className="text-sm">{workspace.progressSummary.reason ?? "Progress is unavailable."}</p>
+      ) : (
+        <Link href={workspace.progressSummary.href}>
+          {workspace.progressSummary.label ?? "Open Progress"}
+        </Link>
+      )}
     </Section>
   );
 }

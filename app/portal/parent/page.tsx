@@ -130,6 +130,9 @@ function ChildDashboard({ child }: { child: DashboardChild }) {
               {child.scheduleSummary.nextLesson.subjectName ? (
                 <p>Subject: {child.scheduleSummary.nextLesson.subjectName}</p>
               ) : null}
+              {child.scheduleSummary.nextLesson.teacherName ? (
+                <p>Teacher: {child.scheduleSummary.nextLesson.teacherName}</p>
+              ) : null}
               {child.scheduleSummary.nextLesson.classGroupName ? (
                 <p>Group: {child.scheduleSummary.nextLesson.classGroupName}</p>
               ) : null}

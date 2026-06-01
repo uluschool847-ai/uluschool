@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { deleteClassGroupAction } from "@/app/(admin)/admin/classes/actions";
+import { ConfirmedSubmit } from "@/components/admin/ConfirmedSubmit";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/session";
@@ -189,19 +190,25 @@ export default async function AdminClassGroupsPage({
                           <Button asChild variant="secondary" size="sm">
                             <Link href={`/admin/classes/${group.id}/edit`}>Edit</Link>
                           </Button>
-                          <form
-                            action={
-                              deleteClassGroupAction as unknown as (formData: FormData) => void
-                            }
+                          <ConfirmedSubmit
+                            title="Delete class group"
+                            description={`Delete ${group.name}? This will only succeed if no lessons or student enrollments depend on this class group.`}
+                            confirmLabel="Confirm delete"
                           >
-                            <input type="hidden" name="flash" value="true" />
-                            <input type="hidden" name="id" value={group.id} />
-                            <input type="hidden" name="successRedirect" value="/admin/classes" />
-                            <input type="hidden" name="errorRedirect" value="/admin/classes" />
-                            <Button type="submit" variant="destructive" size="sm">
-                              Delete
-                            </Button>
-                          </form>
+                            <form
+                              action={
+                                deleteClassGroupAction as unknown as (formData: FormData) => void
+                              }
+                            >
+                              <input type="hidden" name="flash" value="true" />
+                              <input type="hidden" name="id" value={group.id} />
+                              <input type="hidden" name="successRedirect" value="/admin/classes" />
+                              <input type="hidden" name="errorRedirect" value="/admin/classes" />
+                              <Button type="submit" variant="destructive" size="sm">
+                                Delete
+                              </Button>
+                            </form>
+                          </ConfirmedSubmit>
                         </div>
                       </td>
                     </tr>

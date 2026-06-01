@@ -48,11 +48,7 @@ const assignmentInclude = {
 } satisfies Prisma.AssignmentInclude;
 
 function teacherAssignmentScope(teacherId: string): Prisma.AssignmentWhereInput[] {
-  return [
-    { teacherId },
-    { scheduledClass: { teacherId } },
-    { scheduledClass: { classGroup: { teacherId } } },
-  ];
+  return [{ scheduledClass: { teacherId } }, { scheduledClass: { classGroup: { teacherId } } }];
 }
 
 function teacherScheduledClassScope(teacherId: string): Prisma.ScheduledClassWhereInput[] {

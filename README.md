@@ -64,6 +64,7 @@ Open [http://localhost:3000](http://localhost:3000).
 | `npm run test` | Run the full Vitest suite once |
 | `npm run test:watch` | Run Vitest in watch mode |
 | `npm run lint` | Run Biome checks across the repo |
+| `npm run qa:admin-smoke` | Run the admin QA smoke suite on an isolated localhost port |
 | `npm run db:generate` | Generate the Prisma client |
 | `npm run db:migrate` | Run `prisma migrate dev` |
 | `npm run db:seed` | Seed the database with local demo/test data |
@@ -95,7 +96,7 @@ manual browser verification for UI flows, and a final implementation report.
 | --- | --- | --- |
 | `AUTH_SESSION_SECRET` | Yes | HMAC secret for the custom signed session cookie (`ulu_session`) |
 | `DEFAULT_PORTAL_PASSWORD` | Yes | Password used for all seeded portal accounts |
-| `ADMIN_REQUIRE_2FA` | Yes for secure local parity | Controls whether admin login requires 2FA flow |
+| `ADMIN_REQUIRE_2FA` | Yes for secure local parity | Controls whether admin login requires 2FA flow. Use `true` to verify production-like admin hardening; use `false` for local/demo password-only admin access. |
 | `ADMIN_2FA_SECRET` | Optional | Seeds TOTP for the main admin account if provided |
 | `TWO_FACTOR_ISSUER` | Optional | TOTP issuer label shown in authenticator apps |
 | `ADMIN_SSO_ENABLED` | Optional | Enables the admin SSO callback flow |
@@ -187,6 +188,26 @@ All seeded accounts use `DEFAULT_PORTAL_PASSWORD`. If you do not override it, th
 
 ### Local QA Manual Flows
 
+#### Admin QA smoke command
+Run the focused admin smoke suite with one command:
+
+```bash
+npm run qa:admin-smoke
+```
+
+The command allocates a free `localhost` port, sets `PORT` and `PLAYWRIGHT_BASE_URL` for that run,
+and uses the seeded admin fixture `fixed.admin@uluglobalacademy.com` with
+`E2E_PORTAL_PASSWORD`, `DEFAULT_PORTAL_PASSWORD`, or `ChangeMe123!` in that order. It runs
+`e2e/portals/admin-full-coverage.spec.ts`, which checks primary admin routes, browser console
+errors, page errors, failed network requests, 5xx responses, dashboard CRM search, reminder dry run,
+authenticated header actions, and sensitive-route RBAC.
+
+Before running it on a fresh database, seed the fixed accounts:
+
+```bash
+npm run db:seed
+```
+
 #### Guest flows
 1. Open `/` and verify the public site header, mobile menu, theme toggle, and skip link.
 2. Open `/contact`, submit the contact form, and verify the success reference ID and next steps.
@@ -210,10 +231,11 @@ All seeded accounts use `DEFAULT_PORTAL_PASSWORD`. If you do not override it, th
 
 #### Admin flow
 1. Log in as `fixed.admin@uluglobalacademy.com` or `admin@uluglobalacademy.com`.
-2. In local development with `ADMIN_REQUIRE_2FA=true`, expect admin login to redirect to `/admin/security?setup2fa=required` before normal admin work.
-3. Verify `/admin` for analytics, CRM summaries, enquiries, leads, and recent audit logs.
-4. Verify `/admin/users`, `/admin/tasks`, `/admin/billing`, `/admin/analytics`, `/admin/audit`, and `/admin/cms`.
-5. Under `/admin/cms`, verify pages, blog posts, and FAQ items can be listed/edited.
+2. In local development with `ADMIN_REQUIRE_2FA=true`, expect admin login to redirect to `/admin/security?setup2fa=required` before normal admin work. The security page explains that setup is required and links directly to the 2FA setup panel.
+3. For local demos where forced setup would interrupt the flow, set `ADMIN_REQUIRE_2FA=false` and restart the dev server. Admin login can then continue to `/admin`, while `/admin/security` still allows optional 2FA setup.
+4. Verify `/admin` for analytics, CRM summaries, enquiries, leads, and recent audit logs.
+5. Verify `/admin/users`, `/admin/tasks`, `/admin/billing`, `/admin/analytics`, `/admin/audit`, and `/admin/cms`.
+6. Under `/admin/cms`, verify pages, blog posts, and FAQ items can be listed/edited.
 
 ### Seed Data
 `D:\2026\mathSchool\prisma\seed.ts` creates or refreshes the following baseline data:

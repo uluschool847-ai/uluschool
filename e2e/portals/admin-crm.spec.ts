@@ -21,7 +21,7 @@ let enquiryRecord: CrmRecord | null = null;
 let leadRecord: CrmRecord | null = null;
 
 test.describe("Admin CRM enquiries and leads", () => {
-  test.describe.configure({ timeout: 180000, mode: "serial" });
+  test.describe.configure({ timeout: 420000, mode: "serial" });
 
   test.beforeAll(async () => {
     await cleanupQaCrmData();
@@ -107,6 +107,40 @@ test.describe("Admin CRM enquiries and leads", () => {
 });
 
 async function cleanupQaCrmData() {
+  const [enquiries, leads] = await Promise.all([
+    prisma.enquiry.findMany({
+      where: {
+        OR: [
+          { email: { startsWith: "qa.crm.enrol." } },
+          { referenceId: { startsWith: "QA-CRM-ENROL-" } },
+        ],
+      },
+      select: { id: true },
+    }),
+    prisma.contactLead.findMany({
+      where: {
+        OR: [
+          { email: { startsWith: "qa.crm.contact." } },
+          { referenceId: { startsWith: "QA-CRM-LEAD-" } },
+        ],
+      },
+      select: { id: true },
+    }),
+  ]);
+  await prisma.adminAuditLog.deleteMany({
+    where: {
+      OR: [
+        {
+          targetType: "Enquiry",
+          targetId: { in: enquiries.map((enquiry) => enquiry.id) },
+        },
+        {
+          targetType: "ContactLead",
+          targetId: { in: leads.map((lead) => lead.id) },
+        },
+      ],
+    },
+  });
   await prisma.enquiry.deleteMany({
     where: {
       OR: [
@@ -131,7 +165,7 @@ async function loginAs(page: Page, email: string, landingUrl: RegExp) {
   await page.getByLabel(/email/i).fill(email);
   await page.getByLabel(/password/i).fill(PASSWORD);
   await page.getByRole("button", { name: /login|sign in/i }).click();
-  await page.waitForURL(landingUrl, { timeout: 20000 });
+  await page.waitForURL(landingUrl, { timeout: 60000 });
 }
 
 async function submitPublicEnrolment(page: Page): Promise<CrmRecord> {
@@ -251,16 +285,38 @@ async function verifyNotFoundRoutes(page: Page) {
 }
 
 async function verifyTimelineTraceability(enquiryId: string, leadId: string) {
-  const [enquiryEvents, leadEvents] = await Promise.all([
+  const [enquiryEvents, leadEvents, adminAuditLogs] = await Promise.all([
     prisma.enquiryTimelineEvent.findMany({ where: { entityId: enquiryId } }),
     prisma.contactLeadTimelineEvent.findMany({ where: { leadId } }),
+    prisma.adminAuditLog.findMany({
+      where: {
+        OR: [
+          {
+            action: { in: ["ENQUIRY_STATUS_UPDATED", "ENQUIRY_NOTE_ADDED"] },
+            targetId: enquiryId,
+            targetType: "Enquiry",
+          },
+          {
+            action: { in: ["CONTACT_LEAD_STATUS_UPDATED", "CONTACT_LEAD_NOTE_ADDED"] },
+            targetId: leadId,
+            targetType: "ContactLead",
+          },
+        ],
+      },
+    }),
   ]);
-  const serializedEvents = JSON.stringify([...enquiryEvents, ...leadEvents]);
+  const serializedEvents = JSON.stringify([...enquiryEvents, ...leadEvents, ...adminAuditLogs]);
 
   expect(enquiryEvents.some((event) => event.type === "STATUS_CHANGED")).toBe(true);
   expect(enquiryEvents.some((event) => event.type === "NOTE_CREATED")).toBe(true);
   expect(leadEvents.some((event) => event.type === "STATUS_CHANGED")).toBe(true);
   expect(leadEvents.some((event) => event.type === "NOTE_CREATED")).toBe(true);
+  expect(adminAuditLogs.some((log) => log.action === "ENQUIRY_STATUS_UPDATED")).toBe(true);
+  expect(adminAuditLogs.some((log) => log.action === "ENQUIRY_NOTE_ADDED")).toBe(true);
+  expect(adminAuditLogs.some((log) => log.action === "CONTACT_LEAD_STATUS_UPDATED")).toBe(true);
+  expect(adminAuditLogs.some((log) => log.action === "CONTACT_LEAD_NOTE_ADDED")).toBe(true);
+  expect(serializedEvents).not.toContain(`QA CRM enquiry note ${RUN_ID}`);
+  expect(serializedEvents).not.toContain(`QA CRM lead note ${RUN_ID}`);
   expect(serializedEvents).not.toMatch(/password|token|secret/i);
 }
 

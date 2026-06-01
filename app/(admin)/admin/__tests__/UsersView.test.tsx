@@ -2,9 +2,18 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const findAllUsersMock = vi.hoisted(() => vi.fn());
+const routerPushMock = vi.hoisted(() => vi.fn());
+const routerRefreshMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/repositories/portal-repository", () => ({
   findAllUsers: findAllUsersMock,
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: routerPushMock,
+    refresh: routerRefreshMock,
+  }),
 }));
 
 type UsersPageModule = {
@@ -98,6 +107,7 @@ describe("Admin user management page", () => {
       limit: expect.any(Number),
       role: "TEACHER",
       searchQuery: "teacher",
+      sort: undefined,
     });
     expect(screen.getAllByText(/teacher user/i).length).toBeGreaterThan(0);
   });
@@ -117,5 +127,43 @@ describe("Admin user management page", () => {
     render(element);
 
     expect(screen.getByText(/no users|no accounts|nothing found/i)).toBeDefined();
+  });
+
+  it("preserves search, role, and sort params across pagination links", async () => {
+    findAllUsersMock.mockResolvedValueOnce({
+      items: [
+        {
+          id: "student-1",
+          email: "student@example.com",
+          fullName: "Student User",
+          role: "STUDENT",
+          isActive: true,
+        },
+      ],
+      totalCount: 45,
+      totalPages: 3,
+    });
+
+    const page = await loadUsersPage();
+    const element = await page.default({
+      searchParams: { role: "STUDENT", q: "student", page: "2", sort: "createdAtDesc" },
+    });
+
+    render(element);
+
+    expect(findAllUsersMock).toHaveBeenCalledWith({
+      page: 2,
+      limit: expect.any(Number),
+      role: "STUDENT",
+      searchQuery: "student",
+      sort: "createdAtDesc",
+    });
+    expect(screen.getByLabelText(/sort/i)).toHaveProperty("value", "createdAtDesc");
+    expect(screen.getByRole("link", { name: /previous/i }).getAttribute("href")).toBe(
+      "/admin/users?q=student&role=STUDENT&sort=createdAtDesc&page=1",
+    );
+    expect(screen.getByRole("link", { name: /^next$/i }).getAttribute("href")).toBe(
+      "/admin/users?q=student&role=STUDENT&sort=createdAtDesc&page=3",
+    );
   });
 });

@@ -128,7 +128,10 @@ test.describe("Admin Scheduled Lessons Management", () => {
     await page.getByLabel(/start/i).fill("2026-07-07T10:00");
     await page.getByLabel(/end/i).fill("2026-07-07T11:00");
     await page.getByLabel(/live lesson|url/i).fill(testMeetUrl("qa-lesson-lifecycle"));
-    await page.getByRole("button", { name: /create lesson|save lesson/i }).click();
+    await Promise.all([
+      page.waitForURL(/classMessage=Lesson(?:\+|%20)created\.?/i, { timeout: 60000 }),
+      page.getByRole("button", { name: /create lesson|save lesson/i }).click(),
+    ]);
     await expect(page.getByText(/lesson created/i)).toBeVisible({ timeout: 30000 });
 
     const lesson = await prisma.scheduledClass.findFirstOrThrow({
@@ -168,8 +171,11 @@ test.describe("Admin Scheduled Lessons Management", () => {
     await page.goto(`${BASE_URL}/admin/classes/${group.id}/lessons/${lesson.id}/edit`);
     await page.getByLabel(/start/i).fill(rescheduledStart);
     await page.getByLabel(/end/i).fill(rescheduledEnd);
-    await page.getByRole("button", { name: /reschedule|save lesson|update lesson/i }).click();
-    await expect(page.getByText(/rescheduled|lesson updated/i)).toBeVisible({ timeout: 30000 });
+    await Promise.all([
+      page.waitForURL(/classMessage=Lesson(?:\+|%20)rescheduled\.?/i, { timeout: 60000 }),
+      page.getByRole("button", { name: /reschedule|save lesson|update lesson/i }).click(),
+    ]);
+    await expect(page.getByText(/lesson rescheduled/i)).toBeVisible({ timeout: 30000 });
 
     await setPortalSession(page, {
       uid: studentUserId,
@@ -191,8 +197,11 @@ test.describe("Admin Scheduled Lessons Management", () => {
     await page.goto(`${BASE_URL}/admin/classes/${group.id}/lessons/${lesson.id}`);
     await page.getByRole("button", { name: /cancel lesson|cancel/i }).click();
     await page.getByLabel(/reason/i).fill("Instructor unavailable.");
-    await page.getByRole("button", { name: /confirm cancel|cancel lesson/i }).click();
-    await expect(page.getByText(/cancelled/i)).toBeVisible({ timeout: 30000 });
+    await Promise.all([
+      page.waitForURL(/classMessage=Lesson(?:\+|%20)cancelled\.?/i, { timeout: 60000 }),
+      page.getByRole("button", { name: /confirm cancel|cancel lesson/i }).click(),
+    ]);
+    await expect(page.getByText(/lesson cancelled/i)).toBeVisible({ timeout: 30000 });
 
     await setPortalSession(page, {
       uid: studentUserId,

@@ -128,6 +128,21 @@ export default async function EditCMSFaq({ params, searchParams }: EditFaqProps)
               />
             </div>
 
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="isPublished"
+                name="isPublished"
+                value="true"
+                defaultChecked={faq?.status !== "draft"}
+                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+              />
+              <input type="hidden" name="isPublished" value="false" />
+              <label htmlFor="isPublished" className="text-sm font-medium">
+                Publish FAQ (visible to public)
+              </label>
+            </div>
+
             <div className="flex justify-end gap-4">
               <Button asChild variant="outline">
                 <Link href="/admin/cms/faq">Cancel</Link>

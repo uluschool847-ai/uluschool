@@ -3,10 +3,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { toggleStudentStatusAction } from "@/app/(admin)/admin/students/actions";
+import { ConfirmedSubmit } from "@/components/admin/ConfirmedSubmit";
+import { PaginationControls } from "@/components/admin/PaginationControls";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/session";
 import {
+  type AdminRegistrySort,
   type AdminStudentRegistryRecord,
   type StudentLearningStatusValue,
   getAdminStudents,
@@ -44,6 +47,19 @@ function parseLearningStatus(value?: string): StudentLearningStatusValue | undef
   return undefined;
 }
 
+function parseSort(sort?: string): AdminRegistrySort | undefined {
+  if (
+    sort === "nameAsc" ||
+    sort === "nameDesc" ||
+    sort === "createdAtDesc" ||
+    sort === "createdAtAsc"
+  ) {
+    return sort;
+  }
+
+  return undefined;
+}
+
 function formatLearningStatus(status: StudentLearningStatusValue) {
   const lower = status.toLowerCase();
   return `${lower.charAt(0).toUpperCase()}${lower.slice(1)}`;
@@ -69,6 +85,7 @@ function buildRegistryPath(params: {
   parentLinked?: boolean;
   classLinked?: boolean;
   classId?: string;
+  sort?: AdminRegistrySort;
 }) {
   const searchParams = new URLSearchParams();
 
@@ -98,6 +115,10 @@ function buildRegistryPath(params: {
 
   if (params.classId) {
     searchParams.set("classId", params.classId);
+  }
+
+  if (params.sort) {
+    searchParams.set("sort", params.sort);
   }
 
   const query = searchParams.toString();
@@ -145,6 +166,21 @@ function StudentRow({
   const editPath = enrollmentClassId
     ? `/admin/students/${student.id}/edit?classId=${encodeURIComponent(enrollmentClassId)}`
     : `/admin/students/${student.id}/edit`;
+  const statusForm = (
+    <form
+      action={toggleStudentStatusAction as unknown as (formData: FormData) => void}
+      className="inline-flex"
+    >
+      <input type="hidden" name="id" value={student.id} />
+      <input type="hidden" name="isActive" value={student.isActive ? "false" : "true"} />
+      <input type="hidden" name="flash" value="true" />
+      <input type="hidden" name="successRedirect" value={returnPath} />
+      <input type="hidden" name="errorRedirect" value={returnPath} />
+      <Button type="submit" size="sm" variant="secondary">
+        {student.isActive ? "Deactivate" : "Activate"}
+      </Button>
+    </form>
+  );
 
   return (
     <tr className="border-b last:border-b-0">
@@ -186,19 +222,17 @@ function StudentRow({
           <Button asChild size="sm" variant="outline">
             <Link href={editPath}>Edit</Link>
           </Button>
-          <form
-            action={toggleStudentStatusAction as unknown as (formData: FormData) => void}
-            className="inline-flex"
-          >
-            <input type="hidden" name="id" value={student.id} />
-            <input type="hidden" name="isActive" value={student.isActive ? "false" : "true"} />
-            <input type="hidden" name="flash" value="true" />
-            <input type="hidden" name="successRedirect" value={returnPath} />
-            <input type="hidden" name="errorRedirect" value={returnPath} />
-            <Button type="submit" size="sm" variant="secondary">
-              {student.isActive ? "Deactivate" : "Activate"}
-            </Button>
-          </form>
+          {student.isActive ? (
+            <ConfirmedSubmit
+              title="Deactivate student account"
+              description={`Deactivate ${student.fullName}? The student will lose portal access until the account is activated again.`}
+              confirmLabel="Confirm deactivation"
+            >
+              {statusForm}
+            </ConfirmedSubmit>
+          ) : (
+            statusForm
+          )}
         </div>
       </td>
     </tr>
@@ -216,6 +250,7 @@ export default async function AdminStudentsPage({ searchParams }: StudentsPagePr
   const learningStatus = parseLearningStatus(resolvedSearchParams?.learningStatus);
   const parentLinked = parseBoolean(resolvedSearchParams?.parentLinked);
   const classLinked = parseBoolean(resolvedSearchParams?.classLinked);
+  const sort = parseSort(resolvedSearchParams?.sort);
   const enrollmentClassId = resolvedSearchParams?.classId?.trim() || undefined;
   const registryPath = buildRegistryPath({
     q: searchQuery,
@@ -225,6 +260,7 @@ export default async function AdminStudentsPage({ searchParams }: StudentsPagePr
     parentLinked,
     classLinked,
     classId: enrollmentClassId,
+    sort,
   });
 
   const [result, enrollmentTarget] = await Promise.all([
@@ -236,6 +272,7 @@ export default async function AdminStudentsPage({ searchParams }: StudentsPagePr
       learningStatus,
       parentLinked,
       classLinked,
+      sort,
     }),
     enrollmentClassId ? getAdminScheduledClassById(enrollmentClassId) : Promise.resolve(null),
   ]);
@@ -280,7 +317,7 @@ export default async function AdminStudentsPage({ searchParams }: StudentsPagePr
             <CardTitle>Filters</CardTitle>
           </CardHeader>
           <CardContent>
-            <form className="grid gap-4 lg:grid-cols-6" action="/admin/students">
+            <form className="grid gap-4 lg:grid-cols-7" action="/admin/students">
               <label className="grid gap-1 text-sm font-medium text-slate-700 lg:col-span-2">
                 Search by name or email
                 <input
@@ -341,6 +378,20 @@ export default async function AdminStudentsPage({ searchParams }: StudentsPagePr
                   <option value="false">Unlinked</option>
                 </select>
               </label>
+              <label className="grid gap-1 text-sm font-medium text-slate-700">
+                Sort
+                <select
+                  name="sort"
+                  defaultValue={sort ?? ""}
+                  className="rounded-md border border-slate-300 px-3 py-2"
+                >
+                  <option value="">Default</option>
+                  <option value="nameAsc">Name A-Z</option>
+                  <option value="nameDesc">Name Z-A</option>
+                  <option value="createdAtDesc">Newest first</option>
+                  <option value="createdAtAsc">Oldest first</option>
+                </select>
+              </label>
               <div className="flex items-end">
                 <Button type="submit" className="w-full lg:w-auto">
                   Apply filters
@@ -362,33 +413,50 @@ export default async function AdminStudentsPage({ searchParams }: StudentsPagePr
                 No students found. Create or enrol students to populate the registry.
               </p>
             ) : (
-              <div className="overflow-x-auto rounded-lg border border-slate-200">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="bg-slate-50 text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">Student</th>
-                      <th className="px-4 py-3 font-medium">Parents</th>
-                      <th className="px-4 py-3 font-medium">Classes</th>
-                      <th className="px-4 py-3 font-medium">Teachers</th>
-                      <th className="px-4 py-3 font-medium">Created</th>
-                      <th className="px-4 py-3 font-medium">Updated</th>
-                      <th className="px-4 py-3 font-medium">Status</th>
-                      <th className="px-4 py-3 font-medium">Learning</th>
-                      <th className="px-4 py-3 font-medium text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {students.map((student) => (
-                      <StudentRow
-                        key={student.id}
-                        student={student}
-                        returnPath={registryPath}
-                        enrollmentClassId={enrollmentTarget ? enrollmentClassId : undefined}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3 font-medium">Student</th>
+                        <th className="px-4 py-3 font-medium">Parents</th>
+                        <th className="px-4 py-3 font-medium">Classes</th>
+                        <th className="px-4 py-3 font-medium">Teachers</th>
+                        <th className="px-4 py-3 font-medium">Created</th>
+                        <th className="px-4 py-3 font-medium">Updated</th>
+                        <th className="px-4 py-3 font-medium">Status</th>
+                        <th className="px-4 py-3 font-medium">Learning</th>
+                        <th className="px-4 py-3 font-medium text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {students.map((student) => (
+                        <StudentRow
+                          key={student.id}
+                          student={student}
+                          returnPath={registryPath}
+                          enrollmentClassId={enrollmentTarget ? enrollmentClassId : undefined}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <PaginationControls
+                  basePath="/admin/students"
+                  currentPage={page}
+                  totalPages={result.totalPages}
+                  totalCount={result.totalCount}
+                  query={{
+                    q: searchQuery,
+                    isActive,
+                    learningStatus,
+                    parentLinked,
+                    classLinked,
+                    classId: enrollmentClassId,
+                    sort,
+                  }}
+                />
+              </>
             )}
           </CardContent>
         </Card>

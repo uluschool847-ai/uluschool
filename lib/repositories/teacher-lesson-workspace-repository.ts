@@ -25,6 +25,7 @@ type StudentRecord = {
   email?: string | null;
   isActive?: boolean;
   learningStatus?: string | null;
+  studentProgresses?: Array<{ id: string }>;
 };
 
 type SubmissionRecord = {
@@ -121,7 +122,7 @@ export type TeacherLessonWorkspace = {
     backToSchedule: string;
     classDetail: string | DisabledAction;
     submissions: LinkAction;
-    progress: DisabledAction;
+    progress: LinkAction;
     materials: LinkAction;
     attendance: LinkAction;
   };
@@ -173,7 +174,13 @@ export type TeacherLessonWorkspace = {
     pendingSubmissions: number;
     gradedSubmissions: number;
   };
-  progressSummary: DisabledAction & { count: number };
+  progressSummary: {
+    count: number;
+    disabled: boolean;
+    href: string | null;
+    label?: string;
+    reason: string | null;
+  };
   attendanceSummary: {
     disabled: boolean;
     hidden: boolean;
@@ -188,7 +195,7 @@ function teacherLessonWhere(teacherId: string, lessonId: string): Prisma.Schedul
   };
 }
 
-function lessonInclude() {
+function lessonInclude(teacherId: string) {
   return {
     subject: {
       select: {
@@ -210,6 +217,13 @@ function lessonInclude() {
             email: true,
             isActive: true,
             learningStatus: true,
+            studentProgresses: {
+              where: {
+                archivedAt: null,
+                teacherId,
+              },
+              select: { id: true },
+            },
           },
           orderBy: { fullName: "asc" as const },
         },
@@ -222,6 +236,13 @@ function lessonInclude() {
         email: true,
         isActive: true,
         learningStatus: true,
+        studentProgresses: {
+          where: {
+            archivedAt: null,
+            teacherId,
+          },
+          select: { id: true },
+        },
       },
       orderBy: { fullName: "asc" as const },
     },
@@ -286,8 +307,8 @@ function safeStartState(lesson: LessonRecord) {
 }
 
 function safeFileLink(material: MaterialRecord): LinkAction {
-  const href = material.fileUrl ?? null;
-  if (!href || href.trim().startsWith("javascript:")) {
+  const href = material.fileUrl?.trim() ?? null;
+  if (!href || /^(javascript|data|file):/i.test(href)) {
     return disabled("Material file link is not available");
   }
 
@@ -296,6 +317,30 @@ function safeFileLink(material: MaterialRecord): LinkAction {
     href,
     label: `Open ${material.title}`,
   };
+}
+
+function submissionReviewHref(input: {
+  assignmentId: string;
+  lessonId: string;
+  submissionId: string;
+}) {
+  const params = new URLSearchParams({
+    assignmentId: input.assignmentId,
+    scheduledClassId: input.lessonId,
+  });
+  return `/portal/teacher/submissions/${input.submissionId}?${params.toString()}`;
+}
+
+function progressHref(lesson: LessonRecord, roster: StudentRecord[]) {
+  const params = new URLSearchParams();
+  if (roster.length === 1) {
+    params.set("studentId", roster[0].id);
+  }
+  if (lesson.subject?.id) {
+    params.set("subjectId", lesson.subject.id);
+  }
+  const query = params.toString();
+  return `/portal/teacher/progress${query ? `?${query}` : ""}`;
 }
 
 function submissionStatusForStudent(assignments: AssignmentRecord[], studentId: string) {
@@ -347,7 +392,15 @@ function mapWorkspace(lesson: LessonRecord): TeacherLessonWorkspace {
       grade: submission.grade,
       feedback: submission.feedback ?? null,
       status: submission.grade === null ? ("pending" as const) : ("graded" as const),
-      review: disabled("Teacher submission detail route is not implemented"),
+      review: {
+        disabled: false as const,
+        href: submissionReviewHref({
+          assignmentId: assignment.id,
+          lessonId: lesson.id,
+          submissionId: submission.id,
+        }),
+        label: "Review",
+      },
     })),
   );
   const attendanceByStudentId = new Map(
@@ -357,6 +410,11 @@ function mapWorkspace(lesson: LessonRecord): TeacherLessonWorkspace {
   const classDetailHref = lesson.classGroup
     ? `/portal/teacher/classes/${lesson.classGroup.id}`
     : null;
+  const currentProgressNotesCount = rosterSource.reduce(
+    (total, student) => total + (student.studentProgresses?.length ?? 0),
+    0,
+  );
+  const lessonProgressHref = progressHref(lesson, rosterSource);
 
   return {
     lesson: {
@@ -397,7 +455,11 @@ function mapWorkspace(lesson: LessonRecord): TeacherLessonWorkspace {
         href: `/portal/teacher/submissions?scheduledClassId=${lesson.id}`,
         label: "Review Submissions",
       },
-      progress: disabled("Teacher progress route is not implemented"),
+      progress: {
+        disabled: false,
+        href: lessonProgressHref,
+        label: "Open Progress",
+      },
       materials: {
         disabled: false,
         href: `/portal/teacher/materials?scheduledClassId=${lesson.id}`,
@@ -460,8 +522,14 @@ function mapWorkspace(lesson: LessonRecord): TeacherLessonWorkspace {
       gradedSubmissions: submissions.length - pendingSubmissions.length,
     },
     progressSummary: {
-      ...disabled("Teacher progress route is not implemented"),
-      count: 0,
+      count: currentProgressNotesCount,
+      disabled: false,
+      href: lessonProgressHref,
+      label: "Open Progress",
+      reason:
+        currentProgressNotesCount > 0
+          ? null
+          : "No current progress notes for this lesson roster yet.",
     },
     attendanceSummary: {
       disabled: false,
@@ -477,7 +545,7 @@ export async function getTeacherLessonWorkspace(
 ): Promise<TeacherLessonWorkspace | null> {
   const lesson = await prisma.scheduledClass.findFirst({
     where: teacherLessonWhere(teacherId, lessonId),
-    include: lessonInclude(),
+    include: lessonInclude(teacherId),
   });
 
   return lesson ? mapWorkspace(lesson as LessonRecord) : null;

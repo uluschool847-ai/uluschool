@@ -17,6 +17,8 @@ type AdminSubmissionRepositoryModule = {
   getSubmissions: (input: {
     entityType: "enquiry" | "lead";
     search?: string;
+    page?: number;
+    limit?: number;
     status?: "NEW" | "IN_PROGRESS" | "CONVERTED" | "REJECTED" | null;
   }) => Promise<Array<Record<string, unknown>>>;
 };
@@ -147,6 +149,35 @@ describe("admin-submission-repository reference search", () => {
         status: "IN_PROGRESS",
       },
       orderBy: { createdAt: "desc" },
+    });
+  });
+
+  it("applies explicit pagination without changing search and status filters", async () => {
+    prismaMock.enquiry.findMany.mockResolvedValueOnce([]);
+
+    const { getSubmissions } = await loadAdminSubmissionRepository();
+    await getSubmissions({
+      entityType: "enquiry",
+      search: "alice",
+      status: "NEW",
+      page: 3,
+      limit: 20,
+    });
+
+    expect(prismaMock.enquiry.findMany).toHaveBeenCalledWith({
+      where: {
+        OR: [
+          { referenceId: { contains: "alice", mode: "insensitive" } },
+          { studentName: { contains: "alice", mode: "insensitive" } },
+          { parentGuardianName: { contains: "alice", mode: "insensitive" } },
+          { email: { contains: "alice", mode: "insensitive" } },
+          { phoneWhatsapp: { contains: "alice", mode: "insensitive" } },
+        ],
+        status: "NEW",
+      },
+      orderBy: { createdAt: "desc" },
+      skip: 40,
+      take: 20,
     });
   });
 });

@@ -252,7 +252,6 @@ describe("submission-repository ownership contract", () => {
     });
 
     const ownershipScope = expect.arrayContaining([
-      { assignment: { teacherId: "teacher-1" } },
       { assignment: { scheduledClass: { teacherId: "teacher-1" } } },
       { assignment: { scheduledClass: { classGroup: { teacherId: "teacher-1" } } } },
     ]);
@@ -345,7 +344,6 @@ describe("submission-repository ownership contract", () => {
         where: expect.objectContaining({
           id: "submission-1",
           OR: expect.arrayContaining([
-            { assignment: { teacherId: "teacher-1" } },
             { assignment: { scheduledClass: { teacherId: "teacher-1" } } },
             { assignment: { scheduledClass: { classGroup: { teacherId: "teacher-1" } } } },
           ]),
@@ -465,7 +463,7 @@ describe("submission-repository ownership contract", () => {
     );
   });
 
-  it("lists all teacher-visible submissions through assignment, scheduled class, and class group ownership", async () => {
+  it("lists all teacher-visible submissions through scheduled class and class group ownership", async () => {
     prismaMock.submission.findMany.mockResolvedValueOnce([
       submission({
         student: {
@@ -505,7 +503,6 @@ describe("submission-repository ownership contract", () => {
     expect(query.where).toEqual(
       expect.objectContaining({
         OR: expect.arrayContaining([
-          { assignment: { teacherId: "teacher-1" } },
           { assignment: { scheduledClass: { teacherId: "teacher-1" } } },
           { assignment: { scheduledClass: { classGroup: { teacherId: "teacher-1" } } } },
         ]),
@@ -559,7 +556,6 @@ describe("submission-repository ownership contract", () => {
       const where = prismaMock.submission.findMany.mock.calls[0][0].where;
       expect(where.OR).toEqual(
         expect.arrayContaining([
-          { assignment: { teacherId: "teacher-1" } },
           { assignment: { scheduledClass: { teacherId: "teacher-1" } } },
           { assignment: { scheduledClass: { classGroup: { teacherId: "teacher-1" } } } },
         ]),

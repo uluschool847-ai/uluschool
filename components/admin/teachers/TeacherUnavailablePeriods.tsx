@@ -3,6 +3,7 @@ import {
   deleteTeacherUnavailablePeriodAction,
   updateTeacherUnavailablePeriodAction,
 } from "@/app/(admin)/admin/teachers/[id]/availability/actions";
+import { ConfirmedSubmit } from "@/components/admin/ConfirmedSubmit";
 import { Button } from "@/components/ui/button";
 import { DEFAULT_AVAILABILITY_TIMEZONE, utcToLocalDateTime } from "@/lib/scheduling/availability";
 
@@ -102,13 +103,19 @@ export function TeacherUnavailablePeriods({ teacherId, periods, message, error, 
                         Edit period
                       </Button>
                     </form>
-                    <form action={deletePeriodFormAction} className="inline">
-                      <input name="id" type="hidden" value={period.id} />
-                      <input name="teacherId" type="hidden" value={teacherId} />
-                      <Button size="sm" type="submit" variant="destructive">
-                        Delete period
-                      </Button>
-                    </form>
+                    <ConfirmedSubmit
+                      title="Delete unavailable period"
+                      description={`Delete unavailable period ${formatDateTime(period.startAt)} - ${formatDateTime(period.endAt)}? This period will no longer block scheduling.`}
+                      confirmLabel="Confirm delete"
+                    >
+                      <form action={deletePeriodFormAction} className="inline">
+                        <input name="id" type="hidden" value={period.id} />
+                        <input name="teacherId" type="hidden" value={teacherId} />
+                        <Button size="sm" type="submit" variant="destructive">
+                          Delete period
+                        </Button>
+                      </form>
+                    </ConfirmedSubmit>
                   </td>
                 </tr>
               ))}

@@ -12,6 +12,13 @@ export const metadata: Metadata = {
   title: "Teacher Notifications - mathSchool",
 };
 
+function pickNotificationFilters(params: { status?: string; type?: string }) {
+  return {
+    status: params.status,
+    type: params.type,
+  };
+}
+
 export default async function TeacherNotificationsPage({
   searchParams,
 }: {
@@ -19,8 +26,9 @@ export default async function TeacherNotificationsPage({
 }) {
   const session = await requireRole([UserRole.TEACHER]);
   const params = (await searchParams) ?? {};
+  const filters = pickNotificationFilters(params);
   const [notifications, preferences] = await Promise.all([
-    listNotificationsForUser(session.uid, params),
+    listNotificationsForUser(session.uid, filters),
     getNotificationPreference(session.uid),
   ]);
 

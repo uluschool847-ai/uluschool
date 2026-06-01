@@ -8,6 +8,7 @@ import {
   UserRole,
 } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { requireRole } from "@/lib/auth/session";
@@ -36,6 +37,14 @@ function revalidateBillingPaths() {
   revalidatePath("/admin/analytics/inputs");
   revalidatePath("/portal/parent");
   revalidatePath("/portal/parent/billing");
+}
+
+function billingFeedbackUrl(type: "billingMessage" | "billingError", message: string) {
+  return `/admin/billing?${new URLSearchParams({ [type]: message }).toString()}`;
+}
+
+function actionErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }
 
 const planSchema = z.object({
@@ -173,6 +182,7 @@ export async function refundPaymentAction(input: { paymentId: string }) {
 }
 
 export async function createBillingPlanAction(formData: FormData) {
+  let redirectUrl = billingFeedbackUrl("billingMessage", "Billing plan created.");
   try {
     const session = await requireRole([UserRole.ADMIN]);
     const input = planSchema.parse({
@@ -182,21 +192,31 @@ export async function createBillingPlanAction(formData: FormData) {
       displayOrder: formValue(formData, "displayOrder") ?? "0",
       name: formValue(formData, "name"),
     });
-    const plan = await createBillingPlan(input);
-    await createAdminAuditLog({
-      adminUserId: session.uid,
-      action: "BILLING_PLAN_CREATED",
-      targetId: plan.id,
-      targetType: "billing_plan",
-      after: plan,
+    await prisma.$transaction(async (tx) => {
+      const plan = await createBillingPlan(input, tx);
+      await createAdminAuditLog(
+        {
+          adminUserId: session.uid,
+          action: "BILLING_PLAN_CREATED",
+          targetId: plan.id,
+          targetType: "billing_plan",
+          after: plan,
+        },
+        tx,
+      );
     });
     revalidateBillingPaths();
   } catch (error) {
-    console.error("Failed to create billing plan", error);
+    redirectUrl = billingFeedbackUrl(
+      "billingError",
+      actionErrorMessage(error, "Could not create billing plan."),
+    );
   }
+  redirect(redirectUrl);
 }
 
 export async function createSubscriptionAction(formData: FormData) {
+  let redirectUrl = billingFeedbackUrl("billingMessage", "Subscription assigned.");
   try {
     const session = await requireRole([UserRole.ADMIN]);
     const input = subscriptionSchema.parse({
@@ -206,21 +226,31 @@ export async function createSubscriptionAction(formData: FormData) {
       status: formValue(formData, "status") ?? SubscriptionStatus.ACTIVE,
       studentId: formValue(formData, "studentId"),
     });
-    const subscription = await createSubscriptionForStudent(input);
-    await createAdminAuditLog({
-      adminUserId: session.uid,
-      action: "STUDENT_SUBSCRIPTION_CREATED",
-      targetId: subscription.id,
-      targetType: "student_subscription",
-      after: subscription,
+    await prisma.$transaction(async (tx) => {
+      const subscription = await createSubscriptionForStudent(input, tx);
+      await createAdminAuditLog(
+        {
+          adminUserId: session.uid,
+          action: "STUDENT_SUBSCRIPTION_CREATED",
+          targetId: subscription.id,
+          targetType: "student_subscription",
+          after: subscription,
+        },
+        tx,
+      );
     });
     revalidateBillingPaths();
   } catch (error) {
-    console.error("Failed to create subscription", error);
+    redirectUrl = billingFeedbackUrl(
+      "billingError",
+      actionErrorMessage(error, "Could not create subscription."),
+    );
   }
+  redirect(redirectUrl);
 }
 
 export async function issueInvoiceAction(formData: FormData) {
+  let redirectUrl = billingFeedbackUrl("billingMessage", "Invoice issued.");
   try {
     const session = await requireRole([UserRole.ADMIN]);
     const input = invoiceSchema.parse({
@@ -234,24 +264,37 @@ export async function issueInvoiceAction(formData: FormData) {
       subscriptionId: formValue(formData, "subscriptionId"),
       title: formValue(formData, "title"),
     });
-    const invoice = await issueInvoice({
-      ...input,
-      dueDate: input.dueDate ? new Date(input.dueDate) : undefined,
-    });
-    await createAdminAuditLog({
-      adminUserId: session.uid,
-      action: "BILLING_INVOICE_ISSUED",
-      targetId: invoice.id,
-      targetType: "billing_invoice",
-      after: invoice,
+    await prisma.$transaction(async (tx) => {
+      const invoice = await issueInvoice(
+        {
+          ...input,
+          dueDate: input.dueDate ? new Date(input.dueDate) : undefined,
+        },
+        tx,
+      );
+      await createAdminAuditLog(
+        {
+          adminUserId: session.uid,
+          action: "BILLING_INVOICE_ISSUED",
+          targetId: invoice.id,
+          targetType: "billing_invoice",
+          after: invoice,
+        },
+        tx,
+      );
     });
     revalidateBillingPaths();
   } catch (error) {
-    console.error("Failed to issue invoice", error);
+    redirectUrl = billingFeedbackUrl(
+      "billingError",
+      actionErrorMessage(error, "Could not issue invoice."),
+    );
   }
+  redirect(redirectUrl);
 }
 
 export async function createManualPaymentAction(formData: FormData) {
+  let redirectUrl = billingFeedbackUrl("billingMessage", "Payment recorded.");
   try {
     const session = await requireRole([UserRole.ADMIN]);
     const input = manualPaymentSchema.parse({
@@ -266,18 +309,27 @@ export async function createManualPaymentAction(formData: FormData) {
       studentId: formValue(formData, "studentId"),
       subscriptionId: formValue(formData, "subscriptionId"),
     });
-    const payment = await createManualPayment(input);
-    await createAdminAuditLog({
-      adminUserId: session.uid,
-      action: "MANUAL_PAYMENT_RECORDED",
-      targetId: payment.id,
-      targetType: "payment_transaction",
-      after: payment,
+    await prisma.$transaction(async (tx) => {
+      const payment = await createManualPayment(input, tx);
+      await createAdminAuditLog(
+        {
+          adminUserId: session.uid,
+          action: "MANUAL_PAYMENT_RECORDED",
+          targetId: payment.id,
+          targetType: "payment_transaction",
+          after: payment,
+        },
+        tx,
+      );
     });
     revalidateBillingPaths();
   } catch (error) {
-    console.error("Failed to create manual payment", error);
+    redirectUrl = billingFeedbackUrl(
+      "billingError",
+      actionErrorMessage(error, "Could not create manual payment."),
+    );
   }
+  redirect(redirectUrl);
 }
 
 export const processRefundAction = refundPaymentAction;

@@ -4,11 +4,14 @@ import { unstable_noStore as noStore } from "next/cache";
 import Link from "next/link";
 
 import { toggleParentStatusAction } from "@/app/(admin)/admin/parents/actions";
+import { ConfirmedSubmit } from "@/components/admin/ConfirmedSubmit";
+import { PaginationControls } from "@/components/admin/PaginationControls";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/session";
 import {
   type AdminParentRegistryRecord,
+  type AdminRegistrySort,
   getAdminParents,
 } from "@/lib/repositories/portal-repository";
 
@@ -37,6 +40,19 @@ function parseBoolean(value?: string) {
   return undefined;
 }
 
+function parseSort(sort?: string): AdminRegistrySort | undefined {
+  if (
+    sort === "nameAsc" ||
+    sort === "nameDesc" ||
+    sort === "createdAtDesc" ||
+    sort === "createdAtAsc"
+  ) {
+    return sort;
+  }
+
+  return undefined;
+}
+
 function formatDate(date: Date) {
   return new Intl.DateTimeFormat("en-US", {
     day: "2-digit",
@@ -54,6 +70,7 @@ function buildRegistryPath(params: {
   page?: number;
   isActive?: boolean;
   studentLinked?: boolean;
+  sort?: AdminRegistrySort;
 }) {
   const searchParams = new URLSearchParams();
 
@@ -63,6 +80,7 @@ function buildRegistryPath(params: {
   if (params.studentLinked !== undefined) {
     searchParams.set("studentLinked", String(params.studentLinked));
   }
+  if (params.sort) searchParams.set("sort", params.sort);
 
   const query = searchParams.toString();
   return query ? `/admin/parents?${query}` : "/admin/parents";
@@ -95,6 +113,22 @@ function ParentRow({
   parent,
   returnPath,
 }: { parent: AdminParentRegistryRecord; returnPath: string }) {
+  const statusForm = (
+    <form
+      action={toggleParentStatusAction as unknown as (formData: FormData) => void}
+      className="inline-flex"
+    >
+      <input type="hidden" name="id" value={parent.id} />
+      <input type="hidden" name="isActive" value={parent.isActive ? "false" : "true"} />
+      <input type="hidden" name="flash" value="true" />
+      <input type="hidden" name="successRedirect" value={returnPath} />
+      <input type="hidden" name="errorRedirect" value={returnPath} />
+      <Button type="submit" size="sm" variant="secondary">
+        {parent.isActive ? "Deactivate" : "Activate"}
+      </Button>
+    </form>
+  );
+
   return (
     <tr className="border-b last:border-b-0">
       <td className="px-4 py-3 align-top">
@@ -126,19 +160,17 @@ function ParentRow({
           <Button asChild size="sm" variant="outline">
             <Link href={`/admin/parents/${parent.id}/edit`}>Edit</Link>
           </Button>
-          <form
-            action={toggleParentStatusAction as unknown as (formData: FormData) => void}
-            className="inline-flex"
-          >
-            <input type="hidden" name="id" value={parent.id} />
-            <input type="hidden" name="isActive" value={parent.isActive ? "false" : "true"} />
-            <input type="hidden" name="flash" value="true" />
-            <input type="hidden" name="successRedirect" value={returnPath} />
-            <input type="hidden" name="errorRedirect" value={returnPath} />
-            <Button type="submit" size="sm" variant="secondary">
-              {parent.isActive ? "Deactivate" : "Activate"}
-            </Button>
-          </form>
+          {parent.isActive ? (
+            <ConfirmedSubmit
+              title="Deactivate parent account"
+              description={`Deactivate ${parent.fullName}? The parent will lose portal access until the account is activated again.`}
+              confirmLabel="Confirm deactivation"
+            >
+              {statusForm}
+            </ConfirmedSubmit>
+          ) : (
+            statusForm
+          )}
         </div>
       </td>
     </tr>
@@ -155,7 +187,8 @@ export default async function AdminParentsPage({ searchParams }: ParentsPageProp
   const searchQuery = resolvedSearchParams?.q?.trim() || undefined;
   const isActive = parseBoolean(resolvedSearchParams?.isActive);
   const studentLinked = parseBoolean(resolvedSearchParams?.studentLinked);
-  const registryPath = buildRegistryPath({ q: searchQuery, page, isActive, studentLinked });
+  const sort = parseSort(resolvedSearchParams?.sort);
+  const registryPath = buildRegistryPath({ q: searchQuery, page, isActive, studentLinked, sort });
 
   const result = await getAdminParents({
     page,
@@ -163,6 +196,7 @@ export default async function AdminParentsPage({ searchParams }: ParentsPageProp
     searchQuery,
     isActive,
     studentLinked,
+    sort,
   });
   const parents = result.items ?? [];
 
@@ -192,7 +226,7 @@ export default async function AdminParentsPage({ searchParams }: ParentsPageProp
             <CardTitle>Filters</CardTitle>
           </CardHeader>
           <CardContent>
-            <form className="grid gap-4 lg:grid-cols-4" action="/admin/parents">
+            <form className="grid gap-4 lg:grid-cols-5" action="/admin/parents">
               <label className="grid gap-1 text-sm font-medium text-slate-700 lg:col-span-2">
                 Search by name or email
                 <input
@@ -227,6 +261,20 @@ export default async function AdminParentsPage({ searchParams }: ParentsPageProp
                   <option value="false">Unlinked</option>
                 </select>
               </label>
+              <label className="grid gap-1 text-sm font-medium text-slate-700">
+                Sort
+                <select
+                  name="sort"
+                  defaultValue={sort ?? ""}
+                  className="rounded-md border border-slate-300 px-3 py-2"
+                >
+                  <option value="">Default</option>
+                  <option value="nameAsc">Name A-Z</option>
+                  <option value="nameDesc">Name Z-A</option>
+                  <option value="createdAtDesc">Newest first</option>
+                  <option value="createdAtAsc">Oldest first</option>
+                </select>
+              </label>
               <div className="flex items-end">
                 <Button type="submit" className="w-full lg:w-auto">
                   Apply filters
@@ -248,25 +296,39 @@ export default async function AdminParentsPage({ searchParams }: ParentsPageProp
                 No parent records found. Create the first parent account to populate the registry.
               </p>
             ) : (
-              <div className="overflow-x-auto rounded-lg border border-slate-200">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="bg-slate-50 text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">Parent</th>
-                      <th className="px-4 py-3 font-medium">Linked Students</th>
-                      <th className="px-4 py-3 font-medium">Created</th>
-                      <th className="px-4 py-3 font-medium">Updated</th>
-                      <th className="px-4 py-3 font-medium">Status</th>
-                      <th className="px-4 py-3 font-medium text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {parents.map((parent) => (
-                      <ParentRow key={parent.id} parent={parent} returnPath={registryPath} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3 font-medium">Parent</th>
+                        <th className="px-4 py-3 font-medium">Linked Students</th>
+                        <th className="px-4 py-3 font-medium">Created</th>
+                        <th className="px-4 py-3 font-medium">Updated</th>
+                        <th className="px-4 py-3 font-medium">Status</th>
+                        <th className="px-4 py-3 font-medium text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parents.map((parent) => (
+                        <ParentRow key={parent.id} parent={parent} returnPath={registryPath} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <PaginationControls
+                  basePath="/admin/parents"
+                  currentPage={page}
+                  totalPages={result.totalPages}
+                  totalCount={result.totalCount}
+                  query={{
+                    q: searchQuery,
+                    isActive,
+                    studentLinked,
+                    sort,
+                  }}
+                />
+              </>
             )}
           </CardContent>
         </Card>

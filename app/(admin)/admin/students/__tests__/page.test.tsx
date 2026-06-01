@@ -169,8 +169,63 @@ describe("Admin student registry page", () => {
       learningStatus: "PAUSED",
       parentLinked: false,
       classLinked: true,
+      sort: undefined,
     });
     expect(screen.getByText(/alice student/i)).toBeDefined();
+  });
+
+  it("preserves search, filters, and sort params across pagination links", async () => {
+    getAdminStudentsMock.mockResolvedValueOnce({
+      items: [
+        {
+          id: "student-1",
+          fullName: "Alice Student",
+          email: "alice.student@example.com",
+          isActive: false,
+          learningStatus: "PAUSED",
+          parents: [],
+          enrolledClasses: [],
+          derivedTeachers: [],
+          createdAt: new Date("2026-05-01T10:00:00.000Z"),
+          updatedAt: new Date("2026-05-04T10:00:00.000Z"),
+        },
+      ],
+      totalCount: 45,
+      totalPages: 3,
+    });
+
+    const page = await loadStudentsAdminPage();
+    const element = await page.default({
+      searchParams: {
+        q: "alice",
+        page: "2",
+        isActive: "false",
+        learningStatus: "PAUSED",
+        parentLinked: "false",
+        classLinked: "true",
+        sort: "nameDesc",
+      },
+    });
+
+    render(element);
+
+    expect(getAdminStudentsMock).toHaveBeenCalledWith({
+      page: 2,
+      limit: expect.any(Number),
+      searchQuery: "alice",
+      isActive: false,
+      learningStatus: "PAUSED",
+      parentLinked: false,
+      classLinked: true,
+      sort: "nameDesc",
+    });
+    expect(screen.getByLabelText(/sort/i)).toHaveProperty("value", "nameDesc");
+    expect(screen.getByRole("link", { name: /previous/i }).getAttribute("href")).toBe(
+      "/admin/students?q=alice&isActive=false&learningStatus=PAUSED&parentLinked=false&classLinked=true&sort=nameDesc&page=1",
+    );
+    expect(screen.getByRole("link", { name: /^next$/i }).getAttribute("href")).toBe(
+      "/admin/students?q=alice&isActive=false&learningStatus=PAUSED&parentLinked=false&classLinked=true&sort=nameDesc&page=3",
+    );
   });
 
   it("renders an empty state when no students exist", async () => {

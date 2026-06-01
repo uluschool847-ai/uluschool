@@ -99,6 +99,29 @@ describe("Admin CRM forms", () => {
     });
   });
 
+  it("StatusUpdateForm cancel restores the last saved status without calling actions", async () => {
+    const StatusUpdateForm = await loadStatusForm();
+
+    render(
+      <StatusUpdateForm
+        entityType="enquiry"
+        entityId="enq-1"
+        currentStatus="NEW"
+        statuses={["NEW", "IN_PROGRESS", "CONVERTED"]}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/status/i), {
+      target: { value: "CONVERTED" },
+    });
+    expect(screen.getByLabelText(/status/i)).toHaveProperty("value", "CONVERTED");
+
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(screen.getByLabelText(/status/i)).toHaveProperty("value", "NEW");
+    expect(updateEnquiryStatusActionMock).not.toHaveBeenCalled();
+  });
+
   it("StatusUpdateForm shows a loading or optimistic state while saving", async () => {
     let resolveAction: (value: unknown) => void = () => {};
     updateEnquiryStatusActionMock.mockImplementation(
@@ -186,5 +209,20 @@ describe("Admin CRM forms", () => {
       });
     });
     expect(textarea.value).toBe("");
+  });
+
+  it("NoteAddForm cancel clears note text and feedback without submitting", async () => {
+    const NoteAddForm = await loadNoteForm();
+
+    render(<NoteAddForm entityType="lead" entityId="lead-1" />);
+
+    const textarea = screen.getByLabelText(/note/i) as HTMLTextAreaElement;
+    fireEvent.change(textarea, {
+      target: { value: "Draft note to cancel." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(textarea.value).toBe("");
+    expect(addContactLeadNoteActionMock).not.toHaveBeenCalled();
   });
 });

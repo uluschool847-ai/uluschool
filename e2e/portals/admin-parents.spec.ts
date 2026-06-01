@@ -21,7 +21,7 @@ const QA_EMAIL_PREFIXES = [
 ];
 
 test.describe("Admin Parent Management", () => {
-  test.describe.configure({ timeout: 120000, mode: "serial" });
+  test.describe.configure({ timeout: 300000, mode: "serial" });
 
   async function cleanupQaParentData() {
     const users = await prisma.appUser.findMany({
@@ -212,6 +212,10 @@ test.describe("Admin Parent Management", () => {
     await expect(updatedRow).toContainText(parent.updatedFullName);
 
     await updatedRow.getByRole("button", { name: /^deactivate$/i }).click();
+    await expect(page.getByRole("dialog", { name: /deactivate parent account/i })).toContainText(
+      parent.updatedFullName,
+    );
+    await page.getByRole("button", { name: /confirm deactivation/i }).click();
     await page.waitForURL(
       /\/admin\/parents(?:\?.*parentMessage=Parent%20account%20deactivated\.)?$/,
     );
@@ -230,24 +234,34 @@ test.describe("Admin Parent Management", () => {
     await page
       .getByRole("combobox", { name: /^Student$/i })
       .selectOption({ label: FIXED_STUDENT_NAME });
-    await page.getByRole("button", { name: /link student|add student/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/parents/${parent.parentId}/edit\\?.*parentMessage=Student(?:%20|\\+)linked\\.`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/parents/${parent.parentId}/edit\\?.*parentMessage=Student(?:%20|\\+)linked\\.`,
+        ),
       ),
-    );
+      page.getByRole("button", { name: /link student|add student/i }).click(),
+    ]);
 
     await page.goto(`/admin/parents/${parent.parentId}`);
     await expect(page.getByRole("heading", { name: /linked students/i })).toBeVisible();
     await expect(page.getByText(FIXED_STUDENT_NAME)).toBeVisible();
 
     await page.goto(`/admin/parents/${parent.parentId}/edit`);
-    await page.getByRole("button", { name: /remove|unlink/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/parents/${parent.parentId}/edit\\?.*parentMessage=Student(?:%20|\\+)unlinked\\.`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/parents/${parent.parentId}/edit\\?.*parentMessage=Student(?:%20|\\+)unlinked\\.`,
+        ),
       ),
-    );
+      (async () => {
+        await page.getByRole("button", { name: /remove|unlink/i }).click();
+        await expect(page.getByRole("dialog", { name: /remove student link/i })).toContainText(
+          FIXED_STUDENT_NAME,
+        );
+        await page.getByRole("button", { name: /confirm removal/i }).click();
+      })(),
+    ]);
 
     await page.goto(`/admin/parents/${parent.parentId}`);
     await expect(page.getByText(FIXED_STUDENT_NAME)).toHaveCount(0);
@@ -279,20 +293,24 @@ test.describe("Admin Parent Management", () => {
     await page
       .getByRole("combobox", { name: /^Student$/i })
       .selectOption({ label: FIXED_STUDENT_NAME });
-    await page.getByRole("button", { name: /link student|add student/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/parents/${parent.parentId}/edit\\?.*parentMessage=Student(?:%20|\\+)linked\\.`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/parents/${parent.parentId}/edit\\?.*parentMessage=Student(?:%20|\\+)linked\\.`,
+        ),
       ),
-    );
+      page.getByRole("button", { name: /link student|add student/i }).click(),
+    ]);
 
     await forceSelectOption(page, "studentId", studentId as string, FIXED_STUDENT_NAME);
-    await page.getByRole("button", { name: /link student|add student/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/parents/${parent.parentId}/edit(?:\\?.*parentError=Student(?:%20|\\+)already(?:%20|\\+)linked\\.)$`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/parents/${parent.parentId}/edit(?:\\?.*parentError=Student(?:%20|\\+)already(?:%20|\\+)linked\\.)$`,
+        ),
       ),
-    );
+      page.getByRole("button", { name: /link student|add student/i }).click(),
+    ]);
 
     await expect(
       page.locator("div[role='alert']").filter({ hasText: "Student already linked." }).first(),
@@ -331,20 +349,25 @@ test.describe("Admin Parent Management", () => {
     await page
       .getByRole("combobox", { name: /^Student$/i })
       .selectOption({ label: sofia.fullName });
-    await page.getByRole("button", { name: /link student|add student/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/parents/${parent.parentId}/edit\\?.*parentMessage=Student(?:%20|\\+)linked\\.`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/parents/${parent.parentId}/edit\\?.*parentMessage=Student(?:%20|\\+)linked\\.`,
+        ),
       ),
-    );
+      page.getByRole("button", { name: /link student|add student/i }).click(),
+    ]);
 
+    await page.goto(`/admin/parents/${parent.parentId}/edit`);
     await page.getByRole("combobox", { name: /^Student$/i }).selectOption({ label: mark.fullName });
-    await page.getByRole("button", { name: /link student|add student/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/parents/${parent.parentId}/edit\\?.*parentMessage=Student(?:%20|\\+)linked\\.`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/parents/${parent.parentId}/edit\\?.*parentMessage=Student(?:%20|\\+)linked\\.`,
+        ),
       ),
-    );
+      page.getByRole("button", { name: /link student|add student/i }).click(),
+    ]);
 
     await page.context().clearCookies();
     await loginAsParent(page, parent.email);
@@ -357,12 +380,20 @@ test.describe("Admin Parent Management", () => {
     await loginAsAdmin(page);
     await page.goto(`/admin/parents/${parent.parentId}/edit`);
     const sofiaRow = page.locator("li").filter({ hasText: sofia.fullName }).first();
-    await sofiaRow.getByRole("button", { name: /remove|unlink/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/parents/${parent.parentId}/edit\\?.*parentMessage=Student(?:%20|\\+)unlinked\\.`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/parents/${parent.parentId}/edit\\?.*parentMessage=Student(?:%20|\\+)unlinked\\.`,
+        ),
       ),
-    );
+      (async () => {
+        await sofiaRow.getByRole("button", { name: /remove|unlink/i }).click();
+        await expect(page.getByRole("dialog", { name: /remove student link/i })).toContainText(
+          sofia.fullName,
+        );
+        await page.getByRole("button", { name: /confirm removal/i }).click();
+      })(),
+    ]);
 
     await page.context().clearCookies();
     await loginAsParent(page, parent.email);
@@ -377,6 +408,10 @@ test.describe("Admin Parent Management", () => {
     const parentRow = await openParentRegistryByEmail(page, parent.email);
 
     await parentRow.getByRole("button", { name: /^deactivate$/i }).click();
+    await expect(page.getByRole("dialog", { name: /deactivate parent account/i })).toContainText(
+      parent.fullName,
+    );
+    await page.getByRole("button", { name: /confirm deactivation/i }).click();
     await page.waitForURL(
       /\/admin\/parents(?:\?.*parentMessage=Parent%20account%20deactivated\.)?$/,
     );

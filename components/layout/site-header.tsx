@@ -286,7 +286,9 @@ export function SiteHeader() {
   }, [pathname]);
 
   const isAuthenticated = session.authenticated;
-  const isAdmin = isAuthenticated && session.user.role === "ADMIN";
+  const isAdminPath = pathname?.startsWith("/admin") ?? false;
+  const showAuthenticatedActions = sessionLoaded && isAuthenticated;
+  const showGuestActions = !isAdminPath && (!sessionLoaded || !isAuthenticated);
 
   return (
     <>
@@ -313,7 +315,7 @@ export function SiteHeader() {
           </nav>
 
           <div className="hidden items-center gap-2 md:flex">
-            {sessionLoaded && isAuthenticated ? (
+            {showAuthenticatedActions ? (
               <>
                 <HeaderUserInfo user={session.user} />
                 <PortalLink role={session.user.role} />
@@ -327,7 +329,7 @@ export function SiteHeader() {
                   </Button>
                 </form>
               </>
-            ) : (
+            ) : showGuestActions ? (
               <>
                 <Button asChild variant="ghost" className="text-foreground/80 hover:text-primary">
                   <Link href="/portal/login">Log In</Link>
@@ -336,7 +338,7 @@ export function SiteHeader() {
                   <Link href="/admissions">Sign Up</Link>
                 </Button>
               </>
-            )}
+            ) : null}
             <ThemeToggle />
           </div>
 
@@ -397,7 +399,7 @@ export function SiteHeader() {
             </nav>
 
             <div className="space-y-3 pt-6">
-              {sessionLoaded && isAuthenticated ? (
+              {showAuthenticatedActions ? (
                 <>
                   <HeaderUserInfo user={session.user} />
                   <PortalLink
@@ -411,7 +413,7 @@ export function SiteHeader() {
                     </Button>
                   </form>
                 </>
-              ) : (
+              ) : showGuestActions ? (
                 <>
                   <Button asChild variant="secondary" className="w-full">
                     <Link href="/portal/login" onClick={() => closeMobileMenu(true)}>
@@ -424,7 +426,7 @@ export function SiteHeader() {
                     </Link>
                   </Button>
                 </>
-              )}
+              ) : null}
             </div>
           </dialog>
         </div>

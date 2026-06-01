@@ -5,6 +5,7 @@ type GetSubmissionsInput = {
   entityType: "enquiry" | "lead";
   search?: string;
   page?: number;
+  limit?: number;
   status?: EnquiryStatus | null;
 };
 
@@ -46,11 +47,33 @@ export async function getSubmissions(input: GetSubmissionsInput) {
     ...buildSearchWhere(input.entityType, input.search),
     ...(input.status ? { status: input.status } : {}),
   };
+  const shouldPaginate = input.page !== undefined || input.limit !== undefined;
+  const page = Math.max(1, input.page ?? 1);
+  const limit = Math.max(1, input.limit ?? 20);
+  const skip = (page - 1) * limit;
 
   if (input.entityType === "enquiry") {
+    if (shouldPaginate) {
+      return prisma.enquiry.findMany({
+        where: Object.keys(where).length > 0 ? where : undefined,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limit,
+      });
+    }
+
     return prisma.enquiry.findMany({
       where: Object.keys(where).length > 0 ? where : undefined,
       orderBy: { createdAt: "desc" },
+    });
+  }
+
+  if (shouldPaginate) {
+    return prisma.contactLead.findMany({
+      where: Object.keys(where).length > 0 ? where : undefined,
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: limit,
     });
   }
 

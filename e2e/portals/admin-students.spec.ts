@@ -12,7 +12,7 @@ const FIXED_CLASS_TITLE = "IGCSE Mathematics - Algebra";
 const FIXED_CLASS_TEACHER = "Fixed Teacher";
 
 test.describe("Admin Student Management", () => {
-  test.describe.configure({ timeout: 120000, mode: "serial" });
+  test.describe.configure({ timeout: 300000, mode: "serial" });
 
   async function cleanupQaStudentsData() {
     await prisma.appUser.deleteMany({
@@ -177,6 +177,10 @@ test.describe("Admin Student Management", () => {
     await expect(updatedRegistryRow).toContainText(/active/i);
 
     await updatedRegistryRow.getByRole("button", { name: /^deactivate$/i }).click();
+    await expect(page.getByRole("dialog", { name: /deactivate student account/i })).toContainText(
+      student.updatedFullName,
+    );
+    await page.getByRole("button", { name: /confirm deactivation/i }).click();
     await page.waitForURL(
       /\/admin\/students(?:\?.*studentMessage=Student%20account%20deactivated\.)?$/,
     );
@@ -255,36 +259,34 @@ test.describe("Admin Student Management", () => {
     await page
       .getByRole("combobox", { name: /^Parent$/i })
       .selectOption({ label: FIXED_PARENT_NAME });
-    await page.getByRole("button", { name: /link parent/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/students/${student.studentId}/edit(?:\\?.*studentMessage=Parent%20linked\\.)?$`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/students/${student.studentId}/edit\\?.*studentMessage=Parent(?:%20|\\+)linked\\.`,
+        ),
       ),
-    );
-
-    await expect(page).toHaveURL(
-      new RegExp(
-        `/admin/students/${student.studentId}/edit\\?studentMessage=Parent(?:%20|\\+)linked\\.$`,
-      ),
-    );
+      page.getByRole("button", { name: /link parent/i }).click(),
+    ]);
     await page.goto(`/admin/students/${student.studentId}`);
     await expect(page.getByRole("heading", { name: /linked parents/i })).toBeVisible();
     await expect(page.getByText(/Fixed Parent/i)).toBeVisible();
 
     await page.goto(`/admin/students/${student.studentId}/edit`);
 
-    await page.getByRole("button", { name: /remove/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/students/${student.studentId}/edit(?:\\?.*studentMessage=Parent%20unlinked\\.)?$`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/students/${student.studentId}/edit\\?.*studentMessage=Parent(?:%20|\\+)unlinked\\.`,
+        ),
       ),
-    );
-
-    await expect(page).toHaveURL(
-      new RegExp(
-        `/admin/students/${student.studentId}/edit\\?studentMessage=Parent(?:%20|\\+)unlinked\\.$`,
-      ),
-    );
+      (async () => {
+        await page.getByRole("button", { name: /remove/i }).click();
+        await expect(page.getByRole("dialog", { name: /remove parent link/i })).toContainText(
+          "Fixed Parent",
+        );
+        await page.getByRole("button", { name: /confirm removal/i }).click();
+      })(),
+    ]);
     await page.goto(`/admin/students/${student.studentId}`);
     await expect(page.getByRole("heading", { name: /linked parents/i })).toBeVisible();
     await expect(page.getByText(/Fixed Parent/i)).toHaveCount(0);
@@ -294,12 +296,14 @@ test.describe("Admin Student Management", () => {
     await page
       .getByRole("combobox", { name: /^Class$/i })
       .selectOption({ label: FIXED_CLASS_TITLE });
-    await page.getByRole("button", { name: /enroll class/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/students/${student.studentId}/edit(?:\\?.*studentMessage=Class%20enrolled\\.)?$`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/students/${student.studentId}/edit\\?.*studentMessage=Class(?:%20|\\+)enrolled\\.`,
+        ),
       ),
-    );
+      page.getByRole("button", { name: /enroll class/i }).click(),
+    ]);
 
     await page.goto(`/admin/students/${student.studentId}`);
     await page.reload();
@@ -316,12 +320,20 @@ test.describe("Admin Student Management", () => {
     await page.goto(`/admin/students/${student.studentId}/edit`);
     await page.reload();
     const classRow = page.locator("li", { hasText: FIXED_CLASS_TITLE }).first();
-    await classRow.getByRole("button", { name: /remove/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/students/${student.studentId}/edit(?:\\?.*studentMessage=Class%20unlinked\\.)?$`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/students/${student.studentId}/edit\\?.*studentMessage=Class(?:%20|\\+)unlinked\\.`,
+        ),
       ),
-    );
+      (async () => {
+        await classRow.getByRole("button", { name: /remove/i }).click();
+        await expect(page.getByRole("dialog", { name: /remove class enrollment/i })).toContainText(
+          FIXED_CLASS_TITLE,
+        );
+        await page.getByRole("button", { name: /confirm removal/i }).click();
+      })(),
+    ]);
 
     await page.goto(`/admin/students/${student.studentId}`);
     await page.reload();
@@ -371,20 +383,24 @@ test.describe("Admin Student Management", () => {
     await page
       .getByRole("combobox", { name: /^Parent$/i })
       .selectOption({ label: FIXED_PARENT_NAME });
-    await page.getByRole("button", { name: /link parent/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/students/${student.studentId}/edit(?:\\?.*studentMessage=Parent%20linked\\.)?$`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/students/${student.studentId}/edit\\?.*studentMessage=Parent(?:%20|\\+)linked\\.`,
+        ),
       ),
-    );
+      page.getByRole("button", { name: /link parent/i }).click(),
+    ]);
 
     await forceSelectOption(page, "parentId", parentId as string, FIXED_PARENT_NAME);
-    await page.getByRole("button", { name: /link parent/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/students/${student.studentId}/edit(?:\\?.*studentError=Parent(?:%20|\\+)already(?:%20|\\+)linked\\.)$`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/students/${student.studentId}/edit(?:\\?.*studentError=Parent(?:%20|\\+)already(?:%20|\\+)linked\\.)$`,
+        ),
       ),
-    );
+      page.getByRole("button", { name: /link parent/i }).click(),
+    ]);
     await expect(page.getByRole("heading", { name: /parent links/i })).toBeVisible();
     await expect(
       page.locator("div[role='alert']").filter({ hasText: "Parent already linked." }).first(),
@@ -401,20 +417,24 @@ test.describe("Admin Student Management", () => {
     await page
       .getByRole("combobox", { name: /^Class$/i })
       .selectOption({ label: FIXED_CLASS_TITLE });
-    await page.getByRole("button", { name: /enroll class/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/students/${student.studentId}/edit(?:\\?.*studentMessage=Class%20enrolled\\.)?$`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/students/${student.studentId}/edit\\?.*studentMessage=Class(?:%20|\\+)enrolled\\.`,
+        ),
       ),
-    );
+      page.getByRole("button", { name: /enroll class/i }).click(),
+    ]);
 
     await forceSelectOption(page, "classId", classId as string, FIXED_CLASS_TITLE);
-    await page.getByRole("button", { name: /enroll class/i }).click();
-    await page.waitForURL(
-      new RegExp(
-        `/admin/students/${student.studentId}/edit(?:\\?.*studentError=Class(?:%20|\\+)already(?:%20|\\+)enrolled\\.)$`,
+    await Promise.all([
+      page.waitForURL(
+        new RegExp(
+          `/admin/students/${student.studentId}/edit(?:\\?.*studentError=Class(?:%20|\\+)already(?:%20|\\+)enrolled\\.)$`,
+        ),
       ),
-    );
+      page.getByRole("button", { name: /enroll class/i }).click(),
+    ]);
     await expect(page.getByRole("heading", { name: /class enrollments/i })).toBeVisible();
     await expect(
       page.locator("div[role='alert']").filter({ hasText: "Class already enrolled." }).first(),

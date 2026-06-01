@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getEnquiryCaseByIdMock = vi.hoisted(() => vi.fn());
 const getContactLeadCaseByIdMock = vi.hoisted(() => vi.fn());
+const requireRoleMock = vi.hoisted(() => vi.fn());
 const routerPushMock = vi.hoisted(() => vi.fn());
 const routerReplaceMock = vi.hoisted(() => vi.fn());
 const SERVER_COMPONENT_TEST_TIMEOUT_MS = 15_000;
@@ -14,6 +15,10 @@ vi.mock("@/lib/repositories/enquiry-repository", () => ({
 
 vi.mock("@/lib/repositories/contact-lead-repository", () => ({
   getContactLeadCaseById: getContactLeadCaseByIdMock,
+}));
+
+vi.mock("@/lib/auth/session", () => ({
+  requireRole: requireRoleMock,
 }));
 
 vi.mock("next/navigation", () => ({
@@ -41,6 +46,7 @@ async function importFutureModule<T>(specifier: string): Promise<T> {
 describe("Admin CRM case detail pages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    requireRoleMock.mockResolvedValue({ uid: "admin-1", role: "ADMIN" });
   });
 
   afterEach(() => {
@@ -74,10 +80,14 @@ describe("Admin CRM case detail pages", () => {
       render(element);
 
       expect(getEnquiryCaseByIdMock).toHaveBeenCalledWith("enq-1");
+      expect(requireRoleMock).toHaveBeenCalledWith(["ADMIN"]);
       expect(screen.getByText(/alice student/i)).toBeDefined();
       expect(screen.getByText(/maria@example\.com/i)).toBeDefined();
       expect(screen.getByText(/\+100000000/i)).toBeDefined();
       expect(screen.getByText(/parent asked for a monday callback/i)).toBeDefined();
+      expect(
+        screen.getByRole("link", { name: /back to enrolment submissions/i }).getAttribute("href"),
+      ).toBe("/admin/submissions");
     },
     SERVER_COMPONENT_TEST_TIMEOUT_MS,
   );
@@ -99,9 +109,14 @@ describe("Admin CRM case detail pages", () => {
     render(element);
 
     expect(getContactLeadCaseByIdMock).toHaveBeenCalledWith("lead-1");
+    expect(requireRoleMock).toHaveBeenCalledWith(["ADMIN"]);
     expect(screen.getByText(/daniel guardian/i)).toBeDefined();
     expect(screen.getByText(/daniel@example\.com/i)).toBeDefined();
     expect(screen.getByText(/\+200000000/i)).toBeDefined();
+    expect(screen.getByText(/no admin notes yet/i)).toBeDefined();
+    expect(screen.getByRole("link", { name: /back to contact leads/i }).getAttribute("href")).toBe(
+      "/admin/leads",
+    );
   });
 
   it("enquiry detail page renders a not-found state for invalid IDs", async () => {
@@ -128,12 +143,20 @@ describe("Admin CRM case detail pages", () => {
     const { AdminCrmListControls } = await importFutureModule<{
       AdminCrmListControls: React.ComponentType<{
         basePath: string;
+        hasNextPage?: boolean;
         initialPage: number;
         initialQuery: string;
       }>;
     }>("@/components/admin/crm/AdminCrmListControls");
 
-    render(<AdminCrmListControls basePath="/admin/enquiries" initialPage={1} initialQuery="" />);
+    render(
+      <AdminCrmListControls
+        basePath="/admin/enquiries"
+        hasNextPage={true}
+        initialPage={1}
+        initialQuery=""
+      />,
+    );
 
     fireEvent.change(screen.getByRole("searchbox", { name: /search/i }), {
       target: { value: "biology parent" },

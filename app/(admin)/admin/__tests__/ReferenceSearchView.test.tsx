@@ -75,10 +75,14 @@ describe("Admin CRM reference search UI", () => {
       entityType: "enquiry",
       search: "MS-2026-0042",
       page: 1,
+      limit: expect.any(Number),
     });
     expect(screen.getByRole("searchbox", { name: /search/i })).toBeDefined();
     expect(screen.getByText(/ms-2026-0042/i)).toBeDefined();
     expect(screen.getByText(/alice student/i)).toBeDefined();
+    expect(screen.getByRole("link", { name: /open enquiry details/i }).getAttribute("href")).toBe(
+      "/admin/enquiries/enq-42",
+    );
     expect(screen.queryByText(/ms-2026-9999/i)).toBeNull();
   });
 
@@ -96,6 +100,7 @@ describe("Admin CRM reference search UI", () => {
       entityType: "lead",
       search: "MS-2026-9999",
       page: 1,
+      limit: expect.any(Number),
     });
     expect(screen.getByRole("searchbox", { name: /search/i })).toBeDefined();
     expect(screen.getByText(/no results found/i)).toBeDefined();
@@ -148,5 +153,71 @@ describe("Admin CRM reference search UI", () => {
     await waitFor(() => {
       expect(routerPushMock).toHaveBeenCalledWith("/admin/submissions?page=1&search=MS-2026-0042");
     });
+  });
+
+  it("renders previous and next CRM pagination controls only when pages are available", async () => {
+    getSubmissionsMock.mockResolvedValueOnce(
+      Array.from({ length: 21 }, (_, index) => ({
+        id: `enq-${index}`,
+        referenceId: `MS-2026-${String(index).padStart(4, "0")}`,
+        studentName: `Student ${index}`,
+      })),
+    );
+
+    const page = await loadSubmissionsPage();
+    const element = await page.default({
+      searchParams: Promise.resolve({ search: "MS-2026", page: "2" }),
+    });
+
+    render(element);
+
+    expect(getSubmissionsMock).toHaveBeenCalledWith({
+      entityType: "enquiry",
+      search: "MS-2026",
+      page: 2,
+      limit: expect.any(Number),
+    });
+    expect(screen.getByText(/ms-2026-0000/i)).toBeDefined();
+    expect(screen.queryByText(/ms-2026-0020/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /previous page/i }));
+    fireEvent.click(screen.getByRole("button", { name: /next page/i }));
+
+    await waitFor(() => {
+      expect(routerPushMock).toHaveBeenCalledWith("/admin/submissions?page=1&search=MS-2026");
+      expect(routerPushMock).toHaveBeenCalledWith("/admin/submissions?page=3&search=MS-2026");
+    });
+  });
+
+  it("falls back to the first CRM page when a filtered deep link points past available results", async () => {
+    getSubmissionsMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: "enq-42",
+        referenceId: "MS-2026-0042",
+        studentName: "Alice Student",
+      },
+    ]);
+
+    const page = await loadSubmissionsPage();
+    const element = await page.default({
+      searchParams: Promise.resolve({ search: "MS-2026-0042", page: "999" }),
+    });
+
+    render(element);
+
+    expect(getSubmissionsMock).toHaveBeenNthCalledWith(1, {
+      entityType: "enquiry",
+      search: "MS-2026-0042",
+      page: 999,
+      limit: expect.any(Number),
+    });
+    expect(getSubmissionsMock).toHaveBeenNthCalledWith(2, {
+      entityType: "enquiry",
+      search: "MS-2026-0042",
+      page: 1,
+      limit: expect.any(Number),
+    });
+    expect(screen.getByText(/ms-2026-0042/i)).toBeDefined();
+    expect(screen.queryByRole("button", { name: /previous page/i })).toBeNull();
   });
 });

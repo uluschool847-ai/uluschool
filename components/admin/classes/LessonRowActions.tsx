@@ -8,6 +8,7 @@ import {
   completeLessonAction,
   deleteLessonAction,
 } from "@/app/(admin)/admin/lessons/actions";
+import { ConfirmedSubmit } from "@/components/admin/ConfirmedSubmit";
 import { Button } from "@/components/ui/button";
 import { validateLiveLessonUrl } from "@/lib/lessons/live-lesson-url";
 
@@ -67,24 +68,30 @@ export function LessonRowActions({ lesson, showStatus = true }: LessonRowActions
         <Button type="button" variant="secondary" size="sm" onClick={() => setShowCancel(true)}>
           Cancel
         </Button>
-        <form action={deleteLessonAction as unknown as (formData: FormData) => void}>
-          <input type="hidden" name="id" value={lesson.id} />
-          <input type="hidden" name="classGroupId" value={lesson.classGroupId} />
-          <input type="hidden" name="flash" value="true" />
-          <input
-            type="hidden"
-            name="successRedirect"
-            value={`/admin/classes/${lesson.classGroupId}`}
-          />
-          <input
-            type="hidden"
-            name="errorRedirect"
-            value={`/admin/classes/${lesson.classGroupId}/lessons/${lesson.id}`}
-          />
-          <Button type="submit" variant="destructive" size="sm">
-            Delete
-          </Button>
-        </form>
+        <ConfirmedSubmit
+          title="Delete lesson"
+          description={`Delete ${lesson.title}? This will only succeed if no dependent lesson records block deletion.`}
+          confirmLabel="Confirm delete"
+        >
+          <form action={deleteLessonAction as unknown as (formData: FormData) => void}>
+            <input type="hidden" name="id" value={lesson.id} />
+            <input type="hidden" name="classGroupId" value={lesson.classGroupId} />
+            <input type="hidden" name="flash" value="true" />
+            <input
+              type="hidden"
+              name="successRedirect"
+              value={`/admin/classes/${lesson.classGroupId}`}
+            />
+            <input
+              type="hidden"
+              name="errorRedirect"
+              value={`/admin/classes/${lesson.classGroupId}/lessons/${lesson.id}`}
+            />
+            <Button type="submit" variant="destructive" size="sm">
+              Delete
+            </Button>
+          </form>
+        </ConfirmedSubmit>
         {canJoin ? (
           <Button asChild size="sm">
             <a href={safeLiveLessonUrl ?? ""} target="_blank" rel="noreferrer">
@@ -94,35 +101,44 @@ export function LessonRowActions({ lesson, showStatus = true }: LessonRowActions
         ) : null}
       </div>
       {showCancel ? (
-        <form
-          action={cancelLessonAction as unknown as (formData: FormData) => void}
-          className="flex flex-wrap items-end gap-2"
-        >
-          <input type="hidden" name="id" value={lesson.id} />
-          <input type="hidden" name="classGroupId" value={lesson.classGroupId} />
-          <input type="hidden" name="flash" value="true" />
-          <input
-            type="hidden"
-            name="successRedirect"
-            value={`/admin/classes/${lesson.classGroupId}`}
-          />
-          <input
-            type="hidden"
-            name="errorRedirect"
-            value={`/admin/classes/${lesson.classGroupId}/lessons/${lesson.id}`}
-          />
-          <label className="block space-y-1 text-sm font-medium">
-            <span>Cancel reason</span>
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+          <p className="text-sm font-medium text-amber-950">Cancel {lesson.title}</p>
+          <p className="text-xs text-amber-800">
+            Submit a reason only if this lesson should be cancelled for enrolled users.
+          </p>
+          <form
+            action={cancelLessonAction as unknown as (formData: FormData) => void}
+            className="mt-3 flex flex-wrap items-end gap-2"
+          >
+            <input type="hidden" name="id" value={lesson.id} />
+            <input type="hidden" name="classGroupId" value={lesson.classGroupId} />
+            <input type="hidden" name="flash" value="true" />
             <input
-              name="cancelReason"
-              required
-              className="h-11 rounded-md border border-input bg-background px-3"
+              type="hidden"
+              name="successRedirect"
+              value={`/admin/classes/${lesson.classGroupId}`}
             />
-          </label>
-          <Button type="submit" variant="destructive" size="sm">
-            Confirm Cancel
-          </Button>
-        </form>
+            <input
+              type="hidden"
+              name="errorRedirect"
+              value={`/admin/classes/${lesson.classGroupId}/lessons/${lesson.id}`}
+            />
+            <label className="block space-y-1 text-sm font-medium">
+              <span>Cancel reason</span>
+              <input
+                name="cancelReason"
+                required
+                className="h-11 rounded-md border border-input bg-background px-3"
+              />
+            </label>
+            <Button type="submit" variant="destructive" size="sm">
+              Confirm Cancel
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setShowCancel(false)}>
+              Keep Lesson
+            </Button>
+          </form>
+        </div>
       ) : null}
     </div>
   );

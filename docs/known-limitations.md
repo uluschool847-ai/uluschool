@@ -29,6 +29,15 @@
 - The upload route enforces a simple role gate (`DEVELOPER` or `TEACHER` request role).
 - There is no S3/GCS/Azure storage integration in the current local stack.
 
+## Admin Materials / Files
+- There is intentionally no standalone `/admin/materials` or `/admin/files` workspace.
+- Course materials are teacher-owned and managed through `/portal/teacher/materials`, where teacher
+  ownership is enforced through the course material repository.
+- Students and parents consume materials through their own portal read-only material views.
+- Admin users can manage the surrounding academic objects such as teachers, students, parents,
+  classes, class groups, and lessons, but they do not have a separate global file library in this
+  implementation.
+
 ## SMS / WhatsApp Notifications
 - WhatsApp reminders are only attempted when `WHATSAPP_WEBHOOK_URL` is configured.
 - If that variable is empty, reminder processing records WhatsApp deliveries as skipped.
@@ -38,7 +47,7 @@
 - Turnstile is optional locally. If `TURNSTILE_SECRET_KEY` is empty and `TURNSTILE_ENFORCE=false`, CAPTCHA checks are bypassed.
 - Sentry is optional. Empty DSNs leave monitoring effectively disabled.
 - Admin SSO is optional and disabled by default.
-- In local development with `ADMIN_REQUIRE_2FA=true`, admin login uses a controlled dev bypass and redirects to `/admin/security?setup2fa=required` rather than enforcing a production-style second factor challenge.
+- In local development with `ADMIN_REQUIRE_2FA=true`, admin login uses a controlled dev bypass and redirects to `/admin/security?setup2fa=required` rather than enforcing a production-style second factor challenge. The security page labels this as required setup. For demos where setup should be optional, set `ADMIN_REQUIRE_2FA=false` and restart the dev server.
 
 ## Seed Coverage
 - The seed script does **not** create `PageContent` records, public `Teacher` marketing profiles, or `Testimonial` records.

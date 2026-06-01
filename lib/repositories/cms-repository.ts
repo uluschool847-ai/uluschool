@@ -206,6 +206,7 @@ export async function createFaqItem(
     question: string;
     answer: string;
     displayOrder: number;
+    status?: string;
   },
   database: CmsDatabase = prisma,
 ) {
@@ -216,7 +217,13 @@ export async function createFaqItem(
 
 export async function updateFaqItem(
   id: string,
-  data: { category?: string; question?: string; answer?: string; displayOrder?: number },
+  data: {
+    category?: string;
+    question?: string;
+    answer?: string;
+    displayOrder?: number;
+    status?: string;
+  },
   database: CmsDatabase = prisma,
 ) {
   return database.faqItem.update({

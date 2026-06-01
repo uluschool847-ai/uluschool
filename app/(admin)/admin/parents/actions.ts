@@ -37,6 +37,8 @@ const studentLinkSchema = z.object({
   studentId: z.string().min(1, "Student id is required."),
 });
 
+const PARENT_TRANSACTION_OPTIONS = { timeout: 20_000 };
+
 function isRedirectError(error: unknown) {
   return (
     typeof error === "object" &&
@@ -198,7 +200,7 @@ export async function createParentAction(
         },
         tx,
       );
-    });
+    }, PARENT_TRANSACTION_OPTIONS);
     revalidatePath("/admin/parents");
   } catch (error) {
     const message = buildFailureMessage(error, "Failed to create parent account.");
@@ -292,7 +294,7 @@ export async function updateParentAction(
         },
         tx,
       );
-    });
+    }, PARENT_TRANSACTION_OPTIONS);
     revalidateParentPaths(parsed.data.id);
   } catch (error) {
     const message = buildFailureMessage(error, "Failed to update parent account.");
@@ -367,7 +369,7 @@ export async function toggleParentStatusAction(
         },
         tx,
       );
-    });
+    }, PARENT_TRANSACTION_OPTIONS);
     revalidateParentPaths(id);
   } catch (error) {
     if (isRedirectError(error)) throw error;
@@ -460,7 +462,7 @@ export async function linkParentStudentAction(
         },
         tx,
       );
-    });
+    }, PARENT_TRANSACTION_OPTIONS);
     revalidateParentPaths(parsed.data.parentId);
     revalidatePath("/admin/students");
   } catch (error) {
@@ -555,7 +557,7 @@ export async function unlinkParentStudentAction(
         },
         tx,
       );
-    });
+    }, PARENT_TRANSACTION_OPTIONS);
     revalidateParentPaths(parsed.data.parentId);
     revalidatePath("/admin/students");
   } catch (error) {

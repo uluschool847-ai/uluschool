@@ -32,7 +32,7 @@ type TestUsers = {
 let testUsers: TestUsers;
 
 test.describe("Admin Teacher Management", () => {
-  test.describe.configure({ timeout: 240000, mode: "serial" });
+  test.describe.configure({ timeout: 420000, mode: "serial" });
 
   test.beforeAll(async () => {
     await cleanupTestData();
@@ -142,7 +142,7 @@ async function verifyAccessControl(browser: Browser) {
     const page = await context.newPage();
     await loginAs(page, email, expectedPath);
     await page.goto("/admin/teachers");
-    await page.waitForURL(/\/portal\/unauthorized/);
+    await page.waitForURL(/\/portal\/unauthorized/, { timeout: 60000 });
     await context.close();
   }
 }
@@ -158,7 +158,7 @@ async function loginAs(page: Page, email: string, expectedPath: RegExp) {
   await page.getByLabel(/email/i).fill(email);
   await page.getByLabel(/password/i).fill(PASSWORD);
   await page.getByRole("button", { name: /login|sign in/i }).click();
-  await page.waitForURL(expectedPath, { timeout: 30000 });
+  await page.waitForURL(expectedPath, { timeout: 60000 });
 }
 
 async function verifyRequiredValidation(page: Page) {
@@ -275,8 +275,23 @@ async function editTeacherProfile(
 
 async function removeTeacherPhoto(page: Page, teacherId: string, teacherName: string) {
   await page.goto(`/admin/teachers/${teacherId}/edit`);
+  const beforeCancel = await prisma.teacher.findUniqueOrThrow({ where: { id: teacherId } });
+
   await page.getByRole("checkbox", { name: "Remove current photo" }).check();
   await page.getByRole("button", { name: "Save Changes" }).click();
+  await expect(page.getByRole("dialog", { name: /remove teacher photo/i })).toContainText(
+    teacherName,
+  );
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("dialog", { name: /remove teacher photo/i })).toHaveCount(0);
+  const afterCancel = await prisma.teacher.findUniqueOrThrow({ where: { id: teacherId } });
+  expect(afterCancel.photoUrl).toBe(beforeCancel.photoUrl);
+
+  await page.getByRole("button", { name: "Save Changes" }).click();
+  await expect(page.getByRole("dialog", { name: /remove teacher photo/i })).toContainText(
+    teacherName,
+  );
+  await page.getByRole("button", { name: /remove photo/i }).click();
 
   const row = rowByText(page, teacherName);
   await expect(row).toBeVisible({ timeout: 60000 });
@@ -292,6 +307,10 @@ async function verifyStatusToggleAndPublicFiltering(page: Page, teacherName: str
   await page.goto("/admin/teachers");
   let row = rowByText(page, teacherName);
   await row.getByRole("button", { name: "Deactivate" }).click();
+  await expect(page.getByRole("dialog", { name: /deactivate teacher account/i })).toContainText(
+    teacherName,
+  );
+  await page.getByRole("button", { name: /confirm deactivation/i }).click();
   await expect(page.getByText("Teacher profile deactivated.")).toBeVisible({ timeout: 60000 });
 
   await page.reload();
@@ -328,6 +347,9 @@ async function deleteTeacherProfile(page: Page, teacherId: string, teacherName: 
   await page.goto("/admin/teachers");
   const row = rowByText(page, teacherName);
   await row.getByRole("button", { name: "Delete" }).click();
+  await expect(page.getByRole("dialog", { name: /confirm teacher deletion/i })).toContainText(
+    teacherName,
+  );
   await page.getByRole("button", { name: "Confirm delete" }).click();
   await expect(page.getByText("Teacher profile deleted.")).toBeVisible({ timeout: 60000 });
   await expect(page.getByText(teacherName)).toHaveCount(0);

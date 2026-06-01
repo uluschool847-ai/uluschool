@@ -249,7 +249,7 @@ function normalizeIdForm(formData: FormData) {
 
 function normalizeMeetingLinkForm(formData: FormData) {
   return {
-    lessonId: formData.get("lessonId")?.toString() ?? formData.get("id")?.toString() ?? "",
+    lessonId: formData.get("lessonId")?.toString() ?? "",
     classGroupId: formData.get("classGroupId")?.toString() ?? "",
     meetingProvider: formData.get("meetingProvider")?.toString() ?? "",
     liveLessonUrl: formData.get("liveLessonUrl")?.toString() ?? "",
@@ -348,6 +348,7 @@ function revalidateLessonPaths(classGroupId?: string | null, lessonId?: string |
 }
 
 type LessonAuditSource = {
+  id?: unknown;
   classGroupId?: unknown;
   teacherId?: unknown;
   status?: unknown;
@@ -381,6 +382,15 @@ function googleMeetAuditMeta(lesson: LessonAuditSource) {
     meetingProvider: lesson.meetingProvider ?? MeetingProvider.GOOGLE_MEET,
     meetingUpdatedAt: lesson.meetingUpdatedAt ?? null,
   };
+}
+
+function auditField(source: unknown, field: string) {
+  if (typeof source !== "object" || source === null || !(field in source)) return null;
+  return (source as Record<string, unknown>)[field];
+}
+
+function auditString(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 type LessonMeetingUpdate = {
@@ -517,6 +527,43 @@ async function writeLessonAudit(
   await createAdminAuditLog(payload, tx);
 }
 
+async function writeClassGroupLessonAudit(
+  input: {
+    adminUserId: string;
+    action:
+      | "CLASS_GROUP_LESSON_CREATED"
+      | "CLASS_GROUP_LESSON_UPDATED"
+      | "CLASS_GROUP_LESSON_DELETED";
+    classGroupId: unknown;
+    lessonId: unknown;
+    before: unknown;
+    after: unknown;
+    meta?: Record<string, unknown>;
+  },
+  tx: Parameters<typeof createAdminAuditLog>[1],
+) {
+  const classGroupId = auditString(input.classGroupId);
+  if (!classGroupId) return;
+
+  await createAdminAuditLog(
+    {
+      adminUserId: input.adminUserId,
+      action: input.action,
+      targetType: "class_group",
+      targetId: classGroupId,
+      before: input.before,
+      after: input.after,
+      meta: {
+        actorRole: UserRole.ADMIN,
+        ...input.meta,
+        classGroupId,
+        lessonId: auditString(input.lessonId) ?? input.lessonId ?? null,
+      },
+    },
+    tx,
+  );
+}
+
 async function resolveAvailabilityTeacherId(
   input: { teacherId?: string | null; classGroupId: string },
   tx: typeof prisma | Parameters<typeof checkTeacherAvailability>[1],
@@ -612,6 +659,18 @@ export async function createLessonAction(formData: FormData): Promise<LessonActi
         },
         tx,
       );
+      await writeClassGroupLessonAudit(
+        {
+          adminUserId: session.uid,
+          action: "CLASS_GROUP_LESSON_CREATED",
+          classGroupId: auditField(finalLesson, "classGroupId") ?? lessonInput.classGroupId,
+          lessonId: auditField(finalLesson, "id") ?? finalLesson.id,
+          before: null,
+          after: finalLesson,
+          meta: lessonAuditMeta(finalLesson),
+        },
+        tx,
+      );
       return finalLesson;
     }, LESSON_TRANSACTION_OPTIONS);
 
@@ -689,6 +748,18 @@ export async function updateLessonAction(formData: FormData): Promise<LessonActi
           adminUserId: session.uid,
           action: shouldReschedule ? "LESSON_RESCHEDULED" : "LESSON_UPDATED",
           targetId: lessonInput.id,
+          before: result.before,
+          after: result.after,
+          meta: lessonAuditMeta(result.after),
+        },
+        tx,
+      );
+      await writeClassGroupLessonAudit(
+        {
+          adminUserId: session.uid,
+          action: "CLASS_GROUP_LESSON_UPDATED",
+          classGroupId: auditField(result.after, "classGroupId") ?? lessonInput.classGroupId,
+          lessonId: auditField(result.after, "id") ?? lessonInput.id,
           before: result.before,
           after: result.after,
           meta: lessonAuditMeta(result.after),
@@ -792,6 +863,18 @@ export async function rescheduleLessonAction(formData: FormData): Promise<Lesson
           adminUserId: session.uid,
           action: "LESSON_RESCHEDULED",
           targetId: lessonInput.id,
+          before: result.before,
+          after: result.after,
+          meta: lessonAuditMeta(result.after),
+        },
+        tx,
+      );
+      await writeClassGroupLessonAudit(
+        {
+          adminUserId: session.uid,
+          action: "CLASS_GROUP_LESSON_UPDATED",
+          classGroupId: auditField(result.after, "classGroupId") ?? lessonInput.classGroupId,
+          lessonId: auditField(result.after, "id") ?? lessonInput.id,
           before: result.before,
           after: result.after,
           meta: lessonAuditMeta(result.after),
@@ -1031,6 +1114,28 @@ export async function deleteLessonAction(formData: FormData): Promise<LessonActi
               startAt: null,
               endAt: null,
             },
+          ),
+        },
+        tx,
+      );
+      const classGroupAuditSource = before ?? removed;
+      await writeClassGroupLessonAudit(
+        {
+          adminUserId: session.uid,
+          action: "CLASS_GROUP_LESSON_DELETED",
+          classGroupId:
+            auditField(classGroupAuditSource, "classGroupId") ?? parsed.data.classGroupId,
+          lessonId: auditField(classGroupAuditSource, "id") ?? parsed.data.id,
+          before: before ?? removed,
+          after: { deleted: true },
+          meta: lessonAuditMeta(
+            (classGroupAuditSource ?? {
+              classGroupId: parsed.data.classGroupId,
+              teacherId: null,
+              status: LessonStatus.SCHEDULED,
+              startAt: null,
+              endAt: null,
+            }) as LessonAuditSource,
           ),
         },
         tx,

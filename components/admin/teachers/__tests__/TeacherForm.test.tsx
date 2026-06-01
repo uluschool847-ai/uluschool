@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createTeacherActionMock = vi.hoisted(() => vi.fn());
@@ -112,6 +112,37 @@ describe("TeacherForm admin controls", () => {
     expect(findSubjectsControl()).toBeTruthy();
     expect(findCabinetControl()).toBeTruthy();
     expect(screen.getByRole("button", { name: /save changes/i })).toBeDefined();
+  });
+
+  it("confirms current photo removal with the teacher name before saving", () => {
+    render(
+      <TeacherForm
+        subjects={subjectOptions}
+        mode="edit"
+        teacher={
+          {
+            id: "teacher-1",
+            fullName: "Jane Doe",
+            title: "STEM Specialist",
+            bio: "Cambridge mathematics specialist with a complete public profile.",
+            photoUrl: "/uploads/jane.webp",
+            displayOrder: 1,
+            isActive: true,
+            cabinetUserId: "teacher-123",
+            subjects: subjectOptions,
+            updatedAt: new Date("2026-05-05T10:00:00.000Z"),
+          } as TeacherFormRecord
+        }
+        successRedirect="/admin/teachers"
+        errorRedirect="/admin/teachers/teacher-1/edit"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /remove current photo/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    const dialog = screen.getByRole("dialog", { name: /remove teacher photo/i });
+    expect(within(dialog).getByText(/jane doe/i)).toBeDefined();
   });
 
   it("shows flash success and error feedback visibly", () => {

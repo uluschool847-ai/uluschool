@@ -21,6 +21,7 @@ export function StatusUpdateForm({
   currentStatus,
   statuses,
 }: StatusUpdateFormProps) {
+  const [savedStatus, setSavedStatus] = useState(currentStatus);
   const [status, setStatus] = useState(currentStatus);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -40,6 +41,7 @@ export function StatusUpdateForm({
         "Something went wrong",
       );
       if (result.success) {
+        setSavedStatus(status);
         setMessage(result.message || "Status updated");
       } else {
         setError(result.message);
@@ -49,6 +51,12 @@ export function StatusUpdateForm({
     } finally {
       setIsSaving(false);
     }
+  }
+
+  function handleCancel() {
+    setStatus(savedStatus);
+    setMessage("");
+    setError("");
   }
 
   return (
@@ -75,6 +83,14 @@ export function StatusUpdateForm({
           className="min-h-10 rounded-md bg-slate-900 px-4 text-sm font-semibold text-white disabled:opacity-60"
         >
           Save
+        </button>
+        <button
+          type="button"
+          disabled={isSaving || status === savedStatus}
+          onClick={handleCancel}
+          className="min-h-10 rounded-md border border-slate-300 px-4 text-sm font-semibold text-slate-900 disabled:opacity-50"
+        >
+          Cancel
         </button>
       </div>
       {isSaving ? <p className="text-sm text-slate-600">Saving...</p> : null}

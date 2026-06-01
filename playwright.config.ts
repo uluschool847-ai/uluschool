@@ -1,7 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
-const isCi = (process.env.CI ?? "") !== "";
+const reuseExistingServer = /^(1|true|yes)$/i.test(
+  process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER ?? "",
+);
 
 export default defineConfig({
   testDir: "./e2e",
@@ -26,7 +28,7 @@ export default defineConfig({
   webServer: {
     command: "npm run dev",
     url: baseURL,
-    reuseExistingServer: !isCi,
+    reuseExistingServer,
     timeout: 120000,
     stdout: "pipe",
     stderr: "pipe",

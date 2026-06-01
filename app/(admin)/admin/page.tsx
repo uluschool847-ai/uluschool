@@ -2,8 +2,8 @@ import { UserRole } from "@prisma/client";
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { runReminderDispatchAction } from "@/app/(admin)/admin/actions";
 import { AdminCrmListControls } from "@/components/admin/crm/AdminCrmListControls";
+import { ReminderDispatchControls } from "@/components/admin/reminders/ReminderDispatchControls";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { enquiryStatuses, getStatusLabel, parseStatus } from "@/lib/admin/enquiry-status";
@@ -225,17 +225,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 Production cron should call <code>/api/reminders/send-due</code>. You can also run
                 it manually from here.
               </p>
-              <form action={runReminderDispatchAction}>
-                <Button type="submit" size="sm">
-                  Run Reminder Job Now
-                </Button>
-              </form>
-              <form action={runReminderDispatchAction} className="mt-2">
-                <input type="hidden" name="dryRun" value="true" />
-                <Button type="submit" size="sm" variant="secondary">
-                  Dry Run Reminder Job
-                </Button>
-              </form>
+              <ReminderDispatchControls />
               <Button asChild className="mt-2" size="sm" variant="secondary">
                 <Link href="/admin/reminders">View Reminder Logs</Link>
               </Button>

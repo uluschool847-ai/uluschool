@@ -132,7 +132,56 @@ describe("Admin parent registry page", () => {
       searchQuery: "mary",
       isActive: false,
       studentLinked: true,
+      sort: undefined,
     });
+  });
+
+  it("preserves search, filters, and sort params across pagination links", async () => {
+    getAdminParentsMock.mockResolvedValueOnce({
+      items: [
+        {
+          id: "parent-1",
+          fullName: "Mary Parent",
+          email: "mary.parent@example.com",
+          phoneWhatsapp: null,
+          isActive: false,
+          children: [],
+          createdAt: new Date("2026-05-01T10:00:00.000Z"),
+          updatedAt: new Date("2026-05-04T10:00:00.000Z"),
+        },
+      ],
+      totalCount: 45,
+      totalPages: 3,
+    });
+
+    const page = await loadParentsAdminPage();
+    const element = await page.default({
+      searchParams: {
+        q: "mary",
+        page: "2",
+        isActive: "false",
+        studentLinked: "true",
+        sort: "createdAtAsc",
+      },
+    });
+
+    render(element);
+
+    expect(getAdminParentsMock).toHaveBeenCalledWith({
+      page: 2,
+      limit: expect.any(Number),
+      searchQuery: "mary",
+      isActive: false,
+      studentLinked: true,
+      sort: "createdAtAsc",
+    });
+    expect(screen.getByLabelText(/sort/i)).toHaveProperty("value", "createdAtAsc");
+    expect(screen.getByRole("link", { name: /previous/i }).getAttribute("href")).toBe(
+      "/admin/parents?q=mary&isActive=false&studentLinked=true&sort=createdAtAsc&page=1",
+    );
+    expect(screen.getByRole("link", { name: /^next$/i }).getAttribute("href")).toBe(
+      "/admin/parents?q=mary&isActive=false&studentLinked=true&sort=createdAtAsc&page=3",
+    );
   });
 
   it("renders an empty state when no parent accounts exist", async () => {

@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const prismaMock = vi.hoisted(() => ({
-  appUser: { findFirst: vi.fn() },
+  academicTerm: { findMany: vi.fn() },
+  appUser: { findFirst: vi.fn(), findMany: vi.fn() },
+  classGroup: { findMany: vi.fn() },
   reportSnapshot: {
     create: vi.fn(),
     findFirst: vi.fn(),
@@ -38,6 +40,7 @@ vi.mock("@/lib/storage", () => ({
 
 type ReportRepositoryModule = {
   buildReportPreview: (teacherId: string, studentId: string, termId: string) => Promise<unknown>;
+  getTeacherReportOptions: (teacherId: string) => Promise<unknown>;
   saveReportSnapshot: (teacherId: string, input: Record<string, unknown>) => Promise<unknown>;
   listReportSnapshotsForStudent: (
     studentId: string,
@@ -119,6 +122,25 @@ describe("report-repository contract", () => {
       fullName: "Amina Yusuf",
       email: "amina@example.com",
     });
+    prismaMock.appUser.findMany.mockResolvedValue([
+      { id: "student-1", fullName: "Amina Yusuf", email: "amina@example.com" },
+    ]);
+    prismaMock.academicTerm.findMany.mockResolvedValue([
+      {
+        id: "term-1",
+        name: "Spring 2026",
+        startDate: new Date("2026-01-01T00:00:00.000Z"),
+        endDate: new Date("2026-06-30T23:59:59.999Z"),
+      },
+    ]);
+    prismaMock.classGroup.findMany.mockResolvedValue([
+      {
+        id: "group-1",
+        name: "Algebra Group A",
+        subject: { name: "Mathematics" },
+        students: [{ id: "student-1", fullName: "Amina Yusuf", email: "amina@example.com" }],
+      },
+    ]);
     prismaMock.reportSnapshot.create.mockResolvedValue(snapshot());
     prismaMock.reportSnapshot.findFirst.mockResolvedValue(snapshot());
     prismaMock.reportSnapshot.update.mockResolvedValue(
@@ -151,6 +173,7 @@ describe("report-repository contract", () => {
     expect(repository).toEqual(
       expect.objectContaining({
         buildReportPreview: expect.any(Function),
+        getTeacherReportOptions: expect.any(Function),
         saveReportSnapshot: expect.any(Function),
         listReportSnapshotsForStudent: expect.any(Function),
         getReportSnapshotForTeacher: expect.any(Function),
@@ -233,6 +256,28 @@ describe("report-repository contract", () => {
           studentId: "student-1",
           teacherComment: "Keep practicing",
         }),
+      }),
+    );
+  });
+
+  it("scopes report preview options through direct lessons and class group enrollments", async () => {
+    const { getTeacherReportOptions } = await loadReportRepository();
+
+    const options = await getTeacherReportOptions("teacher-1");
+
+    expect(prismaMock.appUser.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          OR: [
+            { enrolledClasses: { some: { teacherId: "teacher-1" } } },
+            { enrolledClassGroups: { some: { teacherId: "teacher-1" } } },
+          ],
+        },
+      }),
+    );
+    expect(options).toEqual(
+      expect.objectContaining({
+        students: [expect.objectContaining({ id: "student-1" })],
       }),
     );
   });

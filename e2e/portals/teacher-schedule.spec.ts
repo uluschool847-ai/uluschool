@@ -234,8 +234,14 @@ test.describe("Teacher schedule portal", () => {
     await expect(page.getByText("Teacher schedule homework")).toBeVisible();
     await expect(page.getByText(/pending submissions:\s*1|1 pending/i).first()).toBeVisible();
     await expect(page.getByRole("heading", { name: /progress notes/i })).toBeVisible();
-    await expect(page.getByText(/teacher progress route is not implemented/i)).toBeVisible();
-    await expect(page.getByRole("link", { name: /progress notes/i })).toHaveCount(0);
+    await expect(
+      page.getByText(/no current progress notes for this lesson roster yet/i),
+    ).toBeVisible();
+    await expect(page.getByText(/teacher progress route is not implemented/i)).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /open progress/i }).first()).toHaveAttribute(
+      "href",
+      new RegExp(`/portal/teacher/progress\\?subjectId=${fixture.subjectId}`),
+    );
 
     await page.goto(`${BASE_URL}/portal/teacher/lessons/${fixture.cancelledLessonId}`);
     await expect(page.getByText(/teacher unavailable/i)).toBeVisible();
@@ -254,8 +260,10 @@ test.describe("Teacher schedule portal", () => {
 async function createFixtures(): Promise<TeacherScheduleFixture> {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const now = new Date();
-  const rangeStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0));
-  const rangeEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59));
+  const rangeStart = addMinutes(now, -24 * 60);
+  rangeStart.setUTCHours(0, 0, 0, 0);
+  const rangeEnd = addMinutes(now, 2 * 24 * 60);
+  rangeEnd.setUTCHours(23, 59, 59, 999);
   const teacherAName = `QA Teacher Schedule A ${suffix}`;
   const teacherBName = `QA Teacher Schedule B ${suffix}`;
   const activeStudentName = `QA Teacher Schedule Active Student ${suffix}`;

@@ -1,8 +1,11 @@
+import { UserRole } from "@prisma/client";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { NoteAddForm } from "@/components/admin/crm/NoteAddForm";
 import { StatusUpdateForm } from "@/components/admin/crm/StatusUpdateForm";
 import { Timeline } from "@/components/admin/crm/Timeline";
+import { requireRole } from "@/lib/auth/session";
 import { getContactLeadCaseById } from "@/lib/repositories/contact-lead-repository";
 
 type PageProps = {
@@ -42,6 +45,7 @@ function AdminNotes({ notes }: { notes: AdminNote[] }) {
 }
 
 export default async function LeadCasePage({ params }: PageProps) {
+  await requireRole([UserRole.ADMIN]);
   const resolvedParams = await params;
   const lead = await getContactLeadCaseById(resolvedParams.id);
 
@@ -51,6 +55,12 @@ export default async function LeadCasePage({ params }: PageProps) {
 
   return (
     <main className="space-y-8">
+      <Link
+        href="/admin/leads"
+        className="inline-flex text-sm font-medium text-slate-700 underline-offset-4 hover:underline"
+      >
+        Back to contact leads
+      </Link>
       <section className="rounded-lg border border-slate-200 bg-white p-6">
         <p className="text-sm font-semibold uppercase text-slate-500">Contact lead</p>
         <h1 className="mt-2 text-3xl font-bold text-slate-950">{lead.fullName}</h1>

@@ -92,7 +92,7 @@ async function cleanupQaCmsData() {
 }
 
 test.describe("Admin CMS management", () => {
-  test.describe.configure({ timeout: 180000, mode: "serial" });
+  test.describe.configure({ timeout: 420000, mode: "serial" });
 
   test.beforeAll(async () => {
     await cleanupQaCmsData();
@@ -253,11 +253,14 @@ async function verifyPageWorkflow(page: Page) {
   );
   await page.locator("#isPublished").uncheck();
   await page.getByRole("button", { name: /create page/i }).click();
-  await page.waitForURL(/\/admin\/cms\/pages$/);
+  await page.waitForURL(/\/admin\/cms\/pages(?:\?.*)?$/);
+  await expect(page.getByText(/page created/i)).toBeVisible();
   await expect(page.getByText(title)).toBeVisible();
 
   await page.goto(`/pages/${PAGE_SLUG}`);
   await expect(page.getByText(/404|not found/i)).toBeVisible();
+  await page.goto("/pages");
+  await expect(page.getByText(title)).toHaveCount(0);
 
   await page.goto("/admin/cms/pages/new");
   await page.locator("#title").fill(`${title} Duplicate`);
@@ -278,18 +281,46 @@ async function verifyPageWorkflow(page: Page) {
   );
   await page.locator("#isPublished").check();
   await page.getByRole("button", { name: /save changes/i }).click();
-  await page.waitForURL(/\/admin\/cms\/pages$/);
+  await page.waitForURL(/\/admin\/cms\/pages(?:\?.*)?$/);
+  await expect(page.getByText(/page updated/i)).toBeVisible();
   await expect(page.getByText(editedTitle)).toBeVisible();
 
+  await page.goto("/pages");
+  const publicPageCard = page.locator(".rounded-xl").filter({ hasText: editedTitle }).first();
+  await expect(page.getByRole("heading", { name: editedTitle })).toBeVisible();
+  await expect(publicPageCard.getByRole("link", { name: /open page/i })).toHaveAttribute(
+    "href",
+    `/pages/${PAGE_SLUG_EDITED}`,
+  );
   await page.goto(`/pages/${PAGE_SLUG_EDITED}`);
   await expect(page.getByRole("heading", { name: editedTitle })).toBeVisible();
   await expect(page.getByText("QA CMS edited public paragraph")).toBeVisible();
+
+  await page.goto(`/admin/cms/pages/${createdPage.id}`);
+  await page.locator("#isPublished").uncheck();
+  await page.getByRole("button", { name: /save changes/i }).click();
+  await page.waitForURL(/\/admin\/cms\/pages(?:\?.*)?$/);
+  await expect(page.getByText(/page updated/i)).toBeVisible();
+  await expect(page.locator("tr", { hasText: editedTitle })).toContainText("Draft");
+  await page.goto(`/pages/${PAGE_SLUG_EDITED}`);
+  await expect(page.getByText(/404|not found/i)).toBeVisible();
+  await page.goto("/pages");
+  await expect(page.getByText(editedTitle)).toHaveCount(0);
+
+  await page.goto(`/admin/cms/pages/${createdPage.id}`);
+  await page.locator("#isPublished").check();
+  await page.getByRole("button", { name: /save changes/i }).click();
+  await page.waitForURL(/\/admin\/cms\/pages(?:\?.*)?$/);
+  await expect(page.locator("tr", { hasText: editedTitle })).toContainText("Published");
 
   await page.goto("/admin/cms/pages");
   await page
     .locator("tr", { hasText: editedTitle })
     .getByRole("button", { name: /delete/i })
     .click();
+  await expect(page.getByRole("dialog", { name: /delete cms page/i })).toContainText(editedTitle);
+  await page.getByRole("button", { name: /confirm delete/i }).click();
+  await expect(page.getByText(/page deleted/i)).toBeVisible();
   await expect(page.getByText(editedTitle)).toHaveCount(0);
   await expect(
     prisma.pageContent.findUnique({ where: { id: createdPage.id } }),
@@ -297,6 +328,8 @@ async function verifyPageWorkflow(page: Page) {
 
   await page.goto(`/pages/${PAGE_SLUG_EDITED}`);
   await expect(page.getByText(/404|not found/i)).toBeVisible();
+  await page.goto("/pages");
+  await expect(page.getByText(editedTitle)).toHaveCount(0);
 }
 
 async function verifyBlogWorkflow(page: Page) {
@@ -320,7 +353,8 @@ async function verifyBlogWorkflow(page: Page) {
   await page.locator("#content").fill("QA CMS draft blog content");
   await page.locator("#isPublished").uncheck();
   await page.getByRole("button", { name: /create post/i }).click();
-  await page.waitForURL(/\/admin\/cms\/blog$/);
+  await page.waitForURL(/\/admin\/cms\/blog(?:\?.*)?$/);
+  await expect(page.getByText(/blog post created/i)).toBeVisible();
   await expect(page.getByText(title)).toBeVisible();
 
   const draftPost = await prisma.blogPost.findUniqueOrThrow({ where: { slug: BLOG_SLUG } });
@@ -330,6 +364,8 @@ async function verifyBlogWorkflow(page: Page) {
 
   await page.goto(`/blog/${BLOG_SLUG}`);
   await expect(page.getByText(/404|not found/i)).toBeVisible();
+  await page.goto("/blog");
+  await expect(page.getByText(title)).toHaveCount(0);
 
   await page.goto("/admin/cms/blog/new");
   await page.locator("#title").fill(`${title} Duplicate`);
@@ -344,26 +380,54 @@ async function verifyBlogWorkflow(page: Page) {
   await page.locator("#content").fill("QA CMS edited published blog content");
   await page.locator("#isPublished").check();
   await page.getByRole("button", { name: /save changes/i }).click();
-  await page.waitForURL(/\/admin\/cms\/blog$/);
+  await page.waitForURL(/\/admin\/cms\/blog(?:\?.*)?$/);
+  await expect(page.getByText(/blog post updated/i)).toBeVisible();
   await expect(page.getByText(editedTitle)).toBeVisible();
 
   const publishedPost = await prisma.blogPost.findUniqueOrThrow({ where: { id: draftPost.id } });
   expect(publishedPost.publishedAt).toBeTruthy();
 
+  await page.goto("/blog");
+  await expect(page.getByRole("link", { name: editedTitle })).toHaveAttribute(
+    "href",
+    `/blog/${BLOG_SLUG_EDITED}`,
+  );
   await page.goto(`/blog/${BLOG_SLUG_EDITED}`);
   await expect(page.getByRole("heading", { name: editedTitle })).toBeVisible();
   await expect(page.getByText("QA CMS edited published blog content")).toBeVisible();
+
+  await page.goto(`/admin/cms/blog/${draftPost.id}`);
+  await page.locator("#isPublished").uncheck();
+  await page.getByRole("button", { name: /save changes/i }).click();
+  await page.waitForURL(/\/admin\/cms\/blog(?:\?.*)?$/);
+  await expect(page.getByText(/blog post updated/i)).toBeVisible();
+  await expect(page.locator("tr", { hasText: editedTitle })).toContainText("Draft");
+  await page.goto(`/blog/${BLOG_SLUG_EDITED}`);
+  await expect(page.getByText(/404|not found/i)).toBeVisible();
+  await page.goto("/blog");
+  await expect(page.getByText(editedTitle)).toHaveCount(0);
+
+  await page.goto(`/admin/cms/blog/${draftPost.id}`);
+  await page.locator("#isPublished").check();
+  await page.getByRole("button", { name: /save changes/i }).click();
+  await page.waitForURL(/\/admin\/cms\/blog(?:\?.*)?$/);
+  await expect(page.locator("tr", { hasText: editedTitle })).toContainText("Published");
 
   await page.goto("/admin/cms/blog");
   await page
     .locator("tr", { hasText: editedTitle })
     .getByRole("button", { name: /delete/i })
     .click();
+  await expect(page.getByRole("dialog", { name: /delete blog post/i })).toContainText(editedTitle);
+  await page.getByRole("button", { name: /confirm delete/i }).click();
+  await expect(page.getByText(/blog post deleted/i)).toBeVisible();
   await expect(page.getByText(editedTitle)).toHaveCount(0);
   await expect(prisma.blogPost.findUnique({ where: { id: draftPost.id } })).resolves.toBeNull();
 
   await page.goto(`/blog/${BLOG_SLUG_EDITED}`);
   await expect(page.getByText(/404|not found/i)).toBeVisible();
+  await page.goto("/blog");
+  await expect(page.getByText(editedTitle)).toHaveCount(0);
 }
 
 async function verifyFaqWorkflow(page: Page) {
@@ -385,7 +449,9 @@ async function verifyFaqWorkflow(page: Page) {
   await expect(page.getByText(/valid values/i)).toBeVisible();
 
   await createFaqItemThroughUi(page, firstQuestion, "QA CMS first answer", 2);
+  await expect(page.getByText(/faq item created/i)).toBeVisible();
   await createFaqItemThroughUi(page, secondQuestion, "QA CMS second answer", 1);
+  await expect(page.getByText(/faq item created/i)).toBeVisible();
 
   await page.goto("/admin/cms/faq");
   await expect(page.getByText(firstQuestion)).toBeVisible();
@@ -405,19 +471,52 @@ async function verifyFaqWorkflow(page: Page) {
   await page.locator("#answer").fill("QA CMS edited answer");
   await page.locator("#displayOrder").fill("0");
   await page.getByRole("button", { name: /save changes/i }).click();
-  await page.waitForURL(/\/admin\/cms\/faq$/);
+  await page.waitForURL(/\/admin\/cms\/faq(?:\?.*)?$/);
+  await expect(page.getByText(/faq item updated/i)).toBeVisible();
   await expect(page.getByText(editedQuestion)).toBeVisible();
+  await expect(page.locator("tr", { hasText: editedQuestion })).toContainText("Published");
 
   await page.goto("/contact");
   await expect(page.getByText(editedQuestion)).toBeVisible();
+
+  await page.goto(`/admin/cms/faq/${firstFaq.id}`);
+  await page.locator("#isPublished").uncheck();
+  await page.getByRole("button", { name: /save changes/i }).click();
+  await page.waitForURL(/\/admin\/cms\/faq(?:\?.*)?$/);
+  await expect(page.getByText(/faq item updated/i)).toBeVisible();
+  await expect(page.locator("tr", { hasText: editedQuestion })).toContainText("Draft");
+
+  await page.goto("/contact");
+  await expect(page.getByText(editedQuestion)).toHaveCount(0);
+  await expect(page.getByText(secondQuestion)).toBeVisible();
+
+  await page.goto(`/admin/cms/faq/${firstFaq.id}`);
+  await page.locator("#isPublished").check();
+  await page.getByRole("button", { name: /save changes/i }).click();
+  await page.waitForURL(/\/admin\/cms\/faq(?:\?.*)?$/);
+  await expect(page.getByText(/faq item updated/i)).toBeVisible();
+  await expect(page.locator("tr", { hasText: editedQuestion })).toContainText("Published");
+
+  await page.goto("/contact");
+  await expect(page.getByText(editedQuestion)).toBeVisible();
+  await expect(page.getByText(secondQuestion)).toBeVisible();
 
   await page.goto("/admin/cms/faq");
   await page
     .locator("tr", { hasText: editedQuestion })
     .getByRole("button", { name: /delete/i })
     .click();
+  await expect(page.getByRole("dialog", { name: /delete faq item/i })).toContainText(
+    editedQuestion,
+  );
+  await page.getByRole("button", { name: /confirm delete/i }).click();
+  await expect(page.getByText(/faq item deleted/i)).toBeVisible();
   await expect(page.getByText(editedQuestion)).toHaveCount(0);
   await expect(prisma.faqItem.findUnique({ where: { id: firstFaq.id } })).resolves.toBeNull();
+
+  await page.goto("/contact");
+  await expect(page.getByText(editedQuestion)).toHaveCount(0);
+  await expect(page.getByText(secondQuestion)).toBeVisible();
 }
 
 async function createFaqItemThroughUi(
@@ -432,7 +531,7 @@ async function createFaqItemThroughUi(
   await page.locator("#question").fill(question);
   await page.locator("#answer").fill(answer);
   await page.getByRole("button", { name: /create faq/i }).click();
-  await page.waitForURL(/\/admin\/cms\/faq$/);
+  await page.waitForURL(/\/admin\/cms\/faq(?:\?.*)?$/);
 }
 
 async function verifyCmsAuditLogs() {

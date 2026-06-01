@@ -30,6 +30,28 @@ function testMeetUrl(path: string) {
   return `https://meet.google.com/${path}`;
 }
 
+function padDatePart(value: number) {
+  return value.toString().padStart(2, "0");
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function formatDateInput(date: Date) {
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+}
+
+function formatDateTimeInput(date: Date) {
+  return `${formatDateInput(date)}T${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}`;
+}
+
+function formatMonthQuery(date: Date) {
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}`;
+}
+
 function toBase64Url(input: string) {
   return Buffer.from(input, "binary")
     .toString("base64")
@@ -247,6 +269,12 @@ test.describe("Admin Scheduled Classes Management", () => {
       where: { name: levelName },
       select: { id: true },
     });
+    const lessonStart = addDays(new Date(), 14);
+    lessonStart.setHours(10, 0, 0, 0);
+    const lessonEnd = new Date(lessonStart);
+    lessonEnd.setHours(11, 0, 0, 0);
+    const groupEndDate = addDays(lessonStart, 180);
+    const scheduleMonth = formatMonthQuery(lessonStart);
 
     await setPortalSession(page, {
       uid: adminUserId,
@@ -266,8 +294,8 @@ test.describe("Admin Scheduled Classes Management", () => {
     await page.getByLabel(/level/i).selectOption({ label: levelName });
     await page.getByLabel(/capacity/i).fill("8");
     await page.getByLabel(/status/i).selectOption("ACTIVE");
-    await page.getByLabel(/start date/i).fill("2026-05-18");
-    await page.getByLabel(/end date/i).fill("2026-12-15");
+    await page.getByLabel(/start date/i).fill(formatDateInput(lessonStart));
+    await page.getByLabel(/end date/i).fill(formatDateInput(groupEndDate));
     await page.getByRole("button", { name: /create.*class group|save.*class group/i }).click();
     await page.waitForURL(/\/admin\/classes(?:\?|$)/, { timeout: 30000 });
 
@@ -278,6 +306,10 @@ test.describe("Admin Scheduled Classes Management", () => {
     await expect(groupRow).toContainText(subjectName);
     await expect(groupRow).toContainText(levelName);
     await expect(groupRow).toContainText(/0\s*\/\s*8|capacity:\s*8/i);
+    const createdGroup = await prisma.classGroup.findFirstOrThrow({
+      where: { name: groupName },
+      select: { id: true },
+    });
 
     await Promise.all([
       page.waitForURL(/\/admin\/classes\/[^/?]+$/, { timeout: 30000 }),
@@ -299,11 +331,15 @@ test.describe("Admin Scheduled Classes Management", () => {
     await page.getByRole("link", { name: /create lesson|new lesson/i }).click();
     await page.getByLabel(/title/i).fill(lessonTitle);
     await page.getByLabel(/description/i).fill("Lesson inside the class group.");
-    await page.getByLabel(/start/i).fill("2026-05-18T10:00");
-    await page.getByLabel(/end|duration/i).fill("2026-05-18T11:00");
+    await page.getByLabel(/start/i).fill(formatDateTimeInput(lessonStart));
+    await page.getByLabel(/end|duration/i).fill(formatDateTimeInput(lessonEnd));
     await page.getByLabel(/live lesson|url/i).fill(testMeetUrl("qa-class-group-lesson"));
     await page.getByRole("button", { name: /create lesson|save lesson/i }).click();
     await expect(page.getByText(lessonTitle)).toBeVisible({ timeout: 30000 });
+    const createdLesson = await prisma.scheduledClass.findFirstOrThrow({
+      where: { classGroupId: createdGroup.id, title: lessonTitle },
+      select: { id: true },
+    });
 
     await setPortalSession(page, {
       uid: primaryTeacherUserId,
@@ -322,7 +358,7 @@ test.describe("Admin Scheduled Classes Management", () => {
       email: STUDENT_EMAIL,
       fullName: STUDENT_NAME,
     });
-    await page.goto(`${BASE_URL}/portal/schedule?month=2026-05`);
+    await page.goto(`${BASE_URL}/portal/schedule?month=${scheduleMonth}`);
     await expect(page.getByText(lessonTitle)).toBeVisible();
     await expect(page.getByText(`Group: ${groupName}`)).toBeVisible();
     await expect(page.getByText("Unrelated Group Lesson")).toHaveCount(0);
@@ -336,6 +372,58 @@ test.describe("Admin Scheduled Classes Management", () => {
     await page.goto(`${BASE_URL}/portal/parent`);
     await expect(page.getByText(lessonTitle)).toBeVisible();
     await expect(page.getByText(`Group: ${groupName}`)).toBeVisible();
+    await page.goto(
+      `${BASE_URL}/portal/parent/schedule?studentId=${studentUserId}&month=${scheduleMonth}`,
+    );
+    await expect(page.getByRole("heading", { name: /child schedule/i })).toBeVisible();
+    await expect(page.getByText(lessonTitle)).toBeVisible();
+    await expect(page.getByText(`Group: ${groupName}`)).toBeVisible();
+
+    await setPortalSession(page, {
+      uid: adminUserId,
+      role: UserRole.ADMIN,
+      email: ADMIN_EMAIL,
+      fullName: "Fixed Admin",
+    });
+    await page.goto(`${BASE_URL}/admin/classes/${createdGroup.id}`);
+    const enrolledStudentRow = page
+      .locator('section[aria-label="Student enrollments"] li')
+      .filter({ hasText: STUDENT_NAME })
+      .filter({ has: page.getByRole("button", { name: "Remove" }) });
+    await expect(enrolledStudentRow).toBeVisible();
+    await enrolledStudentRow.getByRole("button", { name: "Remove" }).click();
+    await expect(
+      page.getByRole("dialog", { name: /remove student from class group/i }),
+    ).toContainText(STUDENT_NAME);
+    await page.getByRole("button", { name: /confirm removal/i }).click();
+    await page.waitForURL(/classMessage=Student(?:\+|%20)removed/i, { timeout: 30000 });
+    await expect(page.getByText(/student removed/i)).toBeVisible({ timeout: 30000 });
+    await expect(
+      page
+        .locator('section[aria-label="Student enrollments"] li')
+        .filter({ hasText: STUDENT_NAME })
+        .filter({ has: page.getByRole("button", { name: "Remove" }) }),
+    ).toHaveCount(0);
+
+    await setPortalSession(page, {
+      uid: studentUserId,
+      role: UserRole.STUDENT,
+      email: STUDENT_EMAIL,
+      fullName: STUDENT_NAME,
+    });
+    await page.goto(`${BASE_URL}/portal/schedule?month=${scheduleMonth}`);
+    await expect(page.getByText(lessonTitle)).toHaveCount(0);
+
+    await setPortalSession(page, {
+      uid: parentUserId,
+      role: UserRole.PARENT,
+      email: PARENT_EMAIL,
+      fullName: PARENT_NAME,
+    });
+    await page.goto(
+      `${BASE_URL}/portal/parent/schedule?studentId=${studentUserId}&month=${scheduleMonth}`,
+    );
+    await expect(page.getByText(lessonTitle)).toHaveCount(0);
 
     await setPortalSession(page, {
       uid: adminUserId,
@@ -361,7 +449,7 @@ test.describe("Admin Scheduled Classes Management", () => {
       email: TEACHER_EMAIL,
       fullName: PRIMARY_TEACHER_NAME,
     });
-    await page.goto(`${BASE_URL}/portal/schedule?month=2026-05`);
+    await page.goto(`${BASE_URL}/portal/schedule?month=${scheduleMonth}`);
     await expect(page.getByText(lessonTitle)).toHaveCount(0);
 
     await setPortalSession(page, {
@@ -370,7 +458,7 @@ test.describe("Admin Scheduled Classes Management", () => {
       email: SECONDARY_TEACHER_EMAIL,
       fullName: SECONDARY_TEACHER_NAME,
     });
-    await page.goto(`${BASE_URL}/portal/schedule?month=2026-05`);
+    await page.goto(`${BASE_URL}/portal/schedule?month=${scheduleMonth}`);
     await expect(page.getByText(lessonTitle, { exact: true }).first()).toBeVisible();
     await expect(page.getByText(`Group: ${groupName}`).first()).toBeVisible();
 
@@ -381,14 +469,39 @@ test.describe("Admin Scheduled Classes Management", () => {
       fullName: "Fixed Admin",
     });
     await page.goto(`${BASE_URL}/admin/classes?q=${encodeURIComponent(groupName)}`);
-    await rowByText(page, groupName)
-      .getByRole("button", { name: /delete|archive/i })
-      .click();
+    const failedDeleteAuditCount = await prisma.adminAuditLog.count({
+      where: {
+        action: "CLASS_GROUP_DELETED",
+        targetId: createdGroup.id,
+        targetType: "class_group",
+      },
+    });
+    await Promise.all([
+      page.waitForURL(/classError=.*dependencies.*cannot.*deleted/i, { timeout: 60000 }),
+      (async () => {
+        await rowByText(page, groupName)
+          .getByRole("button", { name: /delete|archive/i })
+          .click();
+        await expect(page.getByRole("dialog", { name: /delete class group/i })).toContainText(
+          groupName,
+        );
+        await page.getByRole("button", { name: /confirm delete/i }).click();
+      })(),
+    ]);
     await expect(
       page.getByRole("alert").filter({ hasText: /dependencies|cannot be deleted/i }),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 30000 });
+    await expect(
+      prisma.adminAuditLog.count({
+        where: {
+          action: "CLASS_GROUP_DELETED",
+          targetId: createdGroup.id,
+          targetType: "class_group",
+        },
+      }),
+    ).resolves.toBe(failedDeleteAuditCount);
 
-    await prisma.classGroup.create({
+    const dependencyFreeGroup = await prisma.classGroup.create({
       data: {
         name: dependencyFreeGroupName,
         teacherId: secondaryTeacherUserId,
@@ -400,10 +513,60 @@ test.describe("Admin Scheduled Classes Management", () => {
     await page.goto(`${BASE_URL}/admin/classes?q=${encodeURIComponent(dependencyFreeGroupName)}`);
     const dependencyFreeRow = rowByText(page, dependencyFreeGroupName);
     await expect(dependencyFreeRow).toBeVisible();
-    await dependencyFreeRow.getByRole("button", { name: /delete|archive/i }).click();
-    await expect(page.getByText(/class group.*(deleted|archived)/i)).toBeVisible({
+    await Promise.all([
+      page.waitForURL(/classMessage=Class(?:\+|%20)group(?:\+|%20)deleted\.?/i, {
+        timeout: 60000,
+      }),
+      (async () => {
+        await dependencyFreeRow.getByRole("button", { name: /delete|archive/i }).click();
+        await expect(page.getByRole("dialog", { name: /delete class group/i })).toContainText(
+          dependencyFreeGroupName,
+        );
+        await page.getByRole("button", { name: /confirm delete/i }).click();
+      })(),
+    ]);
+    await expect(page.getByText("Class group deleted.", { exact: true })).toBeVisible({
       timeout: 30000,
     });
+
+    const auditLogs = await prisma.adminAuditLog.findMany({
+      where: {
+        targetType: "class_group",
+        OR: [
+          {
+            targetId: createdGroup.id,
+            action: {
+              in: [
+                "CLASS_GROUP_CREATED",
+                "CLASS_GROUP_UPDATED",
+                "CLASS_GROUP_TEACHER_UPDATED",
+                "CLASS_GROUP_STUDENT_ENROLLED",
+                "CLASS_GROUP_STUDENT_UNENROLLED",
+                "CLASS_GROUP_LESSON_CREATED",
+              ],
+            },
+          },
+          {
+            targetId: dependencyFreeGroup.id,
+            action: "CLASS_GROUP_DELETED",
+          },
+        ],
+      },
+    });
+    const serializedLogs = JSON.stringify(auditLogs);
+    expect(auditLogs.some((log) => log.action === "CLASS_GROUP_CREATED")).toBe(true);
+    expect(auditLogs.some((log) => log.action === "CLASS_GROUP_UPDATED")).toBe(true);
+    expect(auditLogs.some((log) => log.action === "CLASS_GROUP_TEACHER_UPDATED")).toBe(true);
+    expect(auditLogs.some((log) => log.action === "CLASS_GROUP_STUDENT_ENROLLED")).toBe(true);
+    expect(auditLogs.some((log) => log.action === "CLASS_GROUP_STUDENT_UNENROLLED")).toBe(true);
+    expect(createdLesson.id).toBeTruthy();
+    expect(auditLogs.some((log) => log.action === "CLASS_GROUP_LESSON_CREATED")).toBe(true);
+    expect(
+      auditLogs.some(
+        (log) => log.action === "CLASS_GROUP_DELETED" && log.targetId === dependencyFreeGroup.id,
+      ),
+    ).toBe(true);
+    expect(serializedLogs).not.toMatch(/password|token|secret/i);
   });
 
   test("legacy direct scheduled class teacher portal visibility remains compatible", async ({
@@ -593,10 +756,22 @@ async function cleanupClassGroupFixtures() {
   });
 
   for (const group of groups) {
-    await prisma.classGroup.update({
-      where: { id: group.id },
-      data: { students: { set: [] } },
-    });
+    try {
+      await prisma.classGroup.update({
+        where: { id: group.id },
+        data: { students: { set: [] } },
+      });
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === "P2025"
+      ) {
+        continue;
+      }
+      throw error;
+    }
   }
 
   await prisma.classGroup.deleteMany({

@@ -6,6 +6,7 @@ import {
   deleteTeacherAction,
   toggleTeacherStatusAction,
 } from "@/app/(admin)/admin/teachers/actions";
+import { ConfirmedSubmit } from "@/components/admin/ConfirmedSubmit";
 import { Button } from "@/components/ui/button";
 
 type TeacherRowActionsProps = {
@@ -71,21 +72,35 @@ export function TeacherRowActions({ teacher }: TeacherRowActionsProps) {
     setIsDeleteDialogOpen(false);
   }
 
+  const statusForm = (
+    <form
+      action={toggleTeacherStatusAction as unknown as (formData: FormData) => void}
+      className="inline-block"
+    >
+      <input type="hidden" name="id" value={teacher.id} />
+      <input type="hidden" name="isActive" value={teacher.isActive ? "false" : "true"} />
+      <input type="hidden" name="flash" value="true" />
+      <input type="hidden" name="successRedirect" value="/admin/teachers" />
+      <input type="hidden" name="errorRedirect" value="/admin/teachers" />
+      <Button type="submit" size="sm" variant="secondary">
+        {teacher.isActive ? "Deactivate" : "Activate"}
+      </Button>
+    </form>
+  );
+
   return (
     <div className="space-y-2 text-right">
-      <form
-        action={toggleTeacherStatusAction as unknown as (formData: FormData) => void}
-        className="inline-block"
-      >
-        <input type="hidden" name="id" value={teacher.id} />
-        <input type="hidden" name="isActive" value={teacher.isActive ? "false" : "true"} />
-        <input type="hidden" name="flash" value="true" />
-        <input type="hidden" name="successRedirect" value="/admin/teachers" />
-        <input type="hidden" name="errorRedirect" value="/admin/teachers" />
-        <Button type="submit" size="sm" variant="secondary">
-          {teacher.isActive ? "Deactivate" : "Activate"}
-        </Button>
-      </form>
+      {teacher.isActive ? (
+        <ConfirmedSubmit
+          title="Deactivate teacher account"
+          description={`Deactivate ${teacher.fullName ?? "this teacher"}? The teacher will lose portal access until the account is activated again.`}
+          confirmLabel="Confirm deactivation"
+        >
+          {statusForm}
+        </ConfirmedSubmit>
+      ) : (
+        statusForm
+      )}
 
       <Button
         ref={deleteButtonRef}

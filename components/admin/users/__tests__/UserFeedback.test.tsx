@@ -4,11 +4,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const createUserActionMock = vi.hoisted(() => vi.fn());
 const updateUserRoleActionMock = vi.hoisted(() => vi.fn());
 const toggleUserStatusActionMock = vi.hoisted(() => vi.fn());
+const routerRefreshMock = vi.hoisted(() => vi.fn());
+
 vi.mock("@/app/(admin)/admin/users/actions", () => ({
   createUserAction: createUserActionMock,
   updateUserRoleAction: updateUserRoleActionMock,
   toggleUserStatusAction: toggleUserStatusActionMock,
 }));
+
+vi.mock("next/navigation", async () => {
+  const actual = await vi.importActual<typeof import("next/navigation")>("next/navigation");
+  return {
+    ...actual,
+    useRouter: () => ({
+      back: vi.fn(),
+      forward: vi.fn(),
+      prefetch: vi.fn(),
+      push: vi.fn(),
+      refresh: routerRefreshMock,
+      replace: vi.fn(),
+    }),
+  };
+});
 
 import { UserCreateForm } from "@/components/admin/users/UserCreateForm";
 import { UserRoleEditor } from "@/components/admin/users/UserRoleEditor";

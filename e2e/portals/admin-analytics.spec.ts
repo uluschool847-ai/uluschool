@@ -274,6 +274,14 @@ test.describe("Admin BI Analytics", () => {
       "href",
       "/admin/analytics/export",
     );
+    const exportResponse = await page.request.get("/admin/analytics/export");
+    expect(exportResponse.ok()).toBe(true);
+    expect(exportResponse.headers()["content-type"]).toContain("text/csv");
+    expect(exportResponse.headers()["content-disposition"]).toContain("analytics-kes-export.csv");
+    const csv = await exportResponse.text();
+    expect(csv).toContain('"metric","value","currency"');
+    expect(csv).toContain('"totalRevenue"');
+    expect(csv).toContain(`"dailyRevenue:${PAYMENT_DAY}"`);
     await expect(page.getByText(TRAFFIC_SOURCE)).toBeVisible();
     await expect(page.getByText(PAYMENT_MONTH)).toBeVisible();
     await expectAnalyticsTotalRevenue(page, initialMetrics.totalRevenue);

@@ -79,8 +79,7 @@ type LessonActionsModule = {
 };
 
 async function loadLessonActions() {
-  const specifier = "@/app/(admin)/admin/lessons/actions";
-  return import(/* @vite-ignore */ specifier) as Promise<LessonActionsModule>;
+  return import("@/app/(admin)/admin/lessons/actions") as Promise<LessonActionsModule>;
 }
 
 function lessonForm(overrides?: Partial<Record<string, string | null>>) {

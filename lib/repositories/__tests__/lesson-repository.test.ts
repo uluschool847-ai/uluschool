@@ -356,6 +356,39 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
     expect(result).toEqual(expect.objectContaining({ id: "lesson-1", status: "SCHEDULED" }));
   });
 
+  it("inherits the class group subject when the admin form submits an empty subject selection", async () => {
+    prismaMock.classGroup.findUnique.mockResolvedValueOnce({
+      id: "group-1",
+      status: "ACTIVE",
+      teacherId: "teacher-1",
+      subjectId: "subject-math",
+    });
+    prismaMock.appUser.findUnique.mockResolvedValueOnce({
+      id: "teacher-1",
+      role: UserRole.TEACHER,
+    });
+    prismaMock.scheduledClass.create.mockResolvedValueOnce(lessonRecord());
+
+    const { createLesson } = await loadLessonRepository();
+    await createLesson({
+      classGroupId: "group-1",
+      title: "Quadratic functions",
+      startAt,
+      endAt,
+      subjectId: null,
+      liveLessonUrl: "https://meet.google.com/abc-defg-hij",
+      meetingProvider: "GOOGLE_MEET",
+    });
+
+    expect(prismaMock.scheduledClass.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          subject: { connect: { id: "subject-math" } },
+        }),
+      }),
+    );
+  });
+
   it.each([
     {
       label: "missing class group",

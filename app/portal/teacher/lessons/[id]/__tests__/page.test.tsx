@@ -62,24 +62,24 @@ function workspaceRecord() {
       backToSchedule: "/portal/teacher/schedule",
       classDetail: "/portal/teacher/classes/group-1",
       submissions: {
-        disabled: true,
-        href: null,
-        reason: "Teacher submissions route is not implemented",
+        disabled: false,
+        href: "/portal/teacher/submissions?scheduledClassId=lesson-1",
+        label: "Review Submissions",
       },
       progress: {
-        disabled: true,
-        href: null,
-        reason: "Teacher progress route is not implemented",
+        disabled: false,
+        href: "/portal/teacher/progress?subjectId=subject-math",
+        label: "Open Progress",
       },
       materials: {
-        disabled: true,
-        href: null,
-        reason: "Teacher materials route is not implemented",
+        disabled: false,
+        href: "/portal/teacher/materials?scheduledClassId=lesson-1",
+        label: "Materials",
       },
       attendance: {
         disabled: true,
         href: null,
-        reason: "Attendance module is not implemented",
+        reason: "Attendance unavailable for this lesson",
       },
     },
     roster: [
@@ -124,9 +124,9 @@ function workspaceRecord() {
         submissionsCount: 2,
         pendingSubmissionsCount: 1,
         review: {
-          disabled: true,
-          href: null,
-          reason: "Teacher submissions route is not implemented",
+          disabled: false,
+          href: "/portal/teacher/submissions?assignmentId=assignment-1",
+          label: "Review assignment work",
         },
       },
     ],
@@ -137,15 +137,16 @@ function workspaceRecord() {
       gradedSubmissions: 1,
     },
     progressSummary: {
-      disabled: true,
-      href: null,
-      count: 0,
-      reason: "Teacher progress route is not implemented",
+      disabled: false,
+      href: "/portal/teacher/progress?subjectId=subject-math",
+      count: 1,
+      label: "Open Progress",
+      reason: null,
     },
     attendanceSummary: {
       disabled: true,
       hidden: true,
-      reason: "Attendance module is not implemented",
+      reason: "Attendance unavailable for this lesson",
     },
   };
 }
@@ -187,7 +188,11 @@ describe("Teacher lesson detail page", () => {
     expect(screen.getByText(/2 submissions/i)).toBeDefined();
     expect(screen.getByText(/1 pending/i)).toBeDefined();
     expect(screen.getByRole("heading", { name: /progress notes/i })).toBeDefined();
-    expect(screen.getByText(/teacher progress route is not implemented/i)).toBeDefined();
+    expect(screen.queryByText(/teacher progress route is not implemented/i)).toBeNull();
+    expect(screen.getAllByRole("link", { name: /open progress/i })[0]).toHaveAttribute(
+      "href",
+      "/portal/teacher/progress?subjectId=subject-math",
+    );
     expect(screen.getByRole("link", { name: /start lesson/i })).toHaveProperty(
       "href",
       "https://meet.google.com/abc-defg-hij",

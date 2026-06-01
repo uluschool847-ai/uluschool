@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireRoleMock = vi.hoisted(() => vi.fn());
 const getTeacherDashboardDataMock = vi.hoisted(() => vi.fn());
+const countUnreadNotificationsForUserMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({
   requireRole: requireRoleMock,
@@ -12,6 +13,10 @@ vi.mock("@/lib/auth/session", () => ({
 
 vi.mock("@/lib/repositories/portal-repository", () => ({
   getTeacherDashboardData: getTeacherDashboardDataMock,
+}));
+
+vi.mock("@/lib/repositories/notification-repository", () => ({
+  countUnreadNotificationsForUser: countUnreadNotificationsForUserMock,
 }));
 
 vi.mock("@/app/portal/actions", () => ({
@@ -35,6 +40,7 @@ describe("Teacher dashboard formatting consistency", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     requireRoleMock.mockResolvedValue({ uid: "teacher-1", role: UserRole.TEACHER });
+    countUnreadNotificationsForUserMock.mockResolvedValue(0);
     getTeacherDashboardDataMock.mockResolvedValue({
       metrics: {
         myClasses: 1,

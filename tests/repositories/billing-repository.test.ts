@@ -60,6 +60,31 @@ describe("billing-repository Kenya local billing contract", () => {
     });
   });
 
+  it("uses the selected plan name when subscription fallback plan name is blank", async () => {
+    prismaMock.billingPlan.findUnique.mockResolvedValueOnce({
+      id: "plan-1",
+      name: "IGCSE Monthly",
+    });
+    prismaMock.studentSubscription.create.mockResolvedValueOnce({ id: "subscription-1" });
+    const { createSubscriptionForStudent } = await loadRepository();
+
+    await createSubscriptionForStudent({
+      planId: "plan-1",
+      planName: "",
+      studentId: "student-1",
+    });
+
+    expect(prismaMock.studentSubscription.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          planId: "plan-1",
+          planName: "IGCSE Monthly",
+          studentId: "student-1",
+        }),
+      }),
+    );
+  });
+
   it("enforces parent-child ownership before starting a mock M-Pesa payment", async () => {
     prismaMock.appUser.findFirst.mockResolvedValueOnce({ id: "student-1" });
     prismaMock.paymentTransaction.create.mockResolvedValueOnce({

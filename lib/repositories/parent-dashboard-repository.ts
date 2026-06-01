@@ -95,6 +95,7 @@ function mapScheduleSummary(studentId: string, lessons: ChildSchedule) {
           href: `/portal/parent/schedule/${studentId}/${nextLesson.id}`,
           startAt: nextLesson.startAt,
           subjectName: nextLesson.subject?.name ?? null,
+          teacherName: nextLesson.teacher?.fullName ?? null,
           title: nextLesson.title,
         }
       : null,

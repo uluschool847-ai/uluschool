@@ -6,6 +6,7 @@ const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const revalidatePathMock = vi.hoisted(() => vi.fn());
 const createLessonMock = vi.hoisted(() => vi.fn());
 const updateLessonMock = vi.hoisted(() => vi.fn());
+const updateLessonMeetingLinkMock = vi.hoisted(() => vi.fn());
 const rescheduleLessonMock = vi.hoisted(() => vi.fn());
 const checkTeacherAvailabilityMock = vi.hoisted(() => vi.fn());
 const createGoogleMeetEventForLessonMock = vi.hoisted(() => vi.fn());
@@ -52,6 +53,7 @@ vi.mock("@/lib/repositories/lesson-repository", () => ({
   getLessonById: getLessonByIdMock,
   rescheduleLesson: rescheduleLessonMock,
   updateLesson: updateLessonMock,
+  updateLessonMeetingLink: updateLessonMeetingLinkMock,
 }));
 
 vi.mock("@/lib/repositories/teacher-availability-repository", () => ({
@@ -79,8 +81,7 @@ type LessonActionsModule = {
 };
 
 async function loadLessonActions() {
-  const specifier = "@/app/(admin)/admin/lessons/actions";
-  return import(/* @vite-ignore */ specifier) as Promise<LessonActionsModule>;
+  return import("@/app/(admin)/admin/lessons/actions") as Promise<LessonActionsModule>;
 }
 
 function lessonForm(overrides?: Partial<Record<string, string | null>>) {
@@ -188,6 +189,22 @@ function expectLessonAudit(action: string, targetId = "lesson-1") {
         status: expect.any(String),
         startAt: expect.any(Date),
         endAt: expect.any(Date),
+      }),
+    }),
+  );
+}
+
+function expectClassGroupLessonAudit(action: string, lessonId = "lesson-1") {
+  expect(auditPayloadFor(action)).toEqual(
+    expect.objectContaining({
+      adminUserId: "admin-1",
+      action,
+      targetType: "class_group",
+      targetId: "group-1",
+      meta: expect.objectContaining({
+        actorRole: UserRole.ADMIN,
+        classGroupId: "group-1",
+        lessonId,
       }),
     }),
   );
@@ -373,7 +390,7 @@ describe("Admin lesson actions", () => {
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
-  it("creates a lesson with transaction-safe LESSON_CREATED audit and visible success", async () => {
+  it("creates a lesson with transaction-safe lesson and class-group audits", async () => {
     createLessonMock.mockResolvedValueOnce(lessonRecord());
 
     const { createLessonAction } = await loadLessonActions();
@@ -400,10 +417,17 @@ describe("Admin lesson actions", () => {
     );
     expect(createAdminAuditLogMock).toHaveBeenCalledWith(expect.any(Object), transactionClientMock);
     expectLessonAudit("LESSON_CREATED");
+    expectClassGroupLessonAudit("CLASS_GROUP_LESSON_CREATED");
     expect(auditPayloadFor("LESSON_CREATED")).toEqual(
       expect.objectContaining({
         before: null,
         after: expect.objectContaining({ id: "lesson-1", title: "Quadratic functions" }),
+      }),
+    );
+    expect(auditPayloadFor("CLASS_GROUP_LESSON_CREATED")).toEqual(
+      expect.objectContaining({
+        before: null,
+        after: expect.objectContaining({ id: "lesson-1", classGroupId: "group-1" }),
       }),
     );
     expectLessonRevalidation();
@@ -483,7 +507,14 @@ describe("Admin lesson actions", () => {
       transactionClientMock,
     );
     expectLessonAudit("LESSON_UPDATED");
+    expectClassGroupLessonAudit("CLASS_GROUP_LESSON_UPDATED");
     expect(auditPayloadFor("LESSON_UPDATED")).toEqual(
+      expect.objectContaining({
+        before: expect.objectContaining({ id: "lesson-1", title: "Old lesson" }),
+        after: expect.objectContaining({ id: "lesson-1", title: "Updated lesson" }),
+      }),
+    );
+    expect(auditPayloadFor("CLASS_GROUP_LESSON_UPDATED")).toEqual(
       expect.objectContaining({
         before: expect.objectContaining({ id: "lesson-1", title: "Old lesson" }),
         after: expect.objectContaining({ id: "lesson-1", title: "Updated lesson" }),
@@ -540,6 +571,7 @@ describe("Admin lesson actions", () => {
       transactionClientMock,
     );
     expectLessonAudit("LESSON_RESCHEDULED");
+    expectClassGroupLessonAudit("CLASS_GROUP_LESSON_UPDATED");
     expect(auditPayloadFor("LESSON_RESCHEDULED")).toEqual(
       expect.objectContaining({
         before: expect.objectContaining({
@@ -550,6 +582,17 @@ describe("Admin lesson actions", () => {
         after: expect.objectContaining({
           status: "RESCHEDULED",
           rescheduledFromId: "lesson-1",
+          startAt: newStart,
+          endAt: newEnd,
+        }),
+      }),
+    );
+    expect(auditPayloadFor("CLASS_GROUP_LESSON_UPDATED")).toEqual(
+      expect.objectContaining({
+        before: expect.objectContaining({ id: "lesson-1", status: "SCHEDULED" }),
+        after: expect.objectContaining({
+          id: "lesson-1",
+          status: "RESCHEDULED",
           startAt: newStart,
           endAt: newEnd,
         }),
@@ -758,9 +801,16 @@ describe("Admin lesson actions", () => {
 
     expect(deleteLessonMock).toHaveBeenCalledWith("lesson-1", transactionClientMock);
     expectLessonAudit("LESSON_DELETED");
+    expectClassGroupLessonAudit("CLASS_GROUP_LESSON_DELETED");
     expect(auditPayloadFor("LESSON_DELETED")).toEqual(
       expect.objectContaining({
         before: expect.objectContaining({ id: "lesson-1" }),
+        after: expect.objectContaining({ deleted: true }),
+      }),
+    );
+    expect(auditPayloadFor("CLASS_GROUP_LESSON_DELETED")).toEqual(
+      expect.objectContaining({
+        before: expect.objectContaining({ id: "lesson-1", classGroupId: "group-1" }),
         after: expect.objectContaining({ deleted: true }),
       }),
     );

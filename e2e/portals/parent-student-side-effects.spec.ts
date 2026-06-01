@@ -197,11 +197,10 @@ test.describe("Parent and student portal side effects", () => {
     await expect(page.getByText(student.fullName)).toBeVisible();
     await expect(page.getByText(classTitle)).toBeVisible();
     await expect(page.getByText(teacher.fullName)).toBeVisible();
-    await expect(
-      page
-        .getByLabel(`Homework status for ${student.fullName}`)
-        .getByText(assignmentTitle, { exact: true }),
-    ).toBeVisible();
+    const childDashboard = page.getByRole("region", {
+      name: `Dashboard for ${student.fullName}`,
+    });
+    await expect(childDashboard.getByText(assignmentTitle, { exact: true })).toBeVisible();
 
     await setPortalSession(page.context(), {
       uid: student.id,

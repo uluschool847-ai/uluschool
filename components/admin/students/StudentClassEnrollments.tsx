@@ -4,6 +4,7 @@ import {
   linkStudentClassAction,
   unlinkStudentClassAction,
 } from "@/app/(admin)/admin/students/actions";
+import { ConfirmedSubmit } from "@/components/admin/ConfirmedSubmit";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -104,16 +105,24 @@ export function StudentClassEnrollments({
                   </p>
                 </div>
 
-                <form action={unlinkStudentClassAction as unknown as (formData: FormData) => void}>
-                  <input type="hidden" name="studentId" value={studentId} />
-                  <input type="hidden" name="classId" value={scheduledClass.id} />
-                  <input type="hidden" name="flash" value="true" />
-                  <input type="hidden" name="successRedirect" value={enrollmentRedirect} />
-                  <input type="hidden" name="errorRedirect" value={enrollmentRedirect} />
-                  <Button type="submit" variant="outline" size="sm">
-                    Remove
-                  </Button>
-                </form>
+                <ConfirmedSubmit
+                  title="Remove class enrollment"
+                  description={`Remove this student from ${scheduledClass.title}? They will no longer see this class through the enrollment.`}
+                  confirmLabel="Confirm removal"
+                >
+                  <form
+                    action={unlinkStudentClassAction as unknown as (formData: FormData) => void}
+                  >
+                    <input type="hidden" name="studentId" value={studentId} />
+                    <input type="hidden" name="classId" value={scheduledClass.id} />
+                    <input type="hidden" name="flash" value="true" />
+                    <input type="hidden" name="successRedirect" value={enrollmentRedirect} />
+                    <input type="hidden" name="errorRedirect" value={enrollmentRedirect} />
+                    <Button type="submit" variant="outline" size="sm">
+                      Remove
+                    </Button>
+                  </form>
+                </ConfirmedSubmit>
               </li>
             ))}
           </ul>

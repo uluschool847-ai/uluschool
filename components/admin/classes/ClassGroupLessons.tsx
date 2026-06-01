@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { deleteClassGroupLessonAction } from "@/app/(admin)/admin/classes/actions";
+import { ConfirmedSubmit } from "@/components/admin/ConfirmedSubmit";
 import { Button } from "@/components/ui/button";
 
 type Lesson = {
@@ -76,46 +77,62 @@ function LessonList({
                       Edit
                     </Link>
                   </Button>
-                  <form
-                    action={deleteClassGroupLessonAction as unknown as (formData: FormData) => void}
+                  <ConfirmedSubmit
+                    title="Cancel lesson"
+                    description={`Cancel ${lesson.title}? The lesson will be removed from active schedule views for enrolled users.`}
+                    confirmLabel="Confirm cancellation"
                   >
-                    <input type="hidden" name="flash" value="true" />
-                    <input type="hidden" name="classGroupId" value={classGroupId} />
-                    <input type="hidden" name="lessonId" value={lesson.id} />
-                    <input
-                      type="hidden"
-                      name="successRedirect"
-                      value={`/admin/classes/${classGroupId}`}
-                    />
-                    <input
-                      type="hidden"
-                      name="errorRedirect"
-                      value={`/admin/classes/${classGroupId}`}
-                    />
-                    <Button type="submit" variant="secondary" size="sm">
-                      Cancel Lesson
-                    </Button>
-                  </form>
-                  <form
-                    action={deleteClassGroupLessonAction as unknown as (formData: FormData) => void}
+                    <form
+                      action={
+                        deleteClassGroupLessonAction as unknown as (formData: FormData) => void
+                      }
+                    >
+                      <input type="hidden" name="flash" value="true" />
+                      <input type="hidden" name="classGroupId" value={classGroupId} />
+                      <input type="hidden" name="lessonId" value={lesson.id} />
+                      <input
+                        type="hidden"
+                        name="successRedirect"
+                        value={`/admin/classes/${classGroupId}`}
+                      />
+                      <input
+                        type="hidden"
+                        name="errorRedirect"
+                        value={`/admin/classes/${classGroupId}`}
+                      />
+                      <Button type="submit" variant="secondary" size="sm">
+                        Cancel Lesson
+                      </Button>
+                    </form>
+                  </ConfirmedSubmit>
+                  <ConfirmedSubmit
+                    title="Delete lesson"
+                    description={`Delete ${lesson.title}? This will only succeed if no dependent lesson records block deletion.`}
+                    confirmLabel="Confirm delete"
                   >
-                    <input type="hidden" name="flash" value="true" />
-                    <input type="hidden" name="classGroupId" value={classGroupId} />
-                    <input type="hidden" name="lessonId" value={lesson.id} />
-                    <input
-                      type="hidden"
-                      name="successRedirect"
-                      value={`/admin/classes/${classGroupId}`}
-                    />
-                    <input
-                      type="hidden"
-                      name="errorRedirect"
-                      value={`/admin/classes/${classGroupId}`}
-                    />
-                    <Button type="submit" variant="destructive" size="sm">
-                      Delete Lesson
-                    </Button>
-                  </form>
+                    <form
+                      action={
+                        deleteClassGroupLessonAction as unknown as (formData: FormData) => void
+                      }
+                    >
+                      <input type="hidden" name="flash" value="true" />
+                      <input type="hidden" name="classGroupId" value={classGroupId} />
+                      <input type="hidden" name="lessonId" value={lesson.id} />
+                      <input
+                        type="hidden"
+                        name="successRedirect"
+                        value={`/admin/classes/${classGroupId}`}
+                      />
+                      <input
+                        type="hidden"
+                        name="errorRedirect"
+                        value={`/admin/classes/${classGroupId}`}
+                      />
+                      <Button type="submit" variant="destructive" size="sm">
+                        Delete Lesson
+                      </Button>
+                    </form>
+                  </ConfirmedSubmit>
                 </div>
               </div>
             </li>

@@ -57,6 +57,7 @@ function lesson(overrides: Record<string, unknown> = {}) {
     id: "lesson-1",
     startAt: new Date("2026-06-01T09:00:00.000Z"),
     subject: { id: "subject-1", name: "Mathematics" },
+    teacher: { id: "teacher-1", fullName: "Jane Teacher", email: "jane@example.com" },
     title: "Algebra lesson",
     ...overrides,
   };
@@ -237,7 +238,10 @@ describe("parent-dashboard-repository contract", () => {
               latestReport: expect.objectContaining({ weightedTermAverage: 92 }),
             }),
             scheduleSummary: expect.objectContaining({
-              nextLesson: expect.objectContaining({ title: "Algebra lesson" }),
+              nextLesson: expect.objectContaining({
+                teacherName: "Jane Teacher",
+                title: "Algebra lesson",
+              }),
               upcomingCount: 2,
             }),
           }),

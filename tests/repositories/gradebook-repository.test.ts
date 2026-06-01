@@ -215,7 +215,7 @@ describe("gradebook-repository contract", () => {
     });
 
     const { getTeacherStudentGradebook } = await loadGradebookRepository();
-    await getTeacherStudentGradebook("teacher-1", "student-1", "term-1");
+    const result = await getTeacherStudentGradebook("teacher-1", "student-1", "term-1");
 
     expect(prismaMock.appUser.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -224,9 +224,14 @@ describe("gradebook-repository contract", () => {
           role: UserRole.STUDENT,
           OR: expect.arrayContaining([
             { enrolledClasses: { some: { teacherId: "teacher-1" } } },
-            { classGroups: { some: { teacherId: "teacher-1" } } },
+            { enrolledClassGroups: { some: { teacherId: "teacher-1" } } },
           ]),
         }),
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        classGroup: { id: "group-1", name: "Algebra Group A" },
       }),
     );
   });

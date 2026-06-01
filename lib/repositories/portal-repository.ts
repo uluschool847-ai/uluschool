@@ -18,7 +18,10 @@ export type FindAllUsersFilters = {
   limit?: number;
   role?: UserRole;
   searchQuery?: string;
+  sort?: AdminRegistrySort;
 };
+
+export type AdminRegistrySort = "nameAsc" | "nameDesc" | "createdAtDesc" | "createdAtAsc";
 
 export async function findAllUsers(filters: FindAllUsersFilters = {}) {
   const page = Math.max(1, filters.page ?? 1);
@@ -41,7 +44,9 @@ export async function findAllUsers(filters: FindAllUsersFilters = {}) {
     prisma.appUser.count({ where }),
     prisma.appUser.findMany({
       where,
-      orderBy: [{ role: "asc" }, { fullName: "asc" }],
+      orderBy: filters.sort
+        ? orderByForAdminRegistrySort(filters.sort)
+        : [{ role: "asc" }, { fullName: "asc" }],
       skip: (page - 1) * limit,
       take: limit,
       select: {
@@ -293,6 +298,7 @@ export type AdminStudentRegistryFilters = {
   learningStatus?: StudentLearningStatusValue;
   parentLinked?: boolean;
   classLinked?: boolean;
+  sort?: AdminRegistrySort;
 };
 
 export type AdminStudentRegistryRecord = {
@@ -325,6 +331,7 @@ export type AdminParentRegistryFilters = {
   searchQuery?: string;
   isActive?: boolean;
   studentLinked?: boolean;
+  sort?: AdminRegistrySort;
 };
 
 export type AdminParentRegistryRecord = {
@@ -390,6 +397,21 @@ type ParentRegistryParentWithRelations = Prisma.AppUserGetPayload<{
     };
   };
 }>;
+
+function orderByForAdminRegistrySort(
+  sort?: AdminRegistrySort,
+): Prisma.AppUserOrderByWithRelationInput[] {
+  switch (sort) {
+    case "nameDesc":
+      return [{ fullName: "desc" }, { email: "desc" }];
+    case "createdAtDesc":
+      return [{ createdAt: "desc" }, { fullName: "asc" }];
+    case "createdAtAsc":
+      return [{ createdAt: "asc" }, { fullName: "asc" }];
+    default:
+      return [{ fullName: "asc" }, { email: "asc" }];
+  }
+}
 
 function buildAdminParentsWhere(filters: AdminParentRegistryFilters): Prisma.AppUserWhereInput {
   const where: Prisma.AppUserWhereInput = {
@@ -521,7 +543,7 @@ export async function getAdminStudents(filters: AdminStudentRegistryFilters = {}
     prisma.appUser.count({ where }),
     prisma.appUser.findMany({
       where,
-      orderBy: [{ fullName: "asc" }, { email: "asc" }],
+      orderBy: orderByForAdminRegistrySort(filters.sort),
       skip: (page - 1) * limit,
       take: limit,
       include: {
@@ -577,7 +599,7 @@ export async function getAdminParents(filters: AdminParentRegistryFilters = {}) 
           orderBy: { fullName: "asc" },
         },
       },
-      orderBy: [{ fullName: "asc" }, { email: "asc" }],
+      orderBy: orderByForAdminRegistrySort(filters.sort),
       skip: (page - 1) * limit,
       take: limit,
     }),
@@ -1315,11 +1337,7 @@ export async function getTeacherDashboardData(teacherId: string): Promise<Teache
     OR: [{ teacherId }, { classGroup: { teacherId } }],
   };
   const teacherAssignmentWhere: Prisma.AssignmentWhereInput = {
-    OR: [
-      { teacherId },
-      { scheduledClass: { teacherId } },
-      { scheduledClass: { classGroup: { teacherId } } },
-    ],
+    OR: [{ scheduledClass: { teacherId } }, { scheduledClass: { classGroup: { teacherId } } }],
   };
   const upcomingTeacherLessonWhere: Prisma.ScheduledClassWhereInput = {
     ...teacherLessonWhere,

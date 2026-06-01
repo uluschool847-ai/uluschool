@@ -7,6 +7,8 @@ type AdminCrmListControlsProps = {
   basePath: string;
   initialPage: number;
   initialQuery: string;
+  hasPreviousPage?: boolean;
+  hasNextPage?: boolean;
   queryParam?: string;
 };
 
@@ -14,6 +16,8 @@ export function AdminCrmListControls({
   basePath,
   initialPage,
   initialQuery,
+  hasPreviousPage = false,
+  hasNextPage = false,
   queryParam = "q",
 }: AdminCrmListControlsProps) {
   const router = useRouter();
@@ -24,7 +28,9 @@ export function AdminCrmListControls({
   function buildUrl(page: number, q: string) {
     const params = new URLSearchParams();
     params.set("page", String(page));
-    params.set(queryParam, q);
+    if (q.trim()) {
+      params.set(queryParam, q);
+    }
     return `${basePath || pathname}?${params.toString()}`;
   }
 
@@ -55,13 +61,26 @@ export function AdminCrmListControls({
           Search
         </button>
       </form>
-      <button
-        type="button"
-        onClick={() => router.push(buildUrl(initialPage + 1, currentQuery))}
-        className="min-h-10 rounded-md border border-slate-300 px-4 text-sm font-semibold text-slate-900"
-      >
-        Next page
-      </button>
+      <div className="flex items-center gap-2">
+        {hasPreviousPage ? (
+          <button
+            type="button"
+            onClick={() => router.push(buildUrl(Math.max(1, initialPage - 1), currentQuery))}
+            className="min-h-10 rounded-md border border-slate-300 px-4 text-sm font-semibold text-slate-900"
+          >
+            Previous page
+          </button>
+        ) : null}
+        {hasNextPage ? (
+          <button
+            type="button"
+            onClick={() => router.push(buildUrl(initialPage + 1, currentQuery))}
+            className="min-h-10 rounded-md border border-slate-300 px-4 text-sm font-semibold text-slate-900"
+          >
+            Next page
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

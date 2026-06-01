@@ -64,6 +64,7 @@ function lessonRecord(overrides: Record<string, unknown> = {}) {
           email: "active@example.com",
           isActive: true,
           learningStatus: "ACTIVE",
+          studentProgresses: [{ id: "progress-active" }],
         },
         {
           id: "student-inactive",
@@ -71,6 +72,7 @@ function lessonRecord(overrides: Record<string, unknown> = {}) {
           email: "inactive@example.com",
           isActive: false,
           learningStatus: "PAUSED",
+          studentProgresses: [],
         },
       ],
     },
@@ -81,6 +83,7 @@ function lessonRecord(overrides: Record<string, unknown> = {}) {
         email: "direct@example.com",
         isActive: true,
         learningStatus: "ACTIVE",
+        studentProgresses: [{ id: "progress-direct" }],
       },
     ],
     courseMaterials: [
@@ -253,9 +256,9 @@ describe("teacher lesson workspace repository", () => {
             label: "Review Submissions",
           },
           progress: {
-            disabled: true,
-            href: null,
-            reason: "Teacher progress route is not implemented",
+            disabled: false,
+            href: "/portal/teacher/progress?subjectId=subject-math",
+            label: "Open Progress",
           },
           materials: {
             disabled: false,
@@ -328,9 +331,9 @@ describe("teacher lesson workspace repository", () => {
             feedback: null,
             status: "pending",
             review: {
-              disabled: true,
-              href: null,
-              reason: "Teacher submission detail route is not implemented",
+              disabled: false,
+              href: "/portal/teacher/submissions/submission-pending?assignmentId=assignment-1&scheduledClassId=lesson-1",
+              label: "Review",
             },
           }),
           expect.objectContaining({
@@ -346,10 +349,11 @@ describe("teacher lesson workspace repository", () => {
           gradedSubmissions: 1,
         },
         progressSummary: {
-          disabled: true,
-          href: null,
-          count: 0,
-          reason: "Teacher progress route is not implemented",
+          count: 1,
+          disabled: false,
+          href: "/portal/teacher/progress?subjectId=subject-math",
+          label: "Open Progress",
+          reason: null,
         },
         attendanceSummary: {
           disabled: false,
@@ -476,7 +480,12 @@ describe("teacher lesson workspace repository", () => {
           pendingSubmissions: 0,
           gradedSubmissions: 0,
         },
-        progressSummary: expect.objectContaining({ disabled: true, count: 0 }),
+        progressSummary: expect.objectContaining({
+          count: 0,
+          disabled: false,
+          href: "/portal/teacher/progress?subjectId=subject-math",
+          reason: "No current progress notes for this lesson roster yet.",
+        }),
         attendanceSummary: expect.objectContaining({ disabled: false, hidden: false }),
       }),
     );

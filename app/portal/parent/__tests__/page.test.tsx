@@ -95,6 +95,7 @@ function childDashboard(overrides: Record<string, unknown> = {}) {
         href: "/portal/parent/schedule/student-1/lesson-1",
         startAt: new Date("2026-06-01T09:00:00.000Z"),
         subjectName: "Mathematics",
+        teacherName: "Jane Teacher",
         title: "Algebra lesson",
       },
       todayCount: 1,
@@ -175,6 +176,7 @@ describe("Parent dashboard final hub", () => {
     }
 
     expect(within(childRegion).getByText(/algebra lesson/i)).toBeDefined();
+    expect(within(childRegion).getByText(/teacher:\s*jane teacher/i)).toBeDefined();
     expect(within(childRegion).getByText(/pending assignments:\s*2/i)).toBeDefined();
     expect(within(childRegion).getByText(/recently graded:\s*1/i)).toBeDefined();
     expect(within(childRegion).getByText(/materials:\s*3/i)).toBeDefined();

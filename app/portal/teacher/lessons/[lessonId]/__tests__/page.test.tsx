@@ -149,24 +149,24 @@ function workspaceRecord(overrides: Record<string, unknown> = {}) {
       backToSchedule: "/portal/teacher/schedule",
       classDetail: "/portal/teacher/classes/group-1",
       submissions: {
-        disabled: true,
-        href: null,
-        reason: "Teacher submissions route is not implemented",
+        disabled: false,
+        href: "/portal/teacher/submissions?scheduledClassId=lesson-1",
+        label: "Review Submissions",
       },
       progress: {
-        disabled: true,
-        href: null,
-        reason: "Teacher progress route is not implemented",
+        disabled: false,
+        href: "/portal/teacher/progress?subjectId=subject-math",
+        label: "Open Progress",
       },
       materials: {
-        disabled: true,
-        href: null,
-        reason: "Teacher materials route is not implemented",
+        disabled: false,
+        href: "/portal/teacher/materials?scheduledClassId=lesson-1",
+        label: "Materials",
       },
       attendance: {
         disabled: true,
         href: null,
-        reason: "Attendance module is not implemented",
+        reason: "Attendance unavailable for this lesson",
       },
     },
     roster: [
@@ -246,9 +246,9 @@ function workspaceRecord(overrides: Record<string, unknown> = {}) {
         submissionsCount: 2,
         pendingSubmissionsCount: 1,
         review: {
-          disabled: true,
-          href: null,
-          reason: "Teacher submissions route is not implemented",
+          disabled: false,
+          href: "/portal/teacher/submissions?assignmentId=assignment-1",
+          label: "Review assignment work",
         },
       },
     ],
@@ -262,9 +262,9 @@ function workspaceRecord(overrides: Record<string, unknown> = {}) {
         feedback: null,
         status: "pending",
         review: {
-          disabled: true,
-          href: null,
-          reason: "Teacher submission detail route is not implemented",
+          disabled: false,
+          href: "/portal/teacher/submissions/submission-pending?assignmentId=assignment-1&scheduledClassId=lesson-1",
+          label: "Review",
         },
       },
       {
@@ -280,9 +280,9 @@ function workspaceRecord(overrides: Record<string, unknown> = {}) {
         feedback: "Good work",
         status: "graded",
         review: {
-          disabled: true,
-          href: null,
-          reason: "Teacher submission detail route is not implemented",
+          disabled: false,
+          href: "/portal/teacher/submissions/submission-graded?assignmentId=assignment-1&scheduledClassId=lesson-1",
+          label: "Review",
         },
       },
     ],
@@ -292,10 +292,11 @@ function workspaceRecord(overrides: Record<string, unknown> = {}) {
       gradedSubmissions: 1,
     },
     progressSummary: {
-      disabled: true,
-      href: null,
-      count: 0,
-      reason: "Teacher progress route is not implemented",
+      disabled: false,
+      href: "/portal/teacher/progress?subjectId=subject-math",
+      count: 1,
+      label: "Open Progress",
+      reason: null,
     },
     attendanceSummary: {
       disabled: false,
@@ -353,7 +354,11 @@ describe("Teacher schedule lesson detail page", () => {
     expect(screen.getByText(/2 submissions/i)).toBeDefined();
     expect(screen.getByText(/1 pending/i)).toBeDefined();
     expect(screen.getByRole("heading", { name: /progress notes/i })).toBeDefined();
-    expect(screen.getByText(/teacher progress route is not implemented/i)).toBeDefined();
+    expect(screen.queryByText(/teacher progress route is not implemented/i)).toBeNull();
+    expect(screen.getAllByRole("link", { name: /open progress/i })[0]).toHaveAttribute(
+      "href",
+      "/portal/teacher/progress?subjectId=subject-math",
+    );
     expect(container.textContent).not.toContain("https://meet.google.com/abc-defg-hij");
   });
 
@@ -396,24 +401,24 @@ describe("Teacher schedule lesson detail page", () => {
             reason: "Lesson is not tied to a class group",
           },
           submissions: {
-            disabled: true,
-            href: null,
-            reason: "Teacher submissions route is not implemented",
+            disabled: false,
+            href: "/portal/teacher/submissions?scheduledClassId=lesson-1",
+            label: "Review Submissions",
           },
           progress: {
-            disabled: true,
-            href: null,
-            reason: "Teacher progress route is not implemented",
+            disabled: false,
+            href: "/portal/teacher/progress?subjectId=subject-math",
+            label: "Open Progress",
           },
           materials: {
-            disabled: true,
-            href: null,
-            reason: "Teacher materials route is not implemented",
+            disabled: false,
+            href: "/portal/teacher/materials?scheduledClassId=lesson-1",
+            label: "Materials",
           },
           attendance: {
             disabled: true,
             href: null,
-            reason: "Attendance module is not implemented",
+            reason: "Attendance unavailable for this lesson",
           },
         },
       }),
@@ -458,8 +463,11 @@ describe("Teacher schedule lesson detail page", () => {
       "/portal/teacher/submissions?scheduledClassId=lesson-1",
     );
     expect(screen.queryByText(/teacher submissions route is not implemented/i)).toBeNull();
-    expect(screen.queryByRole("link", { name: /progress notes/i })).toBeNull();
-    expect(screen.getByText(/teacher progress route is not implemented/i)).toBeDefined();
+    expect(screen.queryByText(/teacher progress route is not implemented/i)).toBeNull();
+    expect(screen.getAllByRole("link", { name: /open progress/i })[0]).toHaveAttribute(
+      "href",
+      "/portal/teacher/progress?subjectId=subject-math",
+    );
     expect(screen.getByRole("heading", { name: /^attendance$/i })).toBeDefined();
     expect(screen.queryByText(/attendance module is not implemented/i)).toBeNull();
     expect(container.querySelector('a[href="/portal/schedule"]')).toBeNull();
@@ -524,7 +532,10 @@ describe("Teacher schedule lesson detail page", () => {
     expect(screen.getByText(/due soon/i)).toBeDefined();
     expect(screen.getByText(/2 submissions/i)).toBeDefined();
     expect(screen.getByText(/1 pending/i)).toBeDefined();
-    expect(screen.getAllByText(/review disabled/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: /review assignment work/i })).toHaveAttribute(
+      "href",
+      "/portal/teacher/submissions?assignmentId=assignment-1",
+    );
 
     expect(screen.getByText(/pending submissions:\s*1/i)).toBeDefined();
     expect(screen.getByText(/graded submissions:\s*1/i)).toBeDefined();

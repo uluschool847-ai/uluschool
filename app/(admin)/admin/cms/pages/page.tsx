@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { deletePageAction } from "@/app/(admin)/admin/cms/actions";
+import { ConfirmedSubmit } from "@/components/admin/ConfirmedSubmit";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/session";
@@ -10,6 +11,10 @@ import { listPages } from "@/lib/repositories/cms-repository";
 
 export const metadata: Metadata = {
   title: "Manage Pages - CMS",
+};
+
+type CmsPagesListProps = {
+  searchParams?: Promise<{ cmsMessage?: string }> | { cmsMessage?: string };
 };
 
 function formatDate(date: Date) {
@@ -20,8 +25,9 @@ function formatDate(date: Date) {
   }).format(date);
 }
 
-export default async function CMSPagesList() {
+export default async function CMSPagesList({ searchParams = {} }: CmsPagesListProps) {
   await requireRole([UserRole.ADMIN]);
+  const resolvedSearchParams = await searchParams;
   const pages = await listPages();
 
   return (
@@ -38,6 +44,12 @@ export default async function CMSPagesList() {
           <Link href="/admin/cms/pages/new">Create New Page</Link>
         </Button>
       </div>
+
+      {resolvedSearchParams.cmsMessage ? (
+        <output className="block rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-800">
+          {resolvedSearchParams.cmsMessage}
+        </output>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -86,12 +98,18 @@ export default async function CMSPagesList() {
                         <Button asChild variant="outline" size="sm">
                           <Link href={`/admin/cms/pages/${page.id}`}>Edit</Link>
                         </Button>
-                        <form action={deletePageAction} className="inline-block">
-                          <input type="hidden" name="id" value={page.id} />
-                          <Button type="submit" variant="destructive" size="sm">
-                            Delete
-                          </Button>
-                        </form>
+                        <ConfirmedSubmit
+                          title="Delete CMS page"
+                          description={`Delete ${page.title} at /pages/${page.slug}? Published content will disappear from the public route after revalidation.`}
+                          confirmLabel="Confirm delete"
+                        >
+                          <form action={deletePageAction} className="inline-block">
+                            <input type="hidden" name="id" value={page.id} />
+                            <Button type="submit" variant="destructive" size="sm">
+                              Delete
+                            </Button>
+                          </form>
+                        </ConfirmedSubmit>
                       </td>
                     </tr>
                   ))}
