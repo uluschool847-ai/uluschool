@@ -2,6 +2,16 @@
 
 This project is a production-oriented Next.js 15 + Prisma/PostgreSQL school platform for ULU Online School. AI tools may be used to plan, implement, review, and test changes, but they must follow the project-specific workflow below.
 
+## Superpowers Layer
+
+This repository uses a lightweight project-level "Superpowers" layer for AI-assisted engineering. It is not a runtime dependency and must not change production behavior by itself.
+
+Before starting substantial work, read:
+
+- `docs/ai-superpowers.md`
+
+Apply that workflow when the task involves planning, debugging, feature work, refactoring, tests, deployment preparation, or handoff. The Superpowers layer complements the rules below; when there is a conflict, the stricter project-specific rule in this `AGENTS.md` wins.
+
 ## Required Workflow
 
 Every non-trivial change must follow this order:
@@ -135,4 +145,3 @@ Every completed implementation should end with:
 - known gaps or follow-up tasks.
 
 Do not claim 100% completion unless tests and manual verification cover the accepted scope.
-
