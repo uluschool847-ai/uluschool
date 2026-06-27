@@ -367,7 +367,7 @@ async function ensurePortalUsers() {
       weekday: index + 1,
       startTime: "00:00",
       endTime: "23:59",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
     })),
   });
 }

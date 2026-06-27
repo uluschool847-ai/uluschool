@@ -12,12 +12,12 @@ async function loadAvailabilityTimezoneHelpers() {
 }
 
 describe("availability timezone helpers", () => {
-  it("converts datetime-local values in Europe/Kiev to the correct UTC instant", async () => {
+  it("converts datetime-local values in Africa/Nairobi to the correct UTC instant", async () => {
     const { localDateTimeToUtc } = await loadAvailabilityTimezoneHelpers();
 
     const utc = localDateTimeToUtc({
       value: "2026-05-20T10:00",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
     });
 
     expect(utc).toBeInstanceOf(Date);
@@ -31,7 +31,7 @@ describe("availability timezone helpers", () => {
     expect(
       utcToLocalDateTime({
         date: new Date("2026-05-20T07:00:00.000Z"),
-        timezone: "Europe/Kiev",
+        timezone: "Africa/Nairobi",
       }),
     ).toBe("2026-05-20T10:00");
   });
@@ -42,10 +42,10 @@ describe("availability timezone helpers", () => {
     const utcSundayButKievMonday = new Date("2026-05-17T21:30:00.000Z");
 
     expect(utcSundayButKievMonday.getUTCDay()).toBe(0);
-    expect(getWeekdayInTimezone(utcSundayButKievMonday, "Europe/Kiev")).toBe(1);
+    expect(getWeekdayInTimezone(utcSundayButKievMonday, "Africa/Nairobi")).toBe(1);
   });
 
-  it("falls back safely to Europe/Kiev for invalid timezones", async () => {
+  it("falls back safely to Africa/Nairobi for invalid timezones", async () => {
     const { localDateTimeToUtc, utcToLocalDateTime, getWeekdayInTimezone } =
       await loadAvailabilityTimezoneHelpers();
 
@@ -64,26 +64,26 @@ describe("availability timezone helpers", () => {
     expect(getWeekdayInTimezone(new Date("2026-05-17T21:30:00.000Z"), "Invalid/Timezone")).toBe(1);
   });
 
-  it("handles Europe/Kiev DST offsets without shifting the intended local hour", async () => {
+  it("handles Africa/Nairobi fixed offsets without shifting the intended local hour", async () => {
     const { localDateTimeToUtc, utcToLocalDateTime } = await loadAvailabilityTimezoneHelpers();
 
     const winter = localDateTimeToUtc({
       value: "2026-01-20T10:00",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
     });
     const summer = localDateTimeToUtc({
       value: "2026-05-20T10:00",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
     });
     const dstTransitionDay = localDateTimeToUtc({
       value: "2026-03-29T10:00",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
     });
 
-    expect(winter.toISOString()).toBe("2026-01-20T08:00:00.000Z");
+    expect(winter.toISOString()).toBe("2026-01-20T07:00:00.000Z");
     expect(summer.toISOString()).toBe("2026-05-20T07:00:00.000Z");
     expect(dstTransitionDay.toISOString()).toBe("2026-03-29T07:00:00.000Z");
-    expect(utcToLocalDateTime({ date: dstTransitionDay, timezone: "Europe/Kiev" })).toBe(
+    expect(utcToLocalDateTime({ date: dstTransitionDay, timezone: "Africa/Nairobi" })).toBe(
       "2026-03-29T10:00",
     );
   });

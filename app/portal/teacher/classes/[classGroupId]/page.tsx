@@ -17,7 +17,7 @@ function formatDate(date: Date) {
     year: "numeric",
     month: "long",
     day: "2-digit",
-    timeZone: "Europe/Kiev",
+    timeZone: "Africa/Nairobi",
   }).formatToParts(date);
 
   const day = parts.find((part) => part.type === "day")?.value ?? "";
@@ -32,7 +32,7 @@ function formatTime(date: Date) {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-    timeZone: "Europe/Kiev",
+    timeZone: "Africa/Nairobi",
   }).format(date);
 }
 
@@ -76,7 +76,7 @@ function LessonList({
               <p className="font-medium">{lesson.title}</p>
               <p className="text-xs text-muted-foreground">
                 {formatDate(lesson.startAt)} {formatTime(lesson.startAt)} -{" "}
-                {formatTime(lesson.endAt)} Europe/Kiev
+                {formatTime(lesson.endAt)} Africa/Nairobi
               </p>
               <p className="text-xs text-muted-foreground">Status: {lesson.status}</p>
             </div>

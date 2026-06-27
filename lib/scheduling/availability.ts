@@ -8,7 +8,7 @@ export type WeeklyAvailabilityRule = {
   status: AvailabilitySlotStatus | string;
 };
 
-export const DEFAULT_AVAILABILITY_TIMEZONE = "Europe/Kiev";
+export const DEFAULT_AVAILABILITY_TIMEZONE = "Africa/Nairobi";
 
 type DateParts = {
   year: number;

@@ -65,7 +65,7 @@ function displayDate(value?: string | null) {
   return new Intl.DateTimeFormat("en", {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: "Europe/Kiev",
+    timeZone: "Africa/Nairobi",
   }).format(new Date(value));
 }
 

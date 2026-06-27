@@ -44,7 +44,7 @@ function formatDate(date: Date | null) {
     day: "2-digit",
     month: "long",
     year: "numeric",
-    timeZone: "Europe/Kiev",
+    timeZone: "Africa/Nairobi",
   }).format(date);
 }
 
@@ -52,7 +52,7 @@ function formatTime(date: Date) {
   return new Intl.DateTimeFormat("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
-    timeZone: "Europe/Kiev",
+    timeZone: "Africa/Nairobi",
   }).format(date);
 }
 

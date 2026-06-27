@@ -27,7 +27,7 @@ function formatDate(date: Date) {
     year: "numeric",
     month: "long",
     day: "2-digit",
-    timeZone: "Europe/Kiev",
+    timeZone: "Africa/Nairobi",
   }).formatToParts(date);
 
   const day = parts.find((part) => part.type === "day")?.value ?? "";
@@ -38,7 +38,7 @@ function formatDate(date: Date) {
 }
 
 function formatDateTime(date: Date) {
-  return `${formatDate(date)}, ${formatTime(date)} Europe/Kiev`;
+  return `${formatDate(date)}, ${formatTime(date)} Africa/Nairobi`;
 }
 
 function formatTime(date: Date) {
@@ -46,7 +46,7 @@ function formatTime(date: Date) {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-    timeZone: "Europe/Kiev",
+    timeZone: "Africa/Nairobi",
   }).format(date);
 }
 
@@ -188,7 +188,7 @@ function LessonCard({
           ) : null}
           <p className="text-xs text-muted-foreground">
             {formatDate(lesson.startAt)} {formatTime(lesson.startAt)} - {formatTime(lesson.endAt)}{" "}
-            {lesson.timezone ?? "Europe/Kiev"}
+            {lesson.timezone ?? "Africa/Nairobi"}
           </p>
           <p className="text-xs text-muted-foreground">Students: {learnerTotal}</p>
           <p className="text-xs text-muted-foreground">
@@ -271,7 +271,7 @@ export default async function TeacherPortalDashboard() {
           <CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
             <SectionHeading
               title="Today Lessons"
-              description="Sessions for today in Europe/Kiev."
+              description="Sessions for today in Africa/Nairobi."
             />
             <Button asChild variant="secondary" size="sm">
               <Link href="/portal/teacher/schedule">Class Schedule</Link>
@@ -415,7 +415,7 @@ export default async function TeacherPortalDashboard() {
                           <p className="text-xs text-muted-foreground">
                             Next lesson: {formatDate(nextLesson.startAt)}{" "}
                             {formatTime(nextLesson.startAt)} - {formatTime(nextLesson.endAt)}{" "}
-                            Europe/Kiev
+                            Africa/Nairobi
                           </p>
                         ) : (
                           <p className="text-xs text-muted-foreground">

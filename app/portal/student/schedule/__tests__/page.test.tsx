@@ -41,7 +41,7 @@ function lessonRecord(overrides: Record<string, unknown> = {}) {
     status: "LIVE",
     startAt: new Date("2026-06-10T10:00:00.000Z"),
     endAt: new Date("2026-06-10T11:00:00.000Z"),
-    timezone: "Europe/Kiev",
+    timezone: "Africa/Nairobi",
     liveLessonUrl: "https://meet.google.com/abc-defg-hij",
     subject: { id: "subject-math", name: "Mathematics", slug: "mathematics" },
     level: { id: "level-igcse", name: "IGCSE", slug: "igcse" },

@@ -166,7 +166,7 @@ test.describe("Admin Teacher Availability", () => {
     await page.getByLabel(/weekday/i).selectOption("1");
     await page.getByLabel(/start time/i).fill("09:00");
     await page.getByLabel(/end time/i).fill("12:00");
-    await page.getByLabel(/timezone/i).fill("Europe/Kiev");
+    await page.getByLabel(/timezone/i).fill("Africa/Nairobi");
     await page
       .getByRole("button", { name: /add availability|create rule|save availability/i })
       .click();

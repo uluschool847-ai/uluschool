@@ -1170,7 +1170,7 @@ function mapDashboardLesson(record: DashboardLessonRecord, now: Date): TeacherDa
     classGroup,
     startAt: record.startAt,
     endAt: record.endAt,
-    timezone: record.timezone ?? "Europe/Kiev",
+    timezone: record.timezone ?? "Africa/Nairobi",
     status: record.status,
     liveLessonUrl: record.liveLessonUrl,
     meetingProvider: record.meetingProvider,
@@ -1329,7 +1329,7 @@ function uniqueDashboardClasses(
 
 export async function getTeacherDashboardData(teacherId: string): Promise<TeacherDashboardData> {
   const now = new Date();
-  const timezone = "Europe/Kiev";
+  const timezone = "Africa/Nairobi";
   const todayKey = dateKeyInTimezone(now, timezone);
   const todayRange = dayRangeInTimezone(now, timezone);
   const weekRange = weekRangeInTimezone(now, timezone);

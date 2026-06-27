@@ -235,7 +235,7 @@ describe("teacher-schedule-repository access contract", () => {
       expect.objectContaining({
         id: "direct-teacher-lesson",
         title: "Algebra live workshop",
-        timezone: "Europe/Kiev",
+        timezone: "Africa/Nairobi",
         meetingProvider: "GOOGLE_MEET",
         googleCalendarEventId: "calendar-event-1",
         googleMeetSpaceName: "spaces/abc-defg-hij",

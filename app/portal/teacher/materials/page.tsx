@@ -58,7 +58,7 @@ function formatLessonTitle(material: MaterialRecord) {
     hour: "2-digit",
     minute: "2-digit",
     month: "long",
-    timeZone: "Europe/Kiev",
+    timeZone: "Africa/Nairobi",
     year: "numeric",
   }).format(date);
 }

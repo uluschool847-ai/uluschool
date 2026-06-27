@@ -178,7 +178,7 @@ export function RecurringLessonsForm({
           />
         </label>
       </div>
-      <input type="hidden" name="timezone" value="Europe/Kiev" />
+      <input type="hidden" name="timezone" value="Africa/Nairobi" />
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="secondary" onClick={() => setShowPreview(true)}>
           Preview

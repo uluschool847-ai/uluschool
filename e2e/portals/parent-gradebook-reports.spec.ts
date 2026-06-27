@@ -334,7 +334,7 @@ async function createFixtures(): Promise<ParentGradebookReportsFixture> {
       status: LessonStatus.COMPLETED,
       subjectId: subject.id,
       teacherId: teacher.id,
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
       title: attendanceLessonTitle,
     },
   });

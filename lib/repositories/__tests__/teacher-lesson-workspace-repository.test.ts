@@ -190,7 +190,7 @@ describe("teacher lesson workspace repository", () => {
         lesson: expect.objectContaining({
           id: "direct-lesson",
           title: "Algebra live workspace",
-          timezone: "Europe/Kiev",
+          timezone: "Africa/Nairobi",
           meetingProvider: "GOOGLE_MEET",
           googleCalendarEventId: "calendar-event-1",
           googleMeetSpaceName: "spaces/abc-defg-hij",
@@ -225,7 +225,7 @@ describe("teacher lesson workspace repository", () => {
           status: LessonStatus.SCHEDULED,
           startAt,
           endAt,
-          timezone: "Europe/Kiev",
+          timezone: "Africa/Nairobi",
           cancelReason: null,
           rescheduledFromId: null,
           isRescheduled: false,

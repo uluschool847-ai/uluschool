@@ -212,7 +212,7 @@ describe("student-schedule-repository access contract", () => {
       expect.objectContaining({
         id: "lesson-1",
         title: "Quadratic functions",
-        timezone: "Europe/Kiev",
+        timezone: "Africa/Nairobi",
         meetingProvider: "GOOGLE_MEET",
         googleCalendarEventId: "calendar-event-1",
         googleMeetSpaceName: "spaces/abc-defg-hij",

@@ -273,7 +273,7 @@ async function createFixtures(): Promise<StudentAttendanceFixture> {
             status: LessonStatus.COMPLETED,
             subjectId: subject.id,
             teacherId: teacher.id,
-            timezone: "Europe/Kiev",
+            timezone: "Africa/Nairobi",
             title,
           },
         }),

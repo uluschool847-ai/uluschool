@@ -92,7 +92,7 @@ function lessonForm(overrides?: Partial<Record<string, string | null>>) {
   formData.set("description", "Live problem-solving session");
   formData.set("startAt", "2026-06-01T10:00");
   formData.set("endAt", "2026-06-01T11:00");
-  formData.set("timezone", "Europe/Kiev");
+  formData.set("timezone", "Africa/Nairobi");
   formData.set("teacherId", "teacher-1");
   formData.set("subjectId", "subject-math");
   formData.set("liveLessonUrl", "https://meet.google.com/abc-defg-hij");
@@ -121,7 +121,7 @@ function recurringForm(overrides?: Partial<Record<string, string | null>>) {
   formData.append("weekdays", "3");
   formData.set("startTime", "10:00");
   formData.set("endTime", "11:00");
-  formData.set("timezone", "Europe/Kiev");
+  formData.set("timezone", "Africa/Nairobi");
   formData.set("teacherId", "teacher-1");
   formData.set("subjectId", "subject-math");
   formData.set("liveLessonUrl", "https://meet.google.com/abc-defg-hij");
@@ -145,7 +145,7 @@ function lessonRecord(overrides?: Record<string, unknown>) {
     description: "Live problem-solving session",
     startAt: new Date("2026-06-01T10:00:00.000Z"),
     endAt: new Date("2026-06-01T11:00:00.000Z"),
-    timezone: "Europe/Kiev",
+    timezone: "Africa/Nairobi",
     status: "SCHEDULED",
     liveLessonUrl: "https://meet.google.com/abc-defg-hij",
     meetingProvider: "GOOGLE_MEET",

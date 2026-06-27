@@ -159,7 +159,7 @@ function normalizeRuleForm(formData: FormData) {
     weekday: formData.get("weekday")?.toString() ?? "",
     startTime: formData.get("startTime")?.toString() ?? "",
     endTime: formData.get("endTime")?.toString() ?? "",
-    timezone: formData.get("timezone")?.toString() ?? "Europe/Kiev",
+    timezone: formData.get("timezone")?.toString() ?? "Africa/Nairobi",
     status: formData.get("status")?.toString() || "ACTIVE",
   };
 }

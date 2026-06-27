@@ -103,7 +103,7 @@ function ruleData(input: AvailabilityRuleInput) {
     weekday: input.weekday,
     startTime: input.startTime,
     endTime: input.endTime,
-    timezone: input.timezone?.trim() || "Europe/Kiev",
+    timezone: input.timezone?.trim() || "Africa/Nairobi",
     status: input.status ?? AvailabilitySlotStatus.ACTIVE,
   };
 }

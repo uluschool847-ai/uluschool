@@ -3,7 +3,7 @@ import { LessonStatus, type MeetingProvider, type Prisma } from "@prisma/client"
 import { canStartLesson } from "@/lib/lessons/lesson-status";
 import { prisma } from "@/lib/prisma";
 
-const DEFAULT_TIMEZONE = "Europe/Kiev";
+const DEFAULT_TIMEZONE = "Africa/Nairobi";
 
 type DisabledAction = {
   disabled: true;

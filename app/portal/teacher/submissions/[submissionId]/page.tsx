@@ -37,7 +37,7 @@ function formatDateTime(value: Date | string | null | undefined) {
     hour: "2-digit",
     minute: "2-digit",
     month: "short",
-    timeZone: "Europe/Kiev",
+    timeZone: "Africa/Nairobi",
     year: "numeric",
   }).format(date);
 }

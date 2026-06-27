@@ -7,7 +7,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { safeCourseMaterialHref } from "@/lib/security/course-material-links";
 
-const DEFAULT_TIMEZONE = "Europe/Kiev";
+const DEFAULT_TIMEZONE = "Africa/Nairobi";
 
 export type StudentScheduleInput = {
   studentId: string;

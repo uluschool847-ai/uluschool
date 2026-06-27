@@ -123,7 +123,7 @@ const lessonBaseSchema = z.object({
   description: optionalText,
   startAt: dateTimeSchema,
   endAt: dateTimeSchema,
-  timezone: z.string().trim().default("Europe/Kiev"),
+  timezone: z.string().trim().default("Africa/Nairobi"),
   teacherId: optionalId,
   subjectId: optionalId,
   liveLessonUrl: z.string().trim(),
@@ -199,7 +199,7 @@ const recurringSchema = z
       .string()
       .trim()
       .regex(/^\d{2}:\d{2}$/, "End time is required."),
-    timezone: z.string().trim().default("Europe/Kiev"),
+    timezone: z.string().trim().default("Africa/Nairobi"),
     teacherId: optionalId,
     subjectId: optionalId,
     liveLessonUrl: z.string().trim(),
@@ -231,7 +231,7 @@ function normalizeLessonForm(formData: FormData) {
     description: formData.get("description")?.toString() ?? "",
     startAt: formData.get("startAt")?.toString() ?? "",
     endAt: formData.get("endAt")?.toString() ?? "",
-    timezone: formData.get("timezone")?.toString() ?? "Europe/Kiev",
+    timezone: formData.get("timezone")?.toString() ?? "Africa/Nairobi",
     teacherId: formData.get("teacherId")?.toString() ?? "",
     subjectId: formData.get("subjectId")?.toString() ?? "",
     liveLessonUrl: formData.get("liveLessonUrl")?.toString() ?? "",
@@ -266,7 +266,7 @@ function normalizeRecurringForm(formData: FormData) {
     weekdays: formData.getAll("weekdays").map((value) => value.toString()),
     startTime: formData.get("startTime")?.toString() ?? "",
     endTime: formData.get("endTime")?.toString() ?? "",
-    timezone: formData.get("timezone")?.toString() ?? "Europe/Kiev",
+    timezone: formData.get("timezone")?.toString() ?? "Africa/Nairobi",
     teacherId: formData.get("teacherId")?.toString() ?? "",
     subjectId: formData.get("subjectId")?.toString() ?? "",
     liveLessonUrl: formData.get("liveLessonUrl")?.toString() ?? "",
@@ -449,7 +449,7 @@ function buildGoogleLessonInput(
     googleMeetSpaceName: lesson.googleMeetSpaceName ?? null,
     lessonId: lesson.id,
     startAt: overrides.startAt ?? lesson.startAt,
-    timezone: overrides.timezone ?? lesson.timezone ?? "Europe/Kiev",
+    timezone: overrides.timezone ?? lesson.timezone ?? "Africa/Nairobi",
     title: overrides.title ?? lesson.title,
   };
 }

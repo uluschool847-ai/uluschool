@@ -43,7 +43,7 @@ describe("TeacherAvailabilityRules", () => {
             weekday: 1,
             startTime: "09:00",
             endTime: "12:00",
-            timezone: "Europe/Kiev",
+            timezone: "Africa/Nairobi",
             status: "ACTIVE",
           },
           {
@@ -52,7 +52,7 @@ describe("TeacherAvailabilityRules", () => {
             weekday: 5,
             startTime: "14:00",
             endTime: "16:00",
-            timezone: "Europe/Kiev",
+            timezone: "Africa/Nairobi",
             status: "INACTIVE",
           },
         ]}
@@ -60,12 +60,12 @@ describe("TeacherAvailabilityRules", () => {
     );
 
     expect(screen.getByText(/monday|mon/i)).toBeDefined();
-    expect(screen.getByText(/friday|fri/i)).toBeDefined();
+    expect(screen.getByText(/^friday$/i)).toBeDefined();
     expect(screen.getByText(/09:00/)).toBeDefined();
     expect(screen.getByText(/12:00/)).toBeDefined();
     expect(screen.getByText(/14:00/)).toBeDefined();
     expect(screen.getByText(/16:00/)).toBeDefined();
-    expect(screen.getAllByText(/europe\/kiev/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/africa\/nairobi/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/^active$/i)).toBeDefined();
     expect(screen.getByText(/^inactive$/i)).toBeDefined();
   });
@@ -83,7 +83,7 @@ describe("TeacherAvailabilityRules", () => {
             weekday: 1,
             startTime: "09:00",
             endTime: "12:00",
-            timezone: "Europe/Kiev",
+            timezone: "Africa/Nairobi",
             status: "ACTIVE",
           },
         ]}

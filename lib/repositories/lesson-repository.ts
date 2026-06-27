@@ -285,7 +285,7 @@ function mapLessonRecord(lesson: LessonWithRelations | LooseLessonRecord): Admin
     description: source.description ?? null,
     startAt: source.startAt ?? new Date(0),
     endAt: source.endAt ?? new Date(0),
-    timezone: source.timezone ?? "Europe/Kiev",
+    timezone: source.timezone ?? "Africa/Nairobi",
     status: source.status ?? LessonStatus.SCHEDULED,
     liveLessonUrl: source.liveLessonUrl ?? null,
     meetingProvider: source.meetingProvider ?? PrismaMeetingProvider.GOOGLE_MEET,
@@ -335,7 +335,7 @@ function mutationSnapshot(lesson: LooseLessonRecord) {
     description: lesson.description ?? null,
     startAt: lesson.startAt,
     endAt: lesson.endAt,
-    timezone: lesson.timezone ?? "Europe/Kiev",
+    timezone: lesson.timezone ?? "Africa/Nairobi",
     status: lesson.status ?? LessonStatus.SCHEDULED,
     liveLessonUrl: lesson.liveLessonUrl ?? null,
     meetingProvider: lesson.meetingProvider ?? PrismaMeetingProvider.GOOGLE_MEET,
@@ -442,7 +442,7 @@ export async function createLesson(input: LessonInput, database: LessonDatabase 
       description: input.description?.trim() || null,
       startAt: input.startAt,
       endAt: input.endAt,
-      timezone: input.timezone || "Europe/Kiev",
+      timezone: input.timezone || "Africa/Nairobi",
       status: LessonStatus.SCHEDULED,
       liveLessonUrl,
       meetingProvider,
@@ -770,7 +770,7 @@ function localDateLabel(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-function buildDateAtTime(date: Date, time: string, timezone = "Europe/Kiev") {
+function buildDateAtTime(date: Date, time: string, timezone = "Africa/Nairobi") {
   const { hour, minute } = parseTimeParts(time);
   return localDateTimeToUtc({
     value: `${localDateLabel(date)}T${hour.toString().padStart(2, "0")}:${minute
@@ -869,7 +869,7 @@ export async function createRecurringLessons(
       description: input.description?.trim() || null,
       startAt,
       endAt,
-      timezone: input.timezone || "Europe/Kiev",
+      timezone: input.timezone || "Africa/Nairobi",
       status: LessonStatus.SCHEDULED,
       liveLessonUrl,
       meetingProvider,

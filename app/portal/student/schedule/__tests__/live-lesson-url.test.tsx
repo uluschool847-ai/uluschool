@@ -41,7 +41,7 @@ function lessonRecord(overrides: Record<string, unknown> = {}) {
     status: "SCHEDULED",
     startAt: new Date("2026-06-01T10:00:00.000Z"),
     endAt: new Date("2026-06-01T11:00:00.000Z"),
-    timezone: "Europe/Kiev",
+    timezone: "Africa/Nairobi",
     liveLessonUrl: "https://meet.google.com/abc-defg-hij",
     meetingProvider: "GOOGLE_MEET",
     googleCalendarEventId: "calendar-event-1",

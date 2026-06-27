@@ -102,7 +102,7 @@ function enableGoogleCalendar(
     "-----BEGIN PRIVATE KEY-----\\nabc123\\n-----END PRIVATE KEY-----";
   process.env.GOOGLE_IMPERSONATED_USER_EMAIL =
     overrides.GOOGLE_IMPERSONATED_USER_EMAIL ?? "calendar-admin@example.com";
-  process.env.GOOGLE_TIMEZONE = overrides.GOOGLE_TIMEZONE ?? "Europe/Kiev";
+  process.env.GOOGLE_TIMEZONE = overrides.GOOGLE_TIMEZONE ?? "Africa/Nairobi";
 }
 
 function lessonInput(
@@ -114,7 +114,7 @@ function lessonInput(
     description: "Solve quadratic equations together.",
     startAt: new Date("2026-06-01T10:00:00.000Z"),
     endAt: new Date("2026-06-01T11:00:00.000Z"),
-    timezone: "Europe/Kiev",
+    timezone: "Africa/Nairobi",
     ...overrides,
   };
 }
@@ -154,7 +154,7 @@ describe("Google Calendar Meet integration service config", () => {
     expect(getGoogleCalendarConfig()).toEqual(
       expect.objectContaining({
         enabled: false,
-        timezone: "Europe/Kiev",
+        timezone: "Africa/Nairobi",
       }),
     );
     expect(jwtMock).not.toHaveBeenCalled();
@@ -177,14 +177,14 @@ describe("Google Calendar Meet integration service config", () => {
         clientEmail: null,
         enabled: false,
         privateKey: null,
-        timezone: "Europe/Kiev",
+        timezone: "Africa/Nairobi",
       }),
     );
     expect(jwtMock).not.toHaveBeenCalled();
     expect(calendarMock).not.toHaveBeenCalled();
   });
 
-  it("reads Google Calendar environment config with Europe/Kiev as the default timezone", async () => {
+  it("reads Google Calendar environment config with Africa/Nairobi as the default timezone", async () => {
     enableGoogleCalendar({ GOOGLE_TIMEZONE: "" });
 
     const { getGoogleCalendarConfig, isGoogleCalendarEnabled } =
@@ -197,7 +197,7 @@ describe("Google Calendar Meet integration service config", () => {
       clientEmail: "service-account@example.iam.gserviceaccount.com",
       impersonatedUserEmail: "calendar-admin@example.com",
       privateKey: "-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
     });
   });
 
@@ -211,7 +211,7 @@ describe("Google Calendar Meet integration service config", () => {
     expect(getGoogleCalendarConfig()).toEqual(
       expect.objectContaining({
         enabled: false,
-        timezone: "Europe/Kiev",
+        timezone: "Africa/Nairobi",
       }),
     );
 
@@ -301,8 +301,8 @@ describe("Google Calendar Meet event lifecycle", () => {
           }),
         },
         description: "Solve quadratic equations together.",
-        end: { dateTime: "2026-06-01T11:00:00.000Z", timeZone: "Europe/Kiev" },
-        start: { dateTime: "2026-06-01T10:00:00.000Z", timeZone: "Europe/Kiev" },
+        end: { dateTime: "2026-06-01T11:00:00.000Z", timeZone: "Africa/Nairobi" },
+        start: { dateTime: "2026-06-01T10:00:00.000Z", timeZone: "Africa/Nairobi" },
         summary: "Quadratic functions",
       }),
     );
@@ -372,8 +372,8 @@ describe("Google Calendar Meet event lifecycle", () => {
     expect(patchedEventBody()).toEqual(
       expect.objectContaining({
         description: "Updated lesson notes.",
-        end: { dateTime: "2026-06-01T11:30:00.000Z", timeZone: "Europe/Kiev" },
-        start: { dateTime: "2026-06-01T10:00:00.000Z", timeZone: "Europe/Kiev" },
+        end: { dateTime: "2026-06-01T11:30:00.000Z", timeZone: "Africa/Nairobi" },
+        start: { dateTime: "2026-06-01T10:00:00.000Z", timeZone: "Africa/Nairobi" },
         summary: "Updated quadratic functions",
       }),
     );

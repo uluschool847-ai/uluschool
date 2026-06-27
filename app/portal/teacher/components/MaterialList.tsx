@@ -61,7 +61,7 @@ function formatDate(value: string | Date | null | undefined) {
     day: "2-digit",
     month: "long",
     year: "numeric",
-    timeZone: "Europe/Kiev",
+    timeZone: "Africa/Nairobi",
   }).format(date);
 }
 

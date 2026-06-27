@@ -147,7 +147,7 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
       description: "Live problem-solving session",
       startAt,
       endAt,
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
       status: "SCHEDULED",
       liveLessonUrl: "https://meet.google.com/abc-defg-hij",
       meetingProvider: "GOOGLE_MEET",
@@ -260,7 +260,7 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
     expect(result).toEqual(
       expect.objectContaining({
         id: "lesson-1",
-        timezone: "Europe/Kiev",
+        timezone: "Africa/Nairobi",
         status: "SCHEDULED",
         cancelledAt: null,
         cancelReason: null,
@@ -327,7 +327,7 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
       description: "Live problem-solving session",
       startAt,
       endAt,
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
       liveLessonUrl: "https://meet.google.com/abc-defg-hij",
       meetingProvider: "GOOGLE_MEET",
     });
@@ -347,7 +347,7 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
           teacher: { connect: { id: "teacher-1" } },
           subject: { connect: { id: "subject-math" } },
           status: "SCHEDULED",
-          timezone: "Europe/Kiev",
+          timezone: "Africa/Nairobi",
           liveLessonUrl: "https://meet.google.com/abc-defg-hij",
           meetingProvider: "GOOGLE_MEET",
         }),
@@ -776,7 +776,7 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
         weekday: 1,
         startTime: "09:00",
         endTime: "12:00",
-        timezone: "Europe/Kiev",
+        timezone: "Africa/Nairobi",
         status: "ACTIVE",
       },
       {
@@ -785,7 +785,7 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
         weekday: 3,
         startTime: "09:00",
         endTime: "12:00",
-        timezone: "Europe/Kiev",
+        timezone: "Africa/Nairobi",
         status: "ACTIVE",
       },
     ]);
@@ -810,7 +810,7 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
       weekdays: [1, 3],
       startTime: "10:00",
       endTime: "11:00",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
       liveLessonUrl: "https://meet.google.com/abc-defg-hij",
       meetingProvider: "GOOGLE_MEET",
     });
@@ -882,7 +882,7 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
         weekday: 1,
         startTime: "09:00",
         endTime: "12:00",
-        timezone: "Europe/Kiev",
+        timezone: "Africa/Nairobi",
         status: "ACTIVE",
       },
     ]);
@@ -899,7 +899,7 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
         weekdays: [1, 3],
         startTime: "10:00",
         endTime: "11:00",
-        timezone: "Europe/Kiev",
+        timezone: "Africa/Nairobi",
         liveLessonUrl: "https://meet.google.com/abc-defg-hij",
         meetingProvider: "GOOGLE_MEET",
       }),

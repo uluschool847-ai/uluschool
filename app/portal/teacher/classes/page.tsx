@@ -53,7 +53,7 @@ function formatDate(date: Date) {
     year: "numeric",
     month: "long",
     day: "2-digit",
-    timeZone: "Europe/Kiev",
+    timeZone: "Africa/Nairobi",
   }).formatToParts(date);
 
   const day = parts.find((part) => part.type === "day")?.value ?? "";

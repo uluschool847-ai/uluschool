@@ -43,7 +43,7 @@ function lessonDetail(overrides: Record<string, unknown> = {}) {
     status: "CANCELLED",
     startAt: new Date("2026-06-10T10:00:00.000Z"),
     endAt: new Date("2026-06-10T11:00:00.000Z"),
-    timezone: "Europe/Kiev",
+    timezone: "Africa/Nairobi",
     liveLessonUrl: "https://meet.google.com/abc-defg-hij",
     student: { id: "student-1", fullName: "Sofia Shevchenko" },
     child: { id: "student-1", fullName: "Sofia Shevchenko" },

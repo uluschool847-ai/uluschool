@@ -57,8 +57,8 @@ describe("Google Calendar environment and dependency readiness", () => {
     expect(missing, `Missing Google Calendar env keys: ${missing.join(", ")}`).toEqual([]);
   });
 
-  it("documents Europe/Kiev as the GOOGLE_TIMEZONE default", () => {
-    expect(readEnvExample()).toMatch(/^GOOGLE_TIMEZONE\s*=\s*Europe\/Kiev\s*$/m);
+  it("documents Africa/Nairobi as the GOOGLE_TIMEZONE default", () => {
+    expect(readEnvExample()).toMatch(/^GOOGLE_TIMEZONE\s*=\s*Africa\/Nairobi\s*$/m);
   });
 
   it("declares googleapis as a runtime dependency for Calendar API access", () => {

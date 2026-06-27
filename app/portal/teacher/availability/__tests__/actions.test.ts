@@ -240,7 +240,7 @@ describe("Teacher portal availability actions", () => {
     expectPortalAvailabilityRevalidation();
   });
 
-  it("converts datetime-local values from Europe/Kiev before creating unavailable periods", async () => {
+  it("converts datetime-local values from Africa/Nairobi before creating unavailable periods", async () => {
     const { createTeacherUnavailablePeriodAction } = await loadTeacherPortalAvailabilityActions();
     await createTeacherUnavailablePeriodAction(unavailablePeriodForm());
 

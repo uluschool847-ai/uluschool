@@ -37,7 +37,7 @@ function formatDate(value: Date) {
   return new Intl.DateTimeFormat("en", {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: "Europe/Kiev",
+    timeZone: "Africa/Nairobi",
   }).format(value);
 }
 

@@ -403,7 +403,7 @@ model TeacherAvailabilityRule {
   weekday   Int
   startTime String
   endTime   String
-  timezone  String                 @default("Europe/Kiev")
+  timezone  String                 @default("Africa/Nairobi")
   status    AvailabilitySlotStatus @default(ACTIVE)
   createdAt DateTime               @default(now())
   updatedAt DateTime               @updatedAt

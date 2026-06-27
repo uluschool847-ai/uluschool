@@ -90,7 +90,7 @@ function lessonForm(overrides?: Partial<Record<string, string | null>>) {
   formData.set("description", "Live problem-solving session");
   formData.set("startAt", "2026-06-01T10:00");
   formData.set("endAt", "2026-06-01T11:00");
-  formData.set("timezone", "Europe/Kiev");
+  formData.set("timezone", "Africa/Nairobi");
   formData.set("teacherId", "teacher-1");
   formData.set("subjectId", "subject-math");
   formData.set("liveLessonUrl", "https://meet.google.com/abc-defg-hij");
@@ -127,7 +127,7 @@ function lessonRecord(overrides?: Record<string, unknown>) {
     status: "SCHEDULED",
     subjectId: "subject-math",
     teacherId: "teacher-1",
-    timezone: "Europe/Kiev",
+    timezone: "Africa/Nairobi",
     title: "Quadratic functions",
     ...overrides,
   };
@@ -218,7 +218,7 @@ describe("Admin lesson Google Meet auto-create actions", () => {
         endAt: new Date("2026-06-01T11:00:00.000Z"),
         lessonId: "lesson-1",
         startAt: new Date("2026-06-01T10:00:00.000Z"),
-        timezone: "Europe/Kiev",
+        timezone: "Africa/Nairobi",
         title: "Quadratic functions",
       }),
     );

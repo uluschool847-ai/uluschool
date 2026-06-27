@@ -74,7 +74,7 @@ describe("teacher availability scheduling utilities", () => {
       weekday: 1,
       startTime: "09:00",
       endTime: "17:00",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
       status: "ACTIVE" as const,
     };
 
@@ -96,7 +96,7 @@ describe("teacher availability scheduling utilities", () => {
       weekday: 1,
       startTime: "09:00",
       endTime: "12:00",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
       status: "ACTIVE",
     };
 
@@ -128,21 +128,21 @@ describe("teacher availability scheduling utilities", () => {
           weekday: 1,
           startTime: "09:00",
           endTime: "12:00",
-          timezone: "Europe/Kiev",
+          timezone: "Africa/Nairobi",
           status: "INACTIVE",
         },
       ),
     ).toBe(false);
   });
 
-  it("uses weekday standard 1-7 and Europe/Kiev timezone for weekly checks", async () => {
+  it("uses weekday standard 1-7 and Africa/Nairobi timezone for weekly checks", async () => {
     const { isWithinWeeklyAvailability } = await loadAvailabilityUtils();
     const sundayRule: AvailabilityRule = {
       teacherId: "teacher-1",
       weekday: 7,
       startTime: "09:00",
       endTime: "10:00",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
       status: "ACTIVE",
     };
 

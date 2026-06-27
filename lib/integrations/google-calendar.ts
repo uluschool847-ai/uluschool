@@ -36,7 +36,7 @@ type DeleteGoogleMeetEventInput = {
 };
 
 const GOOGLE_CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"];
-const DEFAULT_TIMEZONE = "Europe/Kiev";
+const DEFAULT_TIMEZONE = "Africa/Nairobi";
 
 function envValue(key: string) {
   return process.env[key]?.trim() || null;

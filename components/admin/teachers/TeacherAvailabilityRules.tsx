@@ -206,7 +206,7 @@ export function TeacherAvailabilityRules({ teacherId, rules, message, error, rea
             Timezone
             <input
               className="mt-1 w-full rounded-md border px-2 py-2"
-              defaultValue="Europe/Kiev"
+              defaultValue="Africa/Nairobi"
               name="timezone"
             />
           </label>

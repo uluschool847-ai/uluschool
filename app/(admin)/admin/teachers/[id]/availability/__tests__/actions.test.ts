@@ -92,7 +92,7 @@ function availabilityRuleForm(overrides?: Partial<Record<string, string | null>>
   formData.set("weekday", "1");
   formData.set("startTime", "09:00");
   formData.set("endTime", "12:00");
-  formData.set("timezone", "Europe/Kiev");
+  formData.set("timezone", "Africa/Nairobi");
   formData.set("status", "ACTIVE");
 
   for (const [key, value] of Object.entries(overrides ?? {})) {
@@ -167,7 +167,7 @@ describe("Admin teacher availability actions", () => {
       weekday: 1,
       startTime: "09:00",
       endTime: "12:00",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
       status: "ACTIVE",
     });
     updateTeacherAvailabilityRuleMock.mockResolvedValue({
@@ -184,7 +184,7 @@ describe("Admin teacher availability actions", () => {
       weekday: 1,
       startTime: "09:00",
       endTime: "12:00",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
       status: "ACTIVE",
     });
     createTeacherUnavailablePeriodMock.mockResolvedValue({
@@ -295,14 +295,14 @@ describe("Admin teacher availability actions", () => {
         weekday: 1,
         startTime: "09:00",
         endTime: "12:00",
-        timezone: "Europe/Kiev",
+        timezone: "Africa/Nairobi",
       }),
       expect.anything(),
     );
     expectAudit("TEACHER_AVAILABILITY_RULE_CREATED", "teacher_availability", "rule-1", {
       endTime: "12:00",
       startTime: "09:00",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
       weekday: 1,
     });
     expectAvailabilityRevalidation();
@@ -330,7 +330,7 @@ describe("Admin teacher availability actions", () => {
           endTime: "13:00",
           startTime: "10:00",
           teacherId: "teacher-1",
-          timezone: "Europe/Kiev",
+          timezone: "Africa/Nairobi",
           weekday: 1,
         }),
       }),
@@ -359,7 +359,7 @@ describe("Admin teacher availability actions", () => {
         after: expect.objectContaining({ status: "INACTIVE" }),
         meta: expect.objectContaining({
           teacherId: "teacher-1",
-          timezone: "Europe/Kiev",
+          timezone: "Africa/Nairobi",
           weekday: 1,
         }),
       }),
@@ -385,7 +385,7 @@ describe("Admin teacher availability actions", () => {
     expectAudit("TEACHER_AVAILABILITY_RULE_DELETED", "teacher_availability", "rule-1", {
       endTime: "12:00",
       startTime: "09:00",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
       weekday: 1,
     });
   });
@@ -462,7 +462,7 @@ describe("Admin teacher availability actions", () => {
     expectAudit("TEACHER_UNAVAILABLE_PERIOD_CREATED", "teacher_availability", "period-1", {
       endAt: new Date("2026-06-10T09:00:00.000Z"),
       startAt: new Date("2026-06-10T06:00:00.000Z"),
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
     });
     expectAvailabilityRevalidation();
   });
@@ -486,13 +486,13 @@ describe("Admin teacher availability actions", () => {
         after: expect.objectContaining({ reason: "Training day" }),
         meta: expect.objectContaining({
           teacherId: "teacher-1",
-          timezone: "Europe/Kiev",
+          timezone: "Africa/Nairobi",
         }),
       }),
       expect.anything(),
     );
     expectAudit("TEACHER_UNAVAILABLE_PERIOD_DELETED", "teacher_availability", "period-1", {
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
     });
     expect(prismaMock.$transaction).toHaveBeenCalled();
   });

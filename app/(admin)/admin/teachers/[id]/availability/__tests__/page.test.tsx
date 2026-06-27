@@ -64,7 +64,7 @@ const teacherAvailabilityData = {
       weekday: 1,
       startTime: "09:00",
       endTime: "12:00",
-      timezone: "Europe/Kiev",
+      timezone: "Africa/Nairobi",
       status: "ACTIVE",
     },
   ],

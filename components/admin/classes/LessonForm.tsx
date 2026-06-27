@@ -176,7 +176,7 @@ export function LessonForm({
           <span>Timezone</span>
           <input
             name="timezone"
-            defaultValue={lesson?.timezone ?? "Europe/Kiev"}
+            defaultValue={lesson?.timezone ?? "Africa/Nairobi"}
             className="h-11 w-full rounded-md border border-input bg-background px-3"
           />
         </label>
