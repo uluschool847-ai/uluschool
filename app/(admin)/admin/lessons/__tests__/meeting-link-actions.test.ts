@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
+import {
+  createLessonAction,
+  updateLessonAction,
+  updateLessonMeetingLinkAction,
+} from "@/app/(admin)/admin/lessons/actions";
 import { UserRole } from "@prisma/client";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireRoleMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
@@ -44,21 +49,7 @@ vi.mock("next/cache", () => ({
   revalidatePath: revalidatePathMock,
 }));
 
-type LessonActionResult = {
-  success: boolean;
-  message?: string;
-  errors?: Record<string, string[] | undefined>;
-};
-
 type MeetingProvider = "GOOGLE_MEET" | "MANUAL_URL";
-
-type LessonActionsModule = {
-  createLessonAction: (formData: FormData) => Promise<LessonActionResult>;
-  updateLessonAction: (formData: FormData) => Promise<LessonActionResult>;
-  updateLessonMeetingLinkAction: (formData: FormData) => Promise<LessonActionResult>;
-};
-
-let lessonActions: LessonActionsModule;
 
 function lessonRecord(overrides?: Record<string, unknown>) {
   return {
@@ -144,10 +135,6 @@ function expectMeetingLinkRevalidation(classGroupId = "group-1", lessonId = "les
 }
 
 describe("Admin lesson meeting link actions", () => {
-  beforeAll(async () => {
-    lessonActions = (await import("@/app/(admin)/admin/lessons/actions")) as LessonActionsModule;
-  });
-
   beforeEach(() => {
     vi.resetAllMocks();
     requireRoleMock.mockResolvedValue({ uid: "admin-1", role: UserRole.ADMIN });
@@ -162,7 +149,6 @@ describe("Admin lesson meeting link actions", () => {
   it("requires ADMIN before updating a lesson meeting link", async () => {
     requireRoleMock.mockRejectedValueOnce(new Error("Unauthorized"));
 
-    const { updateLessonMeetingLinkAction } = lessonActions;
     const result = await updateLessonMeetingLinkAction(meetingLinkForm());
 
     expect(requireRoleMock).toHaveBeenCalledWith([UserRole.ADMIN]);
@@ -177,7 +163,6 @@ describe("Admin lesson meeting link actions", () => {
   });
 
   it("validates lesson id before persistence", async () => {
-    const { updateLessonMeetingLinkAction } = lessonActions;
     const cases = [
       meetingLinkForm({ lessonId: "" }),
       meetingLinkForm({ id: "lesson-1", lessonId: null }),
@@ -214,7 +199,6 @@ describe("Admin lesson meeting link actions", () => {
       after,
     });
 
-    const { updateLessonMeetingLinkAction } = lessonActions;
     const result = await updateLessonMeetingLinkAction(meetingLinkForm());
 
     expect(updateLessonMeetingLinkMock).toHaveBeenCalledWith(
@@ -270,7 +254,6 @@ describe("Admin lesson meeting link actions", () => {
   ] as Array<[MeetingProvider, string]>)(
     "rejects unsafe or invalid %s meeting URL %s",
     async (meetingProvider, liveLessonUrl) => {
-      const { updateLessonMeetingLinkAction } = lessonActions;
       const result = await updateLessonMeetingLinkAction(
         meetingLinkForm({ meetingProvider, liveLessonUrl }),
       );
@@ -297,7 +280,6 @@ describe("Admin lesson meeting link actions", () => {
     });
     updateLessonMeetingLinkMock.mockResolvedValueOnce({ ...after, before, after });
 
-    const { updateLessonMeetingLinkAction } = lessonActions;
     const result = await updateLessonMeetingLinkAction(
       meetingLinkForm({
         meetingProvider: "MANUAL_URL",
@@ -321,7 +303,6 @@ describe("Admin lesson meeting link actions", () => {
     const after = lessonRecord({ liveLessonUrl: null, meetingProvider: "GOOGLE_MEET" });
     updateLessonMeetingLinkMock.mockResolvedValueOnce({ ...after, before, after });
 
-    const { updateLessonMeetingLinkAction } = lessonActions;
     const result = await updateLessonMeetingLinkAction(
       meetingLinkForm({ liveLessonUrl: "", meetingProvider: "GOOGLE_MEET" }),
     );
@@ -341,7 +322,6 @@ describe("Admin lesson meeting link actions", () => {
   it("does not audit or revalidate when meeting-link mutation fails", async () => {
     updateLessonMeetingLinkMock.mockRejectedValueOnce(new Error("Database unavailable"));
 
-    const { updateLessonMeetingLinkAction } = lessonActions;
     const result = await updateLessonMeetingLinkAction(meetingLinkForm());
 
     expect(result).toEqual(
@@ -362,7 +342,6 @@ describe("Admin lesson meeting link actions", () => {
       }),
     );
 
-    const { createLessonAction } = lessonActions;
     const invalid = await createLessonAction(
       lessonForm({ meetingProvider: "GOOGLE_MEET", liveLessonUrl: "https://example.com/live" }),
     );
@@ -413,7 +392,6 @@ describe("Admin lesson meeting link actions", () => {
     });
     updateLessonMock.mockResolvedValueOnce({ ...after, before, after });
 
-    const { updateLessonAction } = lessonActions;
     const invalid = await updateLessonAction(
       lessonForm({ meetingProvider: "GOOGLE_MEET", liveLessonUrl: "https://example.com/live" }),
     );
