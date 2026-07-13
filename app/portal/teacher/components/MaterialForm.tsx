@@ -234,10 +234,10 @@ export function MaterialForm({
 
     try {
       const formData = new FormData();
+      formData.append("purpose", "course-material");
       formData.append("file", selectedFile, selectedFile.name);
       const response = await fetch("/api/upload", {
         method: "POST",
-        headers: { "x-role": "TEACHER" },
         body: formData,
       });
       const payload = (await response.json()) as Partial<UploadedAttachment> & {

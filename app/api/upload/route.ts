@@ -1,5 +1,7 @@
+import { UserRole } from "@prisma/client";
 import { NextResponse } from "next/server";
 
+import { getSession } from "@/lib/auth/session";
 import { createStorageService } from "@/lib/storage";
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
@@ -18,12 +20,6 @@ const ALLOWED_MIME_TYPES = new Set([
   "image/gif",
   "text/plain",
 ]);
-
-function isAllowedRole(role: string | null) {
-  if (!role) return false;
-  const normalized = role.toUpperCase();
-  return normalized === "DEVELOPER" || normalized === "TEACHER";
-}
 
 function isAllowedMime(type: string) {
   if (type.startsWith("image/")) return true;
@@ -84,23 +80,14 @@ function getStatusForUploadError(message: string) {
 function uploadSuccessPayload(input: {
   filename: string;
   mimeType: string;
-  role: string | null;
   size: number;
   storageKey: string;
   publicUrl: string;
 }) {
-  const legacy = {
+  return {
     success: true,
     fileId: input.storageKey,
     url: input.publicUrl,
-  };
-
-  if (input.role?.toUpperCase() !== "TEACHER") {
-    return legacy;
-  }
-
-  return {
-    ...legacy,
     storageKey: input.storageKey,
     publicUrl: input.publicUrl,
     filename: input.filename,
@@ -110,12 +97,13 @@ function uploadSuccessPayload(input: {
 }
 
 export async function POST(request: Request) {
-  const role = request.headers.get("x-role");
-  if (!isAllowedRole(role)) {
-    return NextResponse.json(
-      { success: false, error: "Forbidden by upload policy" },
-      { status: 403 },
-    );
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (session.role !== UserRole.ADMIN && session.role !== UserRole.TEACHER) {
+    return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
   }
 
   let formData: FormData;
@@ -128,6 +116,18 @@ export async function POST(request: Request) {
     );
   }
 
+  const purpose = String(formData.get("purpose") ?? "");
+  const allowed =
+    (session.role === UserRole.TEACHER && purpose === "course-material") ||
+    (session.role === UserRole.ADMIN && ["course-material", "teacher-photo"].includes(purpose));
+
+  if (!allowed) {
+    return NextResponse.json(
+      { success: false, error: "Upload purpose is not allowed" },
+      { status: 403 },
+    );
+  }
+
   const files = formData.getAll("files").filter((entry): entry is File => isFileLike(entry));
   const file = formData.get("file");
   const single = isFileLike(file) ? [file] : [];
@@ -137,7 +137,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "File is required" }, { status: 400 });
   }
 
-  const service = createStorageService({ runtimeRole: role ?? undefined });
+  const service = createStorageService();
 
   if (effectiveFiles.length === 1) {
     const current = effectiveFiles[0];
@@ -160,7 +160,6 @@ export async function POST(request: Request) {
       const url = service.getURL(fileId);
       return NextResponse.json(
         uploadSuccessPayload({
-          role,
           storageKey: fileId,
           publicUrl: url,
           filename: responseFilename(current, fileId),

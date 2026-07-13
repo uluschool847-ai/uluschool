@@ -1,5 +1,4 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const submitCourseMaterialActionMock = vi.hoisted(() => vi.fn());
@@ -10,21 +9,7 @@ vi.mock("@/app/portal/teacher/actions/material-actions", () => ({
   updateCourseMaterialAction: updateCourseMaterialActionMock,
 }));
 
-type MaterialFormProps = {
-  cancelHref?: string;
-  initialValues?: Record<string, unknown>;
-  lessons: Array<{ id: string; title: string }>;
-  materialId?: string;
-  mode: "create" | "edit";
-};
-
-async function loadMaterialForm() {
-  const specifier = "@/app/portal/teacher/components/MaterialForm";
-  const module = (await import(/* @vite-ignore */ specifier)) as {
-    MaterialForm: ComponentType<MaterialFormProps>;
-  };
-  return module.MaterialForm;
-}
+import { MaterialForm } from "@/app/portal/teacher/components/MaterialForm";
 
 const lessons = [
   { id: "lesson-1", title: "Algebra Group A lesson" },
@@ -41,8 +26,7 @@ describe("MaterialForm", () => {
     vi.unstubAllGlobals();
   });
 
-  it("supports create mode with required fields and cancel/back link", async () => {
-    const MaterialForm = await loadMaterialForm();
+  it("supports create mode with required fields and cancel/back link", () => {
     render(<MaterialForm mode="create" lessons={lessons} cancelHref="/portal/teacher/materials" />);
 
     expect(screen.getByLabelText(/^title$/i)).toBeDefined();
@@ -57,8 +41,7 @@ describe("MaterialForm", () => {
     expect(document.querySelector('input[name="teacherId"]')).toBeNull();
   });
 
-  it("supports edit mode with initial values", async () => {
-    const MaterialForm = await loadMaterialForm();
+  it("supports edit mode with initial values", () => {
     render(
       <MaterialForm
         mode="edit"
@@ -80,7 +63,6 @@ describe("MaterialForm", () => {
   });
 
   it("validates title, scheduledClassId, and fileUrl before submit", async () => {
-    const MaterialForm = await loadMaterialForm();
     render(<MaterialForm mode="create" lessons={lessons} />);
 
     fireEvent.click(screen.getByRole("button", { name: /create material|submit/i }));
@@ -97,7 +79,6 @@ describe("MaterialForm", () => {
     "file:///etc/passwd",
     "http://example.com/material.pdf",
   ])("shows invalid file URL errors for unsafe URL %s", async (fileUrl) => {
-    const MaterialForm = await loadMaterialForm();
     render(<MaterialForm mode="create" lessons={lessons} />);
 
     fireEvent.change(screen.getByLabelText(/^title$/i), { target: { value: "Material" } });
@@ -119,7 +100,6 @@ describe("MaterialForm", () => {
         data: { id: "material-1" },
       });
 
-      const MaterialForm = await loadMaterialForm();
       render(<MaterialForm mode="create" lessons={lessons} />);
 
       fireEvent.change(screen.getByLabelText(/^title$/i), { target: { value: "Material" } });
@@ -145,7 +125,6 @@ describe("MaterialForm", () => {
       error: { fileUrl: ["Invalid file URL"] },
     });
 
-    const MaterialForm = await loadMaterialForm();
     render(
       <MaterialForm
         mode="edit"
@@ -168,8 +147,7 @@ describe("MaterialForm", () => {
     expect(await screen.findByText(/invalid file url/i)).toBeDefined();
   });
 
-  it("renders a file input and shows selected filename and size", async () => {
-    const MaterialForm = await loadMaterialForm();
+  it("renders a file input and shows selected filename and size", () => {
     render(<MaterialForm mode="create" lessons={lessons} />);
 
     const fileInput = screen.getByLabelText(/upload file|file upload|choose file/i);
@@ -198,7 +176,6 @@ describe("MaterialForm", () => {
     ["ZIP", "archive.zip", "application/zip"],
     ["image", "diagram.png", "image/png"],
   ])("accepts supported upload file type: %s", async (_label, filename, mimeType) => {
-    const MaterialForm = await loadMaterialForm();
     render(<MaterialForm mode="create" lessons={lessons} />);
 
     const fileInput = screen.getByLabelText(/upload file|file upload|choose file/i);
@@ -211,7 +188,6 @@ describe("MaterialForm", () => {
   });
 
   it("rejects empty, oversized, and unsupported uploads with visible errors", async () => {
-    const MaterialForm = await loadMaterialForm();
     render(<MaterialForm mode="create" lessons={lessons} />);
     const fileInput = screen.getByLabelText(/upload file|file upload|choose file/i);
 
@@ -256,7 +232,6 @@ describe("MaterialForm", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    const MaterialForm = await loadMaterialForm();
     render(<MaterialForm mode="create" lessons={lessons} />);
 
     fireEvent.change(screen.getByLabelText(/upload file|file upload|choose file/i), {
@@ -270,6 +245,16 @@ describe("MaterialForm", () => {
     fireEvent.click(screen.getByRole("button", { name: /retry upload|upload/i }));
     expect(await screen.findByText(/uploaded|upload complete/i)).toBeDefined();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/upload",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.any(FormData),
+      }),
+    );
+    const requestOptions = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(requestOptions.headers).toBeUndefined();
+    expect((requestOptions.body as FormData).get("purpose")).toBe("course-material");
   });
 
   it("stores attachment metadata after successful upload and sends it on create submit", async () => {
@@ -294,7 +279,6 @@ describe("MaterialForm", () => {
       data: { id: "material-1" },
     });
 
-    const MaterialForm = await loadMaterialForm();
     render(<MaterialForm mode="create" lessons={lessons} />);
 
     fireEvent.change(screen.getByLabelText(/^title$/i), { target: { value: "Material" } });
@@ -341,7 +325,6 @@ describe("MaterialForm", () => {
     );
     updateCourseMaterialActionMock.mockResolvedValue({ success: true, data: { id: "material-1" } });
 
-    const MaterialForm = await loadMaterialForm();
     const { unmount } = render(
       <MaterialForm
         mode="edit"
@@ -398,7 +381,6 @@ describe("MaterialForm", () => {
   it("keeps the existing file visible when replacement upload fails and still supports external fileUrl fallback", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Upload failed")));
 
-    const MaterialForm = await loadMaterialForm();
     render(
       <MaterialForm
         mode="edit"
