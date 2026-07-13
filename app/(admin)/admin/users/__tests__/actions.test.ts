@@ -104,8 +104,8 @@ describe("Admin user management actions audit coverage", () => {
         isActive: true,
         passwordHash: "$2b$10$secret-hash-that-must-not-be-audited",
       },
-      defaultPassword: "ChangeMe123!",
-      mustResetPassword: true,
+      temporaryPassword: "UniqueTemporary123_A",
+      mustChangePassword: true,
     });
 
     const { createUserAction } = await loadUsersActions();
@@ -126,7 +126,13 @@ describe("Admin user management actions audit coverage", () => {
       },
       transactionClientMock,
     );
-    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(result).toEqual({
+      success: true,
+      data: expect.objectContaining({
+        user: expect.objectContaining({ email: "teacher.portal@example.com" }),
+        temporaryPassword: "UniqueTemporary123_A",
+      }),
+    });
     expect(revalidatePathMock).toHaveBeenCalledWith("/admin/users");
     expectAppUserAuditTarget("APP_USER_CREATED");
     expect(auditPayloadFor("APP_USER_CREATED")).toEqual(
@@ -140,6 +146,9 @@ describe("Admin user management actions audit coverage", () => {
       }),
     );
     expectNoSensitiveAuditData(auditPayloadFor("APP_USER_CREATED"));
+    expect(JSON.stringify(auditPayloadFor("APP_USER_CREATED"))).not.toContain(
+      "UniqueTemporary123_A",
+    );
   });
 
   it("writes an audit log when changing an AppUser role", async () => {

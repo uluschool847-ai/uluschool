@@ -69,6 +69,8 @@ type StudentActionsModule = {
   createStudentAction: (formData: FormData) => Promise<{
     success: boolean;
     message?: string;
+    accountEmail?: string;
+    temporaryPassword?: string;
     errors?: Record<string, string[] | undefined>;
   }>;
   updateStudentAction: (formData: FormData) => Promise<{
@@ -237,8 +239,8 @@ describe("Admin student account actions", () => {
         learningStatus: "ACTIVE",
         isActive: true,
       },
-      defaultPassword: "ChangeMe123!",
-      mustResetPassword: true,
+      temporaryPassword: "UniqueTemporary123_A",
+      mustChangePassword: true,
     });
 
     const { createStudentAction } = await loadStudentActions();
@@ -251,7 +253,14 @@ describe("Admin student account actions", () => {
       role: "STUDENT",
     });
     expect(revalidatePathMock).toHaveBeenCalledWith("/admin/students");
-    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: true,
+        message: "Account created.",
+        accountEmail: "alice.student@example.com",
+        temporaryPassword: "UniqueTemporary123_A",
+      }),
+    );
     expect(createAdminAuditLogMock).toHaveBeenCalledWith(
       expect.objectContaining({
         adminUserId: "admin-1",
@@ -274,6 +283,9 @@ describe("Admin student account actions", () => {
       transactionClientMock,
     );
     expectAuditAfterMutation(createUserMock);
+    expect(JSON.stringify(createAdminAuditLogMock.mock.calls)).not.toContain(
+      "UniqueTemporary123_A",
+    );
   });
 
   it("returns structured validation errors for missing or invalid student fields", async () => {
@@ -360,8 +372,8 @@ describe("Admin student account actions", () => {
         role: "STUDENT",
         isActive: true,
       },
-      defaultPassword: "ChangeMe123!",
-      mustResetPassword: true,
+      temporaryPassword: "UniqueTemporary123_A",
+      mustChangePassword: true,
     });
 
     const { createStudentAction } = await loadStudentActions();
@@ -372,7 +384,8 @@ describe("Admin student account actions", () => {
       }),
     );
 
-    expect(redirectMock).toHaveBeenCalledWith(expect.stringContaining("studentMessage="));
+    expect(redirectMock).toHaveBeenCalledWith("/admin/students?studentMessage=Account%20created.");
+    expect(JSON.stringify(redirectMock.mock.calls)).not.toContain("UniqueTemporary123_A");
   });
 
   it("updates only allowed student fields and ignores any submitted role", async () => {
@@ -1348,8 +1361,8 @@ describe("Admin student account actions", () => {
             learningStatus: "ACTIVE",
             isActive: true,
           },
-          defaultPassword: "ChangeMe123!",
-          mustResetPassword: true,
+          temporaryPassword: "UniqueTemporary123_A",
+          mustChangePassword: true,
         });
       },
       run: async (actions: StudentActionsModule) =>

@@ -100,13 +100,13 @@ describe("Admin user management client interactions", () => {
           role: "TEACHER",
           isActive: true,
         },
-        defaultPassword: "ChangeMe123!",
-        mustResetPassword: true,
+        temporaryPassword: "UniqueTemporary123_A",
+        mustChangePassword: true,
       },
     });
     const { UserCreateForm } = await loadUserCreateForm();
 
-    render(<UserCreateForm defaultRole="TEACHER" />);
+    const { unmount } = render(<UserCreateForm defaultRole="TEACHER" />);
 
     fireEvent.change(screen.getByLabelText(/full name|name/i), {
       target: { value: "Teacher User" },
@@ -126,9 +126,13 @@ describe("Admin user management client interactions", () => {
         role: "TEACHER",
       });
     });
-    expect(
-      await screen.findByText(/default password|temporary password|change password/i),
-    ).toBeDefined();
+    expect(await screen.findByText("teacher@example.com")).toBeDefined();
+    expect(screen.getByText("UniqueTemporary123_A")).toBeDefined();
+
+    unmount();
+    render(<UserCreateForm defaultRole="TEACHER" />);
+
+    expect(screen.queryByText("UniqueTemporary123_A")).toBeNull();
   });
 
   it("UserRoleEditor changes a user's role and reflects the selected value", async () => {

@@ -54,6 +54,8 @@ type ParentActionsModule = {
   createParentAction: (formData: FormData) => Promise<{
     success: boolean;
     message?: string;
+    accountEmail?: string;
+    temporaryPassword?: string;
     errors?: Record<string, string[] | undefined>;
   }>;
   updateParentAction: (formData: FormData) => Promise<{
@@ -172,8 +174,8 @@ describe("Admin parent account actions", () => {
         role: "PARENT",
         isActive: true,
       },
-      defaultPassword: "ChangeMe123!",
-      mustResetPassword: true,
+      temporaryPassword: "UniqueTemporary123_A",
+      mustChangePassword: true,
     });
 
     const { createParentAction } = await loadParentActions();
@@ -210,8 +212,13 @@ describe("Admin parent account actions", () => {
     expect(result).toEqual(
       expect.objectContaining({
         success: true,
-        message: expect.stringMatching(/created|parent/i),
+        message: "Account created.",
+        accountEmail: "mary.parent@example.com",
+        temporaryPassword: "UniqueTemporary123_A",
       }),
+    );
+    expect(JSON.stringify(createAdminAuditLogMock.mock.calls)).not.toContain(
+      "UniqueTemporary123_A",
     );
   });
 
@@ -645,8 +652,8 @@ describe("Admin parent account actions", () => {
         role: "PARENT",
         isActive: true,
       },
-      defaultPassword: "ChangeMe123!",
-      mustResetPassword: true,
+      temporaryPassword: "UniqueTemporary123_A",
+      mustChangePassword: true,
     });
 
     const { createParentAction } = await loadParentActions();
@@ -658,7 +665,8 @@ describe("Admin parent account actions", () => {
       }),
     );
 
-    expect(redirectMock).toHaveBeenCalledWith(expect.stringContaining("parentMessage="));
+    expect(redirectMock).toHaveBeenCalledWith("/admin/parents?parentMessage=Account%20created.");
+    expect(JSON.stringify(redirectMock.mock.calls)).not.toContain("UniqueTemporary123_A");
 
     await createParentAction(
       buildParentFormData({

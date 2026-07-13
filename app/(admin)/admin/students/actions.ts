@@ -24,6 +24,8 @@ import { findUserById } from "@/lib/repositories/user-repository";
 export type StudentActionState = {
   success: boolean;
   message?: string;
+  accountEmail?: string;
+  temporaryPassword?: string;
   errors?: Record<string, string[] | undefined>;
 };
 
@@ -210,11 +212,12 @@ export async function createStudentAction(
     return { success: false, errors };
   }
 
+  let created: Awaited<ReturnType<typeof createUser>>;
   try {
     if (!session) {
       throw new Error("Failed to create student account.");
     }
-    await prisma.$transaction(async (tx) => {
+    created = await prisma.$transaction(async (tx) => {
       const data = await createUser(
         {
           fullName: parsed.data.fullName,
@@ -239,6 +242,7 @@ export async function createStudentAction(
         },
         tx,
       );
+      return data;
     }, STUDENT_TRANSACTION_OPTIONS);
     revalidatePath("/admin/students");
   } catch (error) {
@@ -260,10 +264,15 @@ export async function createStudentAction(
   }
 
   if (flashMode && successRedirect) {
-    redirect(buildRedirectUrl(successRedirect, "studentMessage", "Student account created."));
+    redirect(buildRedirectUrl(successRedirect, "studentMessage", "Account created."));
   }
 
-  return { success: true, message: "Student account created." };
+  return {
+    success: true,
+    message: "Account created.",
+    accountEmail: created.user.email,
+    temporaryPassword: created.temporaryPassword,
+  };
 }
 
 export async function updateStudentAction(

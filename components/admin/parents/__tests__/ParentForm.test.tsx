@@ -4,6 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createParentActionMock = vi.hoisted(() => vi.fn());
 const updateParentActionMock = vi.hoisted(() => vi.fn());
+const createFormActionMock = vi.hoisted(() => vi.fn());
+const useActionStateMock = vi.hoisted(() => vi.fn());
+
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return { ...actual, useActionState: useActionStateMock };
+});
 
 vi.mock("@/app/(admin)/admin/parents/actions", () => ({
   createParentAction: createParentActionMock,
@@ -35,6 +42,7 @@ async function loadParentForm() {
 describe("ParentForm admin controls", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useActionStateMock.mockReturnValue([{ success: false }, createFormActionMock]);
   });
 
   afterEach(() => {
@@ -59,6 +67,9 @@ describe("ParentForm admin controls", () => {
     expect(screen.getByRole("button", { name: /create parent|create guardian/i })).toBeDefined();
     expect(screen.queryByLabelText(/role/i)).toBeNull();
     expect(screen.queryByRole("combobox", { name: /role/i })).toBeNull();
+    expect(document.querySelector('input[name="flash"]')).toBeNull();
+    expect(document.querySelector('input[name="successRedirect"]')).toBeNull();
+    expect(document.querySelector('input[name="errorRedirect"]')).toBeNull();
   }, 15_000);
 
   it("renders edit mode with existing parent values", async () => {
@@ -85,6 +96,46 @@ describe("ParentForm admin controls", () => {
     expect(screen.getByDisplayValue("+254700000001")).toBeDefined();
     expect(screen.getByRole("button", { name: /save changes|update parent/i })).toBeDefined();
     expect(screen.queryByLabelText(/role/i)).toBeNull();
+    expect(document.querySelector('input[name="flash"]')).not.toBeNull();
+    expect(document.querySelector('input[name="successRedirect"]')).not.toBeNull();
+    expect(document.querySelector('input[name="errorRedirect"]')).not.toBeNull();
+  });
+
+  it("shows credentials only for the current create action state and clears them on remount", async () => {
+    useActionStateMock
+      .mockReturnValueOnce([
+        {
+          success: true,
+          message: "Account created.",
+          accountEmail: "mary.parent@example.com",
+          temporaryPassword: "UniqueTemporary123_A",
+        },
+        createFormActionMock,
+      ])
+      .mockReturnValueOnce([{ success: false }, createFormActionMock]);
+    const { ParentForm } = await loadParentForm();
+
+    const { unmount } = render(
+      <ParentForm
+        mode="create"
+        successRedirect="/admin/parents"
+        errorRedirect="/admin/parents/new"
+      />,
+    );
+
+    expect(screen.getByText("mary.parent@example.com")).toBeDefined();
+    expect(screen.getByText("UniqueTemporary123_A")).toBeDefined();
+
+    unmount();
+    render(
+      <ParentForm
+        mode="create"
+        successRedirect="/admin/parents"
+        errorRedirect="/admin/parents/new"
+      />,
+    );
+
+    expect(screen.queryByText("UniqueTemporary123_A")).toBeNull();
   });
 
   it("shows visible success and error feedback", async () => {

@@ -1,6 +1,14 @@
-import Link from "next/link";
+"use client";
 
-import { createStudentAction, updateStudentAction } from "@/app/(admin)/admin/students/actions";
+import Link from "next/link";
+import { useActionState } from "react";
+
+import {
+  type StudentActionState,
+  createStudentAction,
+  updateStudentAction,
+} from "@/app/(admin)/admin/students/actions";
+import { TemporaryCredentialsPanel } from "@/components/admin/users/TemporaryCredentialsPanel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,6 +28,19 @@ type StudentFormProps = {
   successRedirect: string;
   errorRedirect: string;
 };
+
+const initialStudentActionState: StudentActionState = { success: false };
+
+function getStudentActionError(state: StudentActionState) {
+  if (state.success) return undefined;
+  if (state.message) return state.message;
+
+  const message = Object.values(state.errors ?? {})
+    .flat()
+    .filter((value): value is string => Boolean(value))
+    .join(" ");
+  return message || undefined;
+}
 
 function StudentFlash({ message, error }: { message?: string; error?: string }) {
   if (error) {
@@ -53,7 +74,12 @@ export function StudentForm({
   errorRedirect,
 }: StudentFormProps) {
   const isNew = mode === "create";
-  const formAction = isNew ? createStudentAction : updateStudentAction;
+  const [createState, createFormAction] = useActionState(
+    createStudentAction,
+    initialStudentActionState,
+  );
+  const formAction = isNew ? createFormAction : updateStudentAction;
+  const createError = getStudentActionError(createState);
 
   return (
     <Card>
@@ -61,16 +87,30 @@ export function StudentForm({
         <CardTitle>{isNew ? "Create Student" : "Edit Student"}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <StudentFlash message={flashMessage} error={flashError} />
+        <StudentFlash
+          message={isNew && createState.success ? createState.message : flashMessage}
+          error={isNew && createState.success ? undefined : (createError ?? flashError)}
+        />
+
+        {isNew && createState.accountEmail && createState.temporaryPassword ? (
+          <TemporaryCredentialsPanel
+            email={createState.accountEmail}
+            temporaryPassword={createState.temporaryPassword}
+          />
+        ) : null}
 
         <form
           action={formAction as unknown as (formData: FormData) => void}
           className="space-y-6"
           noValidate
         >
-          <input type="hidden" name="flash" value="true" />
-          <input type="hidden" name="successRedirect" value={successRedirect} />
-          <input type="hidden" name="errorRedirect" value={errorRedirect} />
+          {!isNew ? (
+            <>
+              <input type="hidden" name="flash" value="true" />
+              <input type="hidden" name="successRedirect" value={successRedirect} />
+              <input type="hidden" name="errorRedirect" value={errorRedirect} />
+            </>
+          ) : null}
           {!isNew && student ? <input type="hidden" name="id" value={student.id} /> : null}
 
           <div className="grid gap-4 md:grid-cols-2">

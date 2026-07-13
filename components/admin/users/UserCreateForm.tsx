@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { createUserAction } from "@/app/(admin)/admin/users/actions";
+import { TemporaryCredentialsPanel } from "@/components/admin/users/TemporaryCredentialsPanel";
 import { normalizeActionResult } from "@/lib/action-result";
 
 type UserRole = "ADMIN" | "TEACHER" | "PARENT" | "STUDENT";
@@ -20,7 +21,10 @@ export function UserCreateForm({ defaultRole = "STUDENT" }: { defaultRole?: User
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<UserRole>(defaultRole);
   const [errors, setErrors] = useState<string[]>([]);
-  const [successMessage, setSuccessMessage] = useState("");
+  const [temporaryCredentials, setTemporaryCredentials] = useState<{
+    email: string;
+    temporaryPassword: string;
+  } | null>(null);
   const [isPending, setIsPending] = useState(false);
 
   async function submitForm() {
@@ -37,12 +41,12 @@ export function UserCreateForm({ defaultRole = "STUDENT" }: { defaultRole?: User
     }
 
     setErrors(nextErrors);
-    setSuccessMessage("");
 
     if (nextErrors.length > 0) {
       return;
     }
 
+    setTemporaryCredentials(null);
     setIsPending(true);
 
     try {
@@ -63,9 +67,10 @@ export function UserCreateForm({ defaultRole = "STUDENT" }: { defaultRole?: User
       setFullName("");
       setEmail("");
       setRole(defaultRole);
-      setSuccessMessage(
-        `Default password: ${result.data.defaultPassword}. User must change password.`,
-      );
+      setTemporaryCredentials({
+        email: result.data.user.email,
+        temporaryPassword: result.data.temporaryPassword,
+      });
       router.refresh();
     } catch {
       setErrors([normalizeActionResult(undefined).message]);
@@ -120,10 +125,14 @@ export function UserCreateForm({ defaultRole = "STUDENT" }: { defaultRole?: User
         </div>
       ) : null}
 
-      {successMessage ? (
-        <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-          {successMessage}
-        </p>
+      {temporaryCredentials ? (
+        <div className="mt-4">
+          <TemporaryCredentialsPanel
+            email={temporaryCredentials.email}
+            temporaryPassword={temporaryCredentials.temporaryPassword}
+            onDismiss={() => setTemporaryCredentials(null)}
+          />
+        </div>
       ) : null}
 
       <button
