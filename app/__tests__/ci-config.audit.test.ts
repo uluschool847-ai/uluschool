@@ -59,6 +59,57 @@ function assertDatabaseUrl(value: unknown, name: string) {
   assertEqual(url.searchParams.get("schema"), "public", `${name} must use the public schema`);
 }
 
+function parseDockerOptions(options: unknown): Map<string, string> {
+  if (typeof options !== "string") {
+    throw new Error("PostgreSQL service options must be a string");
+  }
+
+  const tokens = options.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+  const parsedOptions = new Map<string, string>();
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const option = tokens[index];
+    if (!option.startsWith("--")) {
+      continue;
+    }
+
+    const value = tokens[index + 1];
+    if (!value || value.startsWith("--")) {
+      throw new Error(`PostgreSQL service ${option} must include a value`);
+    }
+
+    if (parsedOptions.has(option)) {
+      throw new Error(`PostgreSQL service ${option} must not be repeated`);
+    }
+
+    const isQuoted =
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"));
+    parsedOptions.set(option, isQuoted ? value.slice(1, -1) : value);
+    index += 1;
+  }
+
+  return parsedOptions;
+}
+
+function assertPostgresHealthOptions(options: unknown) {
+  const parsedOptions = parseDockerOptions(options);
+  const requiredOptions = {
+    "--health-cmd": "pg_isready -U postgres -d ulu_school_test",
+    "--health-interval": "10s",
+    "--health-timeout": "5s",
+    "--health-retries": "5",
+  };
+
+  for (const [option, expectedValue] of Object.entries(requiredOptions)) {
+    assertEqual(
+      parsedOptions.get(option),
+      expectedValue,
+      `PostgreSQL service ${option} must remain ${expectedValue}`,
+    );
+  }
+}
+
 function assertCiWorkflowContract(workflowSource: string) {
   const parsedWorkflow = asRecord(parse(workflowSource), "workflow");
   const jobs = asRecord(parsedWorkflow.jobs, "workflow jobs");
@@ -77,7 +128,9 @@ function assertCiWorkflowContract(workflowSource: string) {
 
   const nodeSetupOptions = asRecord(nodeSetup.with, "Node setup options");
   assertEqual(nodeSetupOptions["node-version-file"], ".nvmrc", "Node setup must read .nvmrc");
-  assertEqual(permissions.contents, "read", "CI permissions.contents must remain read");
+  if (Object.keys(permissions).length !== 1 || permissions.contents !== "read") {
+    throw new Error('CI permissions must be exactly { contents: "read" }');
+  }
 
   assertEqual(postgres.image, "postgres:16", "PostgreSQL service image must remain postgres:16");
   assertEqual(
@@ -86,12 +139,7 @@ function assertCiWorkflowContract(workflowSource: string) {
     "PostgreSQL service must use the disposable database",
   );
 
-  if (
-    typeof postgres.options !== "string" ||
-    !postgres.options.includes("pg_isready -U postgres -d ulu_school_test")
-  ) {
-    throw new Error("PostgreSQL service must include the ulu_school_test health check");
-  }
+  assertPostgresHealthOptions(postgres.options);
 
   assertDatabaseUrl(environment.DATABASE_URL, "DATABASE_URL");
   assertDatabaseUrl(environment.DIRECT_URL, "DIRECT_URL");
@@ -139,5 +187,25 @@ describe("GitHub CI production-readiness contract", () => {
 
     expect(reorderedCommands).not.toBe(workflow);
     expect(() => assertCiWorkflowContract(reorderedCommands)).toThrow(/order/i);
+  });
+
+  it("rejects additional write permissions", () => {
+    const writePermission = workflow.replace(
+      "contents: read",
+      "contents: read\n  pull-requests: write",
+    );
+
+    expect(writePermission).not.toBe(workflow);
+    expect(() => assertCiWorkflowContract(writePermission)).toThrow(/permissions/i);
+  });
+
+  it("rejects pg_isready text that is not a health command", () => {
+    const unrelatedReadinessText = workflow.replace(
+      '--health-cmd "pg_isready -U postgres -d ulu_school_test"',
+      '--label "pg_isready -U postgres -d ulu_school_test"',
+    );
+
+    expect(unrelatedReadinessText).not.toBe(workflow);
+    expect(() => assertCiWorkflowContract(unrelatedReadinessText)).toThrow(/health-cmd/i);
   });
 });
