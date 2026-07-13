@@ -11,6 +11,7 @@ const createSessionMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const logAuthEventMock = vi.hoisted(() => vi.fn());
 const createAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
+const createInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const clearSessionMock = vi.hoisted(() => vi.fn());
 const getSessionMock = vi.hoisted(() => vi.fn());
 const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
@@ -40,6 +41,7 @@ vi.mock("@/lib/repositories/user-repository", () => ({
 vi.mock("@/lib/auth/session", () => ({
   clearAdminPendingTwoFactor: clearAdminPendingTwoFactorMock,
   createAdminPendingTwoFactor: createAdminPendingTwoFactorMock,
+  createInitialSetupSession: createInitialSetupSessionMock,
   createSession: createSessionMock,
   getAdminPendingTwoFactor: vi.fn(),
   getSession: getSessionMock,
@@ -77,6 +79,7 @@ describe("app/student-portal/actions.ts 2FA env defaults", () => {
       role: "ADMIN",
       isActive: true,
       passwordHash: "hashed",
+      mustChangePassword: false,
       twoFactorEnabled: false,
       twoFactorSecret: null,
     });
@@ -86,19 +89,23 @@ describe("app/student-portal/actions.ts 2FA env defaults", () => {
     logAuthEventMock.mockResolvedValue(undefined);
   });
 
-  it("enforces ADMIN_REQUIRE_2FA by default and uses non-production safe bypass path", async () => {
+  it("routes an admin without configured 2FA to restricted setup by default", async () => {
     const { loginPortal } = await import("../../../app/student-portal/actions");
 
     await expect(loginPortal({ success: false, message: "" }, makeLoginFormData())).rejects.toThrow(
-      "REDIRECT:/admin/security?setup2fa=required",
+      "REDIRECT:/portal/setup/2fa",
     );
 
-    expect(createSessionMock).toHaveBeenCalledTimes(1);
-    expect(createAdminAuditLogMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: "ADMIN_LOGIN_2FA_REQUIRED_DEV_BYPASS",
-      }),
-    );
+    expect(clearSessionMock).toHaveBeenCalledOnce();
+    expect(clearAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
+    expect(createInitialSetupSessionMock).toHaveBeenCalledWith({
+      uid: "admin-1",
+      email: "admin@uluglobalacademy.com",
+      role: "ADMIN",
+    });
+    expect(createSessionMock).not.toHaveBeenCalled();
+    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
   });
 
   it("allows admin login without 2FA when ADMIN_REQUIRE_2FA=false", async () => {
@@ -110,6 +117,9 @@ describe("app/student-portal/actions.ts 2FA env defaults", () => {
     );
 
     expect(createSessionMock).toHaveBeenCalledTimes(1);
+    expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
+    expect(clearSessionMock).not.toHaveBeenCalled();
+    expect(clearAdminPendingTwoFactorMock).not.toHaveBeenCalled();
     expect(createAdminAuditLogMock).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "ADMIN_LOGIN_PASSWORD_ONLY",
