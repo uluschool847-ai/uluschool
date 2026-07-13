@@ -2,6 +2,7 @@
 
 import { UserRole } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 
 import { requireRole } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
@@ -24,33 +25,31 @@ function safeAppUserSnapshot(user: {
   };
 }
 
-function parseRole(role: string): UserRole {
-  if (!Object.values(UserRole).includes(role as UserRole)) {
-    throw new Error("Invalid role");
-  }
+const createUserInputSchema = z.object({
+  email: z.string().trim().email(),
+  fullName: z.string().trim().min(2).max(120),
+  role: z.nativeEnum(UserRole),
+  phoneWhatsapp: z.string().trim().min(7).max(32).optional().or(z.literal("")),
+});
 
-  return role as UserRole;
-}
+const updateUserRoleInputSchema = z.object({
+  userId: z.string().trim().min(1),
+  role: z.nativeEnum(UserRole),
+});
 
-export async function createUserAction(input: {
-  email: string;
-  fullName: string;
-  role: string;
-  phoneWhatsapp?: string;
-}) {
+const toggleUserStatusInputSchema = z.object({
+  userId: z.string().trim().min(1),
+  isActive: z.boolean(),
+});
+
+export async function createUserAction(input: unknown) {
   try {
     const session = await requireRole([UserRole.ADMIN]);
-    const role = parseRole(input.role);
+    const parsed = createUserInputSchema.safeParse(input);
+    if (!parsed.success) return { success: false as const, error: "Invalid input." };
+
     const data = await prisma.$transaction(async (tx) => {
-      const created = await createUser(
-        {
-          email: input.email,
-          fullName: input.fullName,
-          role,
-          phoneWhatsapp: input.phoneWhatsapp,
-        },
-        tx,
-      );
+      const created = await createUser(parsed.data, tx);
       await createAdminAuditLog(
         {
           adminUserId: session.uid,
@@ -78,30 +77,32 @@ export async function createUserAction(input: {
   }
 }
 
-export async function updateUserRoleAction(input: { userId: string; role: string }) {
+export async function updateUserRoleAction(input: unknown) {
   try {
     const session = await requireRole([UserRole.ADMIN]);
-    const newRole = parseRole(input.role);
+    const parsed = updateUserRoleInputSchema.safeParse(input);
+    if (!parsed.success) return { success: false as const, error: "Invalid input." };
+
     const data = await prisma.$transaction(async (tx) => {
-      const updated = await updateUserRole(input.userId, newRole, session.uid, tx);
+      const updated = await updateUserRole(parsed.data.userId, parsed.data.role, session.uid, tx);
       const auditCandidate = updated as {
         role?: UserRole;
         before?: { role?: UserRole | string | null };
         after?: { role?: UserRole | string | null };
       };
       const before = auditCandidate.before ?? { role: null };
-      const after = auditCandidate.after ?? { role: auditCandidate.role ?? newRole };
+      const after = auditCandidate.after ?? { role: auditCandidate.role ?? parsed.data.role };
       await createAdminAuditLog(
         {
           adminUserId: session.uid,
           action: "APP_USER_ROLE_UPDATED",
           targetType: "app_user",
-          targetId: input.userId,
+          targetId: parsed.data.userId,
           before,
           after,
           meta: {
             actorRole: UserRole.ADMIN,
-            appUserId: input.userId,
+            appUserId: parsed.data.userId,
           },
         },
         tx,
@@ -118,29 +119,39 @@ export async function updateUserRoleAction(input: { userId: string; role: string
   }
 }
 
-export async function toggleUserStatusAction(input: { userId: string; isActive: boolean }) {
+export async function toggleUserStatusAction(input: unknown) {
   try {
     const session = await requireRole([UserRole.ADMIN]);
+    const parsed = toggleUserStatusInputSchema.safeParse(input);
+    if (!parsed.success) return { success: false as const, error: "Invalid input." };
+
     const data = await prisma.$transaction(async (tx) => {
-      const updated = await toggleUserStatus(input.userId, input.isActive, session.uid, tx);
+      const updated = await toggleUserStatus(
+        parsed.data.userId,
+        parsed.data.isActive,
+        session.uid,
+        tx,
+      );
       const auditCandidate = updated as {
         isActive?: boolean;
         before?: { isActive?: boolean | null };
         after?: { isActive?: boolean | null };
       };
       const before = auditCandidate.before ?? { isActive: null };
-      const after = auditCandidate.after ?? { isActive: auditCandidate.isActive ?? input.isActive };
+      const after = auditCandidate.after ?? {
+        isActive: auditCandidate.isActive ?? parsed.data.isActive,
+      };
       await createAdminAuditLog(
         {
           adminUserId: session.uid,
           action: "APP_USER_STATUS_UPDATED",
           targetType: "app_user",
-          targetId: input.userId,
+          targetId: parsed.data.userId,
           before,
           after,
           meta: {
             actorRole: UserRole.ADMIN,
-            appUserId: input.userId,
+            appUserId: parsed.data.userId,
           },
         },
         tx,
