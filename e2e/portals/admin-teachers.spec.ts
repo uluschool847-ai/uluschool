@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 
 const ADMIN_EMAIL = "fixed.admin@uluglobalacademy.com";
 const PASSWORD =
-  process.env.E2E_PORTAL_PASSWORD ?? process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 const RUN_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const TEACHER_PREFIX = "E2E Teacher";
 const USER_EMAIL_PREFIX = "e2e.teacher.";

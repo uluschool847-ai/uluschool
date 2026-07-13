@@ -11,7 +11,7 @@ import { hashPassword } from "@/lib/auth/password";
 
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 const PASSWORD =
-  process.env.E2E_PORTAL_PASSWORD ?? process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 const prisma = new PrismaClient();
 
 const USER_EMAIL_PREFIX = "qa.teacher-dashboard.";

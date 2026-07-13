@@ -1,7 +1,7 @@
 import { type Page, expect, test } from "@playwright/test";
 
 const PASSWORD =
-  process.env.E2E_PORTAL_PASSWORD ?? process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? "fixed.admin@uluglobalacademy.com";
 const TEACHER_EMAIL = "fixed.teacher@uluglobalacademy.com";
 const STUDENT_EMAIL = "fixed.student@uluglobalacademy.com";

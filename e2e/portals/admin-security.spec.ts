@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 
 const AUTH_SECRET = process.env.AUTH_SESSION_SECRET ?? "dev-only-auth-session-secret-please-change";
 const PASSWORD =
-  process.env.E2E_PORTAL_PASSWORD ?? process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 const ADMIN_REQUIRE_2FA = (process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false";
 const RUN_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const ADMIN_EMAIL = `qa.security.admin.${RUN_ID}@example.com`;

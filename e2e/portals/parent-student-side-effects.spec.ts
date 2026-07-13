@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 
 const AUTH_SECRET = process.env.AUTH_SESSION_SECRET ?? "dev-only-auth-session-secret-please-change";
 const PASSWORD =
-  process.env.E2E_PORTAL_PASSWORD ?? process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 const USER_EMAIL_PREFIX = "qa.portal-side-effects.";
 const CLASS_TITLE_PREFIX = "QA Portal Side Effects";
 

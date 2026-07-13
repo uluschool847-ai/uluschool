@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 
 const AUTH_SECRET = process.env.AUTH_SESSION_SECRET ?? "dev-only-auth-session-secret-please-change";
 const PASSWORD =
-  process.env.E2E_PORTAL_PASSWORD ?? process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 const RUN_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const QA_PREFIX = `QA Audit ${RUN_ID}`;
 const ADMIN_EMAIL = `qa.audit.admin.${RUN_ID}@example.com`;
