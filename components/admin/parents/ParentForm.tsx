@@ -74,12 +74,15 @@ export function ParentForm({
   errorRedirect,
 }: ParentFormProps) {
   const isNew = mode === "create";
-  const [createState, createFormAction] = useActionState(
+  const [createState, createFormAction, isCreatePending] = useActionState(
     createParentAction,
     initialParentActionState,
   );
   const formAction = isNew ? createFormAction : updateParentAction;
   const createError = getParentActionError(createState);
+  const hasTemporaryCredentials = Boolean(
+    isNew && createState.accountEmail && createState.temporaryPassword,
+  );
 
   return (
     <Card>
@@ -161,7 +164,9 @@ export function ParentForm({
             <Button asChild variant="outline">
               <Link href="/admin/parents">Cancel</Link>
             </Button>
-            <Button type="submit">{isNew ? "Create Parent" : "Save Changes"}</Button>
+            <Button type="submit" disabled={isNew && (isCreatePending || hasTemporaryCredentials)}>
+              {isNew ? "Create Parent" : "Save Changes"}
+            </Button>
           </div>
         </form>
       </CardContent>

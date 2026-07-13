@@ -30,6 +30,7 @@ describe("TemporaryCredentialsPanel", () => {
     expect(screen.getByText("student@example.com").tagName).toBe("CODE");
     expect(screen.getByText("UniqueTemporary123_A").tagName).toBe("CODE");
     expect(screen.getByText(/will not be shown after leaving this page/i)).toBeDefined();
+    expect(screen.getByRole("status").textContent).toMatch(/temporary credentials.*ready/i);
   });
 
   it("copies only the temporary password through the clipboard API", async () => {
@@ -60,5 +61,29 @@ describe("TemporaryCredentialsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
 
     expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it("resets copied feedback when the temporary password changes", async () => {
+    const { rerender } = render(
+      <TemporaryCredentialsPanel
+        email="student-a@example.com"
+        temporaryPassword="UniqueTemporary123_A"
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle("Copy temporary password"));
+    expect(await screen.findByText(/temporary password copied/i)).toBeDefined();
+
+    rerender(
+      <TemporaryCredentialsPanel
+        email="student-b@example.com"
+        temporaryPassword="UniqueTemporary123_B"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/temporary password copied/i)).toBeNull();
+    });
+    expect(screen.getByText("UniqueTemporary123_B")).toBeDefined();
   });
 });

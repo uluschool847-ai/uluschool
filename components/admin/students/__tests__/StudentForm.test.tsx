@@ -42,7 +42,7 @@ async function loadStudentForm() {
 describe("StudentForm admin controls", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useActionStateMock.mockReturnValue([{ success: false }, createFormActionMock]);
+    useActionStateMock.mockReturnValue([{ success: false }, createFormActionMock, false]);
   });
 
   afterEach(() => {
@@ -112,8 +112,9 @@ describe("StudentForm admin controls", () => {
           temporaryPassword: "UniqueTemporary123_A",
         },
         createFormActionMock,
+        false,
       ])
-      .mockReturnValueOnce([{ success: false }, createFormActionMock]);
+      .mockReturnValueOnce([{ success: false }, createFormActionMock, false]);
     const { StudentForm } = await loadStudentForm();
 
     const { unmount } = render(
@@ -137,6 +138,66 @@ describe("StudentForm admin controls", () => {
     );
 
     expect(screen.queryByText("UniqueTemporary123_A")).toBeNull();
+  });
+
+  it("disables create submission while pending and after credentials are returned", async () => {
+    const { StudentForm } = await loadStudentForm();
+    useActionStateMock.mockReturnValueOnce([{ success: false }, createFormActionMock, true]);
+
+    const { rerender } = render(
+      <StudentForm
+        mode="create"
+        successRedirect="/admin/students"
+        errorRedirect="/admin/students/new"
+      />,
+    );
+
+    expect(
+      (screen.getByRole("button", { name: /create student/i }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    useActionStateMock.mockReturnValueOnce([
+      {
+        success: true,
+        accountEmail: "alice.student@example.com",
+        temporaryPassword: "UniqueTemporary123_A",
+      },
+      createFormActionMock,
+      false,
+    ]);
+    rerender(
+      <StudentForm
+        mode="create"
+        successRedirect="/admin/students"
+        errorRedirect="/admin/students/new"
+      />,
+    );
+
+    expect(
+      (screen.getByRole("button", { name: /create student/i }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("keeps edit submission enabled when create state is pending", async () => {
+    useActionStateMock.mockReturnValueOnce([{ success: false }, createFormActionMock, true]);
+    const { StudentForm } = await loadStudentForm();
+
+    render(
+      <StudentForm
+        mode="edit"
+        student={{
+          id: "student-1",
+          fullName: "Alice Student",
+          email: "alice.student@example.com",
+        }}
+        successRedirect="/admin/students"
+        errorRedirect="/admin/students/student-1/edit"
+      />,
+    );
+
+    expect(
+      (screen.getByRole("button", { name: /save changes/i }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 
   it("shows flash success and error feedback visibly", async () => {

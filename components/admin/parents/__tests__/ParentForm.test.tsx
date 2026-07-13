@@ -42,7 +42,7 @@ async function loadParentForm() {
 describe("ParentForm admin controls", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useActionStateMock.mockReturnValue([{ success: false }, createFormActionMock]);
+    useActionStateMock.mockReturnValue([{ success: false }, createFormActionMock, false]);
   });
 
   afterEach(() => {
@@ -111,8 +111,9 @@ describe("ParentForm admin controls", () => {
           temporaryPassword: "UniqueTemporary123_A",
         },
         createFormActionMock,
+        false,
       ])
-      .mockReturnValueOnce([{ success: false }, createFormActionMock]);
+      .mockReturnValueOnce([{ success: false }, createFormActionMock, false]);
     const { ParentForm } = await loadParentForm();
 
     const { unmount } = render(
@@ -136,6 +137,66 @@ describe("ParentForm admin controls", () => {
     );
 
     expect(screen.queryByText("UniqueTemporary123_A")).toBeNull();
+  });
+
+  it("disables create submission while pending and after credentials are returned", async () => {
+    const { ParentForm } = await loadParentForm();
+    useActionStateMock.mockReturnValueOnce([{ success: false }, createFormActionMock, true]);
+
+    const { rerender } = render(
+      <ParentForm
+        mode="create"
+        successRedirect="/admin/parents"
+        errorRedirect="/admin/parents/new"
+      />,
+    );
+
+    expect(
+      (screen.getByRole("button", { name: /create parent/i }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    useActionStateMock.mockReturnValueOnce([
+      {
+        success: true,
+        accountEmail: "mary.parent@example.com",
+        temporaryPassword: "UniqueTemporary123_A",
+      },
+      createFormActionMock,
+      false,
+    ]);
+    rerender(
+      <ParentForm
+        mode="create"
+        successRedirect="/admin/parents"
+        errorRedirect="/admin/parents/new"
+      />,
+    );
+
+    expect(
+      (screen.getByRole("button", { name: /create parent/i }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("keeps edit submission enabled when create state is pending", async () => {
+    useActionStateMock.mockReturnValueOnce([{ success: false }, createFormActionMock, true]);
+    const { ParentForm } = await loadParentForm();
+
+    render(
+      <ParentForm
+        mode="edit"
+        parent={{
+          id: "parent-1",
+          fullName: "Mary Parent",
+          email: "mary.parent@example.com",
+        }}
+        successRedirect="/admin/parents"
+        errorRedirect="/admin/parents/parent-1/edit"
+      />,
+    );
+
+    expect(
+      (screen.getByRole("button", { name: /save changes/i }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 
   it("shows visible success and error feedback", async () => {

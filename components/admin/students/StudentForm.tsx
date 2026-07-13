@@ -74,12 +74,15 @@ export function StudentForm({
   errorRedirect,
 }: StudentFormProps) {
   const isNew = mode === "create";
-  const [createState, createFormAction] = useActionState(
+  const [createState, createFormAction, isCreatePending] = useActionState(
     createStudentAction,
     initialStudentActionState,
   );
   const formAction = isNew ? createFormAction : updateStudentAction;
   const createError = getStudentActionError(createState);
+  const hasTemporaryCredentials = Boolean(
+    isNew && createState.accountEmail && createState.temporaryPassword,
+  );
 
   return (
     <Card>
@@ -160,7 +163,9 @@ export function StudentForm({
             <Button asChild variant="outline">
               <Link href="/admin/students">Cancel</Link>
             </Button>
-            <Button type="submit">{isNew ? "Create Student" : "Save Changes"}</Button>
+            <Button type="submit" disabled={isNew && (isCreatePending || hasTemporaryCredentials)}>
+              {isNew ? "Create Student" : "Save Changes"}
+            </Button>
           </div>
         </form>
       </CardContent>

@@ -11,17 +11,17 @@ import { createUser, toggleUserStatus, updateUserRole } from "@/lib/repositories
 
 function safeAppUserSnapshot(user: {
   id: string;
-  email?: string | null;
-  fullName?: string | null;
-  role?: UserRole | string | null;
-  isActive?: boolean | null;
+  email: string;
+  fullName: string;
+  role: UserRole;
+  isActive: boolean;
 }) {
   return {
     id: user.id,
-    email: user.email ?? null,
-    fullName: user.fullName ?? null,
-    role: user.role ?? null,
-    isActive: user.isActive ?? null,
+    email: user.email,
+    fullName: user.fullName,
+    role: user.role,
+    isActive: user.isActive,
   };
 }
 
@@ -68,7 +68,14 @@ export async function createUserAction(input: unknown) {
       return created;
     });
     revalidatePath("/admin/users");
-    return { success: true as const, data };
+    return {
+      success: true as const,
+      data: {
+        user: safeAppUserSnapshot(data.user),
+        temporaryPassword: data.temporaryPassword,
+        mustChangePassword: data.mustChangePassword,
+      },
+    };
   } catch (error) {
     return {
       success: false as const,

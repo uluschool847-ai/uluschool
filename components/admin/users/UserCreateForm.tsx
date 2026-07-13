@@ -28,6 +28,10 @@ export function UserCreateForm({ defaultRole = "STUDENT" }: { defaultRole?: User
   const [isPending, setIsPending] = useState(false);
 
   async function submitForm() {
+    if (isPending || temporaryCredentials) {
+      return;
+    }
+
     const nextErrors: string[] = [];
 
     if (!fullName.trim()) {
@@ -46,7 +50,6 @@ export function UserCreateForm({ defaultRole = "STUDENT" }: { defaultRole?: User
       return;
     }
 
-    setTemporaryCredentials(null);
     setIsPending(true);
 
     try {
@@ -138,7 +141,7 @@ export function UserCreateForm({ defaultRole = "STUDENT" }: { defaultRole?: User
       <button
         type="button"
         onClick={() => void submitForm()}
-        disabled={isPending}
+        disabled={isPending || temporaryCredentials !== null}
         className="mt-4 rounded-md bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
       >
         {isPending ? "Creating..." : "Create User"}

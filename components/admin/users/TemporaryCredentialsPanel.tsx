@@ -15,14 +15,19 @@ export function TemporaryCredentialsPanel({
   onDismiss,
 }: TemporaryCredentialsPanelProps) {
   const titleId = useId();
-  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
+  const [copyFeedback, setCopyFeedback] = useState<{
+    temporaryPassword: string;
+    status: "copied" | "error";
+  } | null>(null);
+  const copyStatus =
+    copyFeedback?.temporaryPassword === temporaryPassword ? copyFeedback.status : "idle";
 
   async function copyTemporaryPassword() {
     try {
       await navigator.clipboard.writeText(temporaryPassword);
-      setCopyStatus("copied");
+      setCopyFeedback({ temporaryPassword, status: "copied" });
     } catch {
-      setCopyStatus("error");
+      setCopyFeedback({ temporaryPassword, status: "error" });
     }
   }
 
@@ -31,6 +36,9 @@ export function TemporaryCredentialsPanel({
       aria-labelledby={titleId}
       className="rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-950"
     >
+      <output className="sr-only" aria-live="polite">
+        Temporary credentials are ready for {email}.
+      </output>
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 id={titleId} className="text-base font-semibold">

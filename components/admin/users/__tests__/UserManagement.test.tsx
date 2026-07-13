@@ -135,6 +135,44 @@ describe("Admin user management client interactions", () => {
     expect(screen.queryByText("UniqueTemporary123_A")).toBeNull();
   });
 
+  it("UserCreateForm keeps returned credentials and blocks repeat creation until dismissal", async () => {
+    createUserActionMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        user: {
+          id: "teacher-1",
+          email: "teacher@example.com",
+          fullName: "Teacher User",
+          role: "TEACHER",
+          isActive: true,
+        },
+        temporaryPassword: "UniqueTemporary123_A",
+        mustChangePassword: true,
+      },
+    });
+    const { UserCreateForm } = await loadUserCreateForm();
+
+    render(<UserCreateForm defaultRole="TEACHER" />);
+    fireEvent.change(screen.getByLabelText(/full name|name/i), {
+      target: { value: "Teacher User" },
+    });
+    fireEvent.change(screen.getByLabelText(/email/i), {
+      target: { value: "teacher@example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create user/i }));
+
+    expect(await screen.findByText("UniqueTemporary123_A")).toBeDefined();
+    const createButton = screen.getByRole("button", { name: /create user/i });
+    expect((createButton as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(createButton);
+    expect(createUserActionMock).toHaveBeenCalledOnce();
+    expect(screen.getByText("UniqueTemporary123_A")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: /dismiss temporary credentials/i }));
+    expect((createButton as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("UserRoleEditor changes a user's role and reflects the selected value", async () => {
     updateUserRoleActionMock.mockResolvedValueOnce({
       success: true,

@@ -94,7 +94,7 @@ describe("Admin user management actions audit coverage", () => {
     requireRoleMock.mockResolvedValue({ uid: "admin-1", role: "ADMIN" });
   });
 
-  it("writes an audit log when creating an AppUser without leaking credentials", async () => {
+  it("returns only the safe AppUser snapshot and one-time credential fields", async () => {
     createUserMock.mockResolvedValueOnce({
       user: {
         id: "user-1",
@@ -103,6 +103,14 @@ describe("Admin user management actions audit coverage", () => {
         role: UserRole.TEACHER,
         isActive: true,
         passwordHash: "$2b$10$secret-hash-that-must-not-be-audited",
+        phoneWhatsapp: "+254700000000",
+        mustChangePassword: true,
+        learningStatus: null,
+        twoFactorEnabled: true,
+        twoFactorSecret: "sensitive-totp-secret",
+        twoFactorBackupCodes: ["sensitive-backup-code"],
+        createdAt: new Date("2026-07-13T10:00:00.000Z"),
+        updatedAt: new Date("2026-07-13T10:00:00.000Z"),
       },
       temporaryPassword: "UniqueTemporary123_A",
       mustChangePassword: true,
@@ -128,11 +136,21 @@ describe("Admin user management actions audit coverage", () => {
     );
     expect(result).toEqual({
       success: true,
-      data: expect.objectContaining({
-        user: expect.objectContaining({ email: "teacher.portal@example.com" }),
+      data: {
+        user: {
+          id: "user-1",
+          email: "teacher.portal@example.com",
+          fullName: "Teacher Portal",
+          role: UserRole.TEACHER,
+          isActive: true,
+        },
         temporaryPassword: "UniqueTemporary123_A",
-      }),
+        mustChangePassword: true,
+      },
     });
+    expect(JSON.stringify(result)).not.toMatch(
+      /passwordHash|twoFactorSecret|twoFactorBackupCodes|sensitive-totp-secret|sensitive-backup-code/i,
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith("/admin/users");
     expectAppUserAuditTarget("APP_USER_CREATED");
     expect(auditPayloadFor("APP_USER_CREATED")).toEqual(
