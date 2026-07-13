@@ -47,14 +47,33 @@ function sourceFiles() {
     );
 }
 
-function e2eSpecsWithLocalPortalPasswordFixture() {
+function e2eSpecsWithPortalPasswordMarker() {
   const e2eDir = join(ROOT, "e2e");
   if (!existsSync(e2eDir)) return [];
 
   return walk(e2eDir).filter((filePath) => {
     if (!filePath.endsWith(".spec.ts")) return false;
-    return readFileSync(filePath, "utf8").includes("ChangeMe123!");
+    return portalPasswordMarkerPattern.test(readFileSync(filePath, "utf8"));
   });
+}
+
+const requiredPortalPasswordFallbackPattern =
+  /process\.env\.E2E_PORTAL_PASSWORD\s*\?\?\s*process\.env\.SEED_PORTAL_PASSWORD\s*\?\?\s*["']ChangeMe123!["']/;
+const portalPasswordMarkerPattern =
+  /process\.env\.(?:E2E_PORTAL_PASSWORD|SEED_PORTAL_PASSWORD)|["']ChangeMe123!["']/;
+
+function usesRequiredPortalPasswordFallback(content: string) {
+  const requiredFallbackMatches = content.match(
+    new RegExp(requiredPortalPasswordFallbackPattern.source, "g"),
+  );
+  if (requiredFallbackMatches?.length !== 1) return false;
+
+  const markersOutsideRequiredFallback = content.replace(
+    new RegExp(requiredPortalPasswordFallbackPattern.source, "g"),
+    "",
+  );
+
+  return !portalPasswordMarkerPattern.test(markersOutsideRequiredFallback);
 }
 
 describe("Google Calendar environment and dependency readiness", () => {
@@ -99,18 +118,38 @@ describe("Google Calendar environment and dependency readiness", () => {
     expect(offenders, offenders.join("\n")).toEqual([]);
   });
 
-  it("uses E2E, seed, then local fallbacks for every E2E portal password fixture", () => {
-    const requiredFallbackPattern =
-      /process\.env\.E2E_PORTAL_PASSWORD\s*\?\?\s*process\.env\.SEED_PORTAL_PASSWORD\s*\?\?\s*["']ChangeMe123!["']/;
-    const offenders = e2eSpecsWithLocalPortalPasswordFixture()
+  it("rejects a compliant decoy alongside an E2E and default-password path", () => {
+    const content = `
+      const decoy = process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
+      const password = process.env.E2E_PORTAL_PASSWORD ?? process.env.DEFAULT_PORTAL_PASSWORD;
+    `;
+
+    expect(usesRequiredPortalPasswordFallback(content)).toBe(false);
+  });
+
+  it("rejects a compliant decoy alongside a reversed seed and E2E path", () => {
+    const content = `
+      const decoy = process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
+      const password = process.env.SEED_PORTAL_PASSWORD ?? process.env.E2E_PORTAL_PASSWORD;
+    `;
+
+    expect(usesRequiredPortalPasswordFallback(content)).toBe(false);
+  });
+
+  it("rejects duplicate compliant portal password fallbacks", () => {
+    const content = `
+      const first = process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
+      const second = process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
+    `;
+
+    expect(usesRequiredPortalPasswordFallback(content)).toBe(false);
+  });
+
+  it("uses exactly one E2E, seed, then local fallback for every portal-password E2E spec", () => {
+    const offenders = e2eSpecsWithPortalPasswordMarker()
       .filter((filePath) => {
         const content = readFileSync(filePath, "utf8");
-        const localFixturesOutsideRequiredFallback = content.replace(
-          new RegExp(requiredFallbackPattern.source, "g"),
-          "",
-        );
-
-        return localFixturesOutsideRequiredFallback.includes("ChangeMe123!");
+        return !usesRequiredPortalPasswordFallback(content);
       })
       .map((filePath) => relative(ROOT, filePath));
 
