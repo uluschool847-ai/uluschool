@@ -59,7 +59,6 @@ import {
 import {
   archiveHomeworkAssignment,
   archiveProgressNote,
-  convertEnquiryToStudent,
   createHomeworkAssignment,
   createProgressNote as createLegacyProgressNote,
   createStudentSubmission,
@@ -224,7 +223,6 @@ export async function auditRepositoryUsageConnections() {
     grade: 100,
     feedback: "Audit feedback",
   });
-  await convertEnquiryToStudent("enquiry-1");
   await listParentScopedSubmissions({ parentId: "parent-1", childId: "student-1" });
   await recordStudentProgress({
     studentId: "student-1",

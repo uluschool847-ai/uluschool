@@ -80,8 +80,8 @@ type PortalRepositoryModule = {
       isActive: boolean;
       learningStatus?: StudentLearningStatus;
     };
-    defaultPassword: string;
-    mustResetPassword: boolean;
+    temporaryPassword: string;
+    mustChangePassword: true;
   }>;
   updateUserProfile: (input: {
     userId: string;
@@ -310,7 +310,6 @@ async function loadPortalRepository() {
 describe("portal-repository admin user management", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    process.env.DEFAULT_PORTAL_PASSWORD = "ChangeMe123!";
     hashPasswordMock.mockResolvedValue("hashed-default-password");
   });
 
@@ -397,7 +396,7 @@ describe("portal-repository admin user management", () => {
     );
   });
 
-  it("createUser hashes the default credential and creates an active student account with lifecycle status", async () => {
+  it("createUser issues a temporary credential and requires a password change for a new student", async () => {
     prismaMock.appUser.findUnique.mockResolvedValueOnce(null);
     prismaMock.appUser.create.mockResolvedValueOnce({
       id: "student-1",
@@ -415,21 +414,22 @@ describe("portal-repository admin user management", () => {
       role: "STUDENT",
     });
 
-    expect(hashPasswordMock).toHaveBeenCalledWith("ChangeMe123!");
+    expect(hashPasswordMock).toHaveBeenCalledWith(expect.stringMatching(/^[A-Za-z0-9_-]{20}$/));
     expect(prismaMock.appUser.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         email: "student@example.com",
         fullName: "Student One",
         role: "STUDENT",
         passwordHash: "hashed-default-password",
+        mustChangePassword: true,
         isActive: true,
         learningStatus: "ACTIVE",
       }),
     });
     expect(result).toEqual({
       user: expect.objectContaining({ id: "student-1", email: "student@example.com" }),
-      defaultPassword: "ChangeMe123!",
-      mustResetPassword: true,
+      temporaryPassword: expect.stringMatching(/^[A-Za-z0-9_-]{20}$/),
+      mustChangePassword: true,
     });
   });
 
@@ -1552,7 +1552,6 @@ describe("portal-repository admin user management", () => {
 describe("portal-repository admin parent management", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    process.env.DEFAULT_PORTAL_PASSWORD = "ChangeMe123!";
     hashPasswordMock.mockResolvedValue("hashed-default-password");
   });
 
@@ -1759,8 +1758,8 @@ describe("portal-repository admin parent management", () => {
     );
     expect(result).toEqual(
       expect.objectContaining({
-        defaultPassword: "ChangeMe123!",
-        mustResetPassword: true,
+        temporaryPassword: expect.stringMatching(/^[A-Za-z0-9_-]{20}$/),
+        mustChangePassword: true,
         user: expect.objectContaining({
           role: "PARENT",
         }),

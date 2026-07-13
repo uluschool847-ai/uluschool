@@ -5,8 +5,8 @@ import { hashPassword } from "../lib/auth/password";
 const prisma = new PrismaClient();
 
 async function main() {
-  const defaultPortalPassword = process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
-  const passwordHash = await hashPassword(defaultPortalPassword);
+  const seedPortalPassword = process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
+  const passwordHash = await hashPassword(seedPortalPassword);
   const adminTwoFactorSecret = (process.env.ADMIN_2FA_SECRET ?? "").trim();
   const seedLiveLessonUrl = process.env.SEED_LIVE_LESSON_URL ?? "https://meet.google.com/";
   const seedHomeworkContentUrl =

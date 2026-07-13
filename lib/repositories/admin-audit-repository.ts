@@ -30,7 +30,6 @@ const SENSITIVE_AUDIT_KEY_PATTERNS = [
 ];
 
 const SENSITIVE_AUDIT_VALUES = [
-  process.env.DEFAULT_PORTAL_PASSWORD ?? "",
   process.env.AUTH_SESSION_SECRET ?? "",
   process.env.ADMIN_SSO_SHARED_SECRET ?? "",
 ].filter((value): value is string => Boolean(value));

@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum EnquiryStatus {
@@ -271,6 +272,7 @@ model AppUser {
   passwordHash         String
   phoneWhatsapp        String?
   isActive             Boolean  @default(true)
+  mustChangePassword   Boolean  @default(false)
   learningStatus       StudentLearningStatus?
   twoFactorEnabled     Boolean  @default(false)
   twoFactorSecret      String?
