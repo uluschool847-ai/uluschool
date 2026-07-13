@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - staging
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ulu_school_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ulu_school_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ulu_school_test?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/ulu_school_test?schema=public
+      AUTH_SESSION_SECRET: ci-only-session-secret-with-at-least-32-characters
+      DEFAULT_PORTAL_PASSWORD: CiOnlyPortalPassword123!
+      ADMIN_REQUIRE_2FA: "true"
+      GOOGLE_TIMEZONE: Africa/Nairobi
+      TURNSTILE_ENFORCE: "false"
+      CRON_SECRET: ci-only-cron-secret
+      REMINDER_CRON_TOKEN: ci-only-reminder-secret
+      ALERT_TEST_TOKEN: ci-only-alert-secret
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Validate Prisma schema
+        run: npx prisma validate
+      - name: Apply test database migrations
+        run: npx prisma migrate deploy
+      - name: Seed deterministic test fixtures
+        run: npm run db:seed
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm run test
+      - name: Build
+        run: npm run build
