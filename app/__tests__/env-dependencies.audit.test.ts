@@ -53,14 +53,21 @@ function e2eSpecsWithPortalPasswordMarker() {
 
   return walk(e2eDir).filter((filePath) => {
     if (!filePath.endsWith(".spec.ts")) return false;
-    return portalPasswordMarkerPattern.test(readFileSync(filePath, "utf8"));
+    return hasPortalPasswordMarker(readFileSync(filePath, "utf8"));
   });
 }
 
 const requiredPortalPasswordFallbackPattern =
   /process\.env\.E2E_PORTAL_PASSWORD\s*\?\?\s*process\.env\.SEED_PORTAL_PASSWORD\s*\?\?\s*["']ChangeMe123!["']/;
-const portalPasswordMarkerPattern =
-  /process\.env\.(?:E2E_PORTAL_PASSWORD|SEED_PORTAL_PASSWORD)|["']ChangeMe123!["']/;
+const portalPasswordMarkers = [
+  "E2E_PORTAL_PASSWORD",
+  "SEED_PORTAL_PASSWORD",
+  "ChangeMe123!",
+] as const;
+
+function hasPortalPasswordMarker(content: string) {
+  return portalPasswordMarkers.some((marker) => content.includes(marker));
+}
 
 function usesRequiredPortalPasswordFallback(content: string) {
   const requiredFallbackMatches = content.match(
@@ -73,7 +80,7 @@ function usesRequiredPortalPasswordFallback(content: string) {
     "",
   );
 
-  return !portalPasswordMarkerPattern.test(markersOutsideRequiredFallback);
+  return !hasPortalPasswordMarker(markersOutsideRequiredFallback);
 }
 
 describe("Google Calendar environment and dependency readiness", () => {
@@ -140,6 +147,33 @@ describe("Google Calendar environment and dependency readiness", () => {
     const content = `
       const first = process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
       const second = process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
+    `;
+
+    expect(usesRequiredPortalPasswordFallback(content)).toBe(false);
+  });
+
+  it("rejects a residual E2E portal password marker in a comment", () => {
+    const content = `
+      const password = process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
+      // E2E_PORTAL_PASSWORD
+    `;
+
+    expect(usesRequiredPortalPasswordFallback(content)).toBe(false);
+  });
+
+  it("rejects a residual seed portal password marker in bracket notation", () => {
+    const content = `
+      const password = process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
+      const seedPassword = process.env["SEED_PORTAL_PASSWORD"];
+    `;
+
+    expect(usesRequiredPortalPasswordFallback(content)).toBe(false);
+  });
+
+  it("rejects a residual local portal password marker in a template string", () => {
+    const content = `
+      const password = process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
+      const localPassword = \`ChangeMe123!\`;
     `;
 
     expect(usesRequiredPortalPasswordFallback(content)).toBe(false);
