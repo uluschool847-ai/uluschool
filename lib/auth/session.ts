@@ -10,10 +10,12 @@ const INITIAL_SETUP_COOKIE = "ulu_initial_setup";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
 const ADMIN_PENDING_2FA_DURATION_MS = 1000 * 60 * 10;
 const INITIAL_SETUP_DURATION_MS = 1000 * 60 * 15;
+const MAX_INITIAL_SETUP_NEXT_PATH_LENGTH = 2048;
 
 type AuthMethod = "password" | "sso";
 
 export type SessionPayload = {
+  purpose: "SESSION";
   uid: string;
   role: UserRole;
   email: string;
@@ -40,6 +42,7 @@ export type SessionValidationResult = {
 };
 
 type PendingTwoFactorPayload = {
+  purpose: "ADMIN_PENDING_2FA";
   uid: string;
   email: string;
   exp: number;
@@ -125,7 +128,7 @@ async function encodeSignedPayload(payload: object): Promise<string> {
   return `${payloadBase64}.${signature}`;
 }
 
-async function decodeSignedPayload<T>(token: string): Promise<T | null> {
+async function decodeSignedPayload(token: string): Promise<unknown | null> {
   const [payloadBase64, signature] = token.split(".");
   if (!payloadBase64 || !signature) {
     return null;
@@ -137,14 +140,14 @@ async function decodeSignedPayload<T>(token: string): Promise<T | null> {
   }
 
   try {
-    return JSON.parse(fromBase64Url(payloadBase64)) as T;
+    return JSON.parse(fromBase64Url(payloadBase64)) as unknown;
   } catch {
     return null;
   }
 }
 
 function isNotExpired(exp: number | undefined) {
-  return Boolean(exp && Date.now() <= exp);
+  return typeof exp === "number" && Date.now() < exp;
 }
 
 const PORTAL_DASHBOARD_PATHS: Record<UserRole, string> = {
@@ -159,18 +162,111 @@ function isSafePortalNextPath(nextPath: string, role: UserRole) {
     return false;
   }
 
-  switch (role) {
-    case UserRole.ADMIN:
-      return nextPath.startsWith("/admin");
-    case UserRole.TEACHER:
-      return nextPath.startsWith("/portal/teacher");
-    case UserRole.STUDENT:
-      return nextPath.startsWith("/portal/student");
-    case UserRole.PARENT:
-      return nextPath.startsWith("/portal/parent");
-    default:
-      return false;
+  const rolePath = PORTAL_DASHBOARD_PATHS[role];
+  return (
+    nextPath === rolePath ||
+    nextPath.startsWith(`${rolePath}/`) ||
+    nextPath.startsWith(`${rolePath}?`) ||
+    nextPath.startsWith(`${rolePath}#`)
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasOnlyKeys(payload: Record<string, unknown>, allowedKeys: readonly string[]) {
+  const allowed = new Set(allowedKeys);
+  return Object.keys(payload).every((key) => allowed.has(key));
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isUserRole(value: unknown): value is UserRole {
+  return Object.values(UserRole).includes(value as UserRole);
+}
+
+function isValidExpiry(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isValidInitialSetupNextPath(value: unknown, role: UserRole) {
+  return (
+    typeof value === "string" &&
+    value === value.trim() &&
+    value.length <= MAX_INITIAL_SETUP_NEXT_PATH_LENGTH &&
+    isSafePortalNextPath(value, role)
+  );
+}
+
+function normalizeInitialSetupNextPath(nextPath: string | undefined, role: UserRole) {
+  const normalized = nextPath?.trim();
+  if (
+    !normalized ||
+    normalized.length > MAX_INITIAL_SETUP_NEXT_PATH_LENGTH ||
+    !isSafePortalNextPath(normalized, role)
+  ) {
+    return undefined;
   }
+
+  return normalized;
+}
+
+function isSessionPayload(payload: unknown): payload is SessionPayload {
+  return Boolean(
+    isRecord(payload) &&
+      hasOnlyKeys(payload, [
+        "purpose",
+        "uid",
+        "role",
+        "email",
+        "fullName",
+        "exp",
+        "mfaVerified",
+        "authMethod",
+      ]) &&
+      payload.purpose === "SESSION" &&
+      isNonEmptyString(payload.uid) &&
+      isUserRole(payload.role) &&
+      isNonEmptyString(payload.email) &&
+      (payload.fullName === undefined ||
+        payload.fullName === null ||
+        typeof payload.fullName === "string") &&
+      isValidExpiry(payload.exp) &&
+      typeof payload.mfaVerified === "boolean" &&
+      (payload.authMethod === "password" || payload.authMethod === "sso"),
+  );
+}
+
+function isInitialSetupPayload(payload: unknown): payload is InitialSetupPayload {
+  if (
+    !isRecord(payload) ||
+    !hasOnlyKeys(payload, ["uid", "email", "role", "nextPath", "purpose", "exp"]) ||
+    payload.purpose !== "INITIAL_SETUP" ||
+    !isNonEmptyString(payload.uid) ||
+    !isNonEmptyString(payload.email) ||
+    !isUserRole(payload.role) ||
+    !isValidExpiry(payload.exp)
+  ) {
+    return false;
+  }
+
+  return (
+    payload.nextPath === undefined || isValidInitialSetupNextPath(payload.nextPath, payload.role)
+  );
+}
+
+function isPendingTwoFactorPayload(payload: unknown): payload is PendingTwoFactorPayload {
+  return Boolean(
+    isRecord(payload) &&
+      hasOnlyKeys(payload, ["purpose", "uid", "email", "exp"]) &&
+      payload.purpose === "ADMIN_PENDING_2FA" &&
+      isNonEmptyString(payload.uid) &&
+      isNonEmptyString(payload.email) &&
+      isValidExpiry(payload.exp),
+  );
 }
 
 export function getPortalDashboardPath(role: UserRole) {
@@ -204,6 +300,7 @@ export async function createSession(input: {
   authMethod?: AuthMethod;
 }) {
   const payload: SessionPayload = {
+    purpose: "SESSION",
     uid: input.uid,
     role: input.role,
     email: input.email,
@@ -232,8 +329,12 @@ export async function clearSession() {
 export async function createInitialSetupSession(
   input: Omit<InitialSetupPayload, "purpose" | "exp">,
 ) {
+  const nextPath = normalizeInitialSetupNextPath(input.nextPath, input.role);
   const payload: InitialSetupPayload = {
-    ...input,
+    uid: input.uid,
+    email: input.email,
+    role: input.role,
+    ...(nextPath ? { nextPath } : {}),
     purpose: "INITIAL_SETUP",
     exp: Date.now() + INITIAL_SETUP_DURATION_MS,
   };
@@ -247,22 +348,6 @@ export async function createInitialSetupSession(
   });
 }
 
-function isInitialSetupPayload(
-  payload: InitialSetupPayload | null,
-): payload is InitialSetupPayload {
-  return Boolean(
-    payload &&
-      payload.purpose === "INITIAL_SETUP" &&
-      typeof payload.uid === "string" &&
-      payload.uid.length > 0 &&
-      typeof payload.email === "string" &&
-      payload.email.length > 0 &&
-      Object.values(UserRole).includes(payload.role) &&
-      typeof payload.exp === "number" &&
-      (payload.nextPath === undefined || typeof payload.nextPath === "string"),
-  );
-}
-
 export async function getInitialSetupSession(): Promise<InitialSetupPayload | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(INITIAL_SETUP_COOKIE)?.value;
@@ -270,7 +355,7 @@ export async function getInitialSetupSession(): Promise<InitialSetupPayload | nu
     return null;
   }
 
-  const payload = await decodeSignedPayload<InitialSetupPayload>(token);
+  const payload = await decodeSignedPayload(token);
   if (!isInitialSetupPayload(payload) || !isNotExpired(payload.exp)) {
     return null;
   }
@@ -317,8 +402,8 @@ async function readSessionFromCookie(): Promise<SessionReadResult> {
     return { session: null };
   }
 
-  const payload = await decodeSignedPayload<SessionPayload>(token);
-  if (!payload) {
+  const payload = await decodeSignedPayload(token);
+  if (!isSessionPayload(payload)) {
     deleteSessionCookieIfWritable(cookieStore);
     return { session: null, reason: "invalid" };
   }
@@ -348,31 +433,11 @@ export async function verifySessionToken(
   token: string | undefined,
 ): Promise<SessionPayload | null> {
   if (!token) return null;
-  const payload = await decodeSignedPayload<SessionPayload>(token);
-  if (!payload) {
+  const payload = await decodeSignedPayload(token);
+  if (!isSessionPayload(payload) || !isNotExpired(payload.exp)) {
     return null;
   }
   return payload;
-}
-
-function getSyntheticSessionValidation(token: string): SessionValidationResult | null {
-  if (token === "valid-session-token") {
-    return {
-      valid: true,
-      expired: false,
-      user: { id: "user-1", role: "STUDENT" },
-    };
-  }
-
-  if (token === "expired-session-token" || token === "boundary-expired-token") {
-    return {
-      valid: false,
-      expired: true,
-      reason: "Session expired",
-    };
-  }
-
-  return null;
 }
 
 export async function validateSession(sessionToken: string): Promise<SessionValidationResult> {
@@ -381,17 +446,12 @@ export async function validateSession(sessionToken: string): Promise<SessionVali
     return { valid: false, expired: false, reason: "No session" };
   }
 
-  const synthetic = getSyntheticSessionValidation(token);
-  if (synthetic) {
-    return synthetic;
-  }
-
-  const payload = await decodeSignedPayload<SessionPayload>(token);
-  if (!payload) {
+  const payload = await decodeSignedPayload(token);
+  if (!isSessionPayload(payload)) {
     return { valid: false, expired: false, reason: "Invalid session" };
   }
 
-  if (!payload.exp || payload.exp <= Date.now()) {
+  if (!isNotExpired(payload.exp)) {
     return { valid: false, expired: true, reason: "Session expired" };
   }
 
@@ -412,6 +472,7 @@ export async function validateSession(sessionToken: string): Promise<SessionVali
 
 export async function createAdminPendingTwoFactor(input: { uid: string; email: string }) {
   const payload: PendingTwoFactorPayload = {
+    purpose: "ADMIN_PENDING_2FA",
     uid: input.uid,
     email: input.email,
     exp: Date.now() + ADMIN_PENDING_2FA_DURATION_MS,
@@ -435,8 +496,8 @@ export async function getAdminPendingTwoFactor(): Promise<PendingTwoFactorPayloa
     return null;
   }
 
-  const payload = await decodeSignedPayload<PendingTwoFactorPayload>(token);
-  if (!payload || !isNotExpired(payload.exp)) {
+  const payload = await decodeSignedPayload(token);
+  if (!isPendingTwoFactorPayload(payload) || !isNotExpired(payload.exp)) {
     return null;
   }
   return payload;

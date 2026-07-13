@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const verifyPasswordMock = vi.hoisted(() => vi.fn(() => Promise.resolve(true)));
 const findUserByEmailMock = vi.hoisted(() => vi.fn());
 const createSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const createAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const createInitialSetupSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const clearSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
 // Mock redirect to throw an error so we can catch and assert it
 const redirectMock = vi.hoisted(() =>
@@ -42,9 +44,11 @@ vi.mock("@/lib/repositories/admin-audit-repository", () => ({
 
 vi.mock("@/lib/auth/session", () => ({
   createSession: createSessionMock,
+  createAdminPendingTwoFactor: createAdminPendingTwoFactorMock,
   createInitialSetupSession: createInitialSetupSessionMock,
   clearSession: clearSessionMock,
   clearAdminPendingTwoFactor: clearAdminPendingTwoFactorMock,
+  clearInitialSetupSession: clearInitialSetupSessionMock,
   getAdminPendingTwoFactor: vi.fn(() => Promise.resolve({ uid: "admin-1" })),
   getPortalRedirectPath: vi.fn((role, nextPath) => {
     // Emulate proper nextPath resolution
@@ -52,6 +56,18 @@ vi.mock("@/lib/auth/session", () => ({
     return role === "ADMIN" ? "/admin" : `/portal/${role.toLowerCase()}`;
   }),
 }));
+
+function expectAllAuthCookiesClearedBefore(issueMock: ReturnType<typeof vi.fn>) {
+  expect(clearSessionMock).toHaveBeenCalledOnce();
+  expect(clearAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
+  expect(clearInitialSetupSessionMock).toHaveBeenCalledOnce();
+
+  const issueOrder = issueMock.mock.invocationCallOrder[0];
+  expect(issueOrder).toBeDefined();
+  expect(clearSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
+  expect(clearAdminPendingTwoFactorMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
+  expect(clearInitialSetupSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
+}
 
 vi.mock("@/lib/auth/two-factor", () => ({
   verifyTotpCode: vi.fn(() => true),
@@ -74,24 +90,7 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
   });
 
   it("parses the next parameter and redirects to the exact intended path upon successful login", async () => {
-    let loginAction:
-      | ((state: { success: boolean; message: string }, formData: FormData) => Promise<unknown>)
-      | undefined;
-    try {
-      // Target the new canonical portal architecture path
-      const modulePath = "../../../app/portal/login/actions";
-      const module = await import(/* @vite-ignore */ modulePath);
-      loginAction = module.loginAction || module.loginPortal;
-    } catch (e) {
-      // In Red Phase, the file might not exist or be relocated yet
-      expect(true, "Action module app/portal/login/actions does not exist").toBe(false);
-      return;
-    }
-
-    if (!loginAction) {
-      expect(true, "loginAction not exported from module").toBe(false);
-      return;
-    }
+    const { loginAction } = await import("@/app/portal/login/actions");
 
     const formData = new FormData();
     formData.set("email", "student@uluglobalacademy.com");
@@ -105,7 +104,9 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
     expect(createSessionMock).toHaveBeenCalledWith(
       expect.objectContaining({ uid: "user-1", role: "STUDENT", mfaVerified: true }),
     );
+    expectAllAuthCookiesClearedBefore(createSessionMock);
     expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
+    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
   });
 
   it("routes a temporary-password user to password setup without a normal session", async () => {
@@ -129,8 +130,7 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
       "REDIRECT:/portal/setup/password",
     );
 
-    expect(clearSessionMock).toHaveBeenCalledOnce();
-    expect(clearAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
+    expectAllAuthCookiesClearedBefore(createInitialSetupSessionMock);
     expect(createInitialSetupSessionMock).toHaveBeenCalledWith({
       uid: "user-1",
       email: "test@uluglobalacademy.com",
@@ -138,6 +138,26 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
       nextPath: "/portal/student/assignments",
     });
     expect(createSessionMock).not.toHaveBeenCalled();
+    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
+  });
+
+  it("does not clear or issue auth cookies when password verification fails", async () => {
+    verifyPasswordMock.mockResolvedValueOnce(false);
+    const { loginAction } = await import("@/app/portal/login/actions");
+    const formData = new FormData();
+    formData.set("email", "student@uluglobalacademy.com");
+    formData.set("password", "WrongPass123!");
+
+    await expect(loginAction({ success: false, message: "" }, formData)).resolves.toEqual(
+      expect.objectContaining({ success: false }),
+    );
+
+    expect(clearSessionMock).not.toHaveBeenCalled();
+    expect(clearAdminPendingTwoFactorMock).not.toHaveBeenCalled();
+    expect(clearInitialSetupSessionMock).not.toHaveBeenCalled();
+    expect(createSessionMock).not.toHaveBeenCalled();
+    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
+    expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
   });
 
   it("parses the next parameter and redirects to the exact intended path upon successful 2FA", async () => {

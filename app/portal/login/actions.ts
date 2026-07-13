@@ -3,6 +3,7 @@
 import { verifyPassword } from "@/lib/auth/password";
 import {
   clearAdminPendingTwoFactor,
+  clearInitialSetupSession,
   clearSession,
   createAdminPendingTwoFactor,
   createInitialSetupSession,
@@ -101,12 +102,14 @@ export async function loginAction(
     timestamp: new Date(),
   });
 
+  await clearSession();
+  await clearAdminPendingTwoFactor();
+  await clearInitialSetupSession();
+
   const require2FA = (process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false";
   const adminNeedsEnrollment = user.role === UserRole.ADMIN && require2FA && !user.twoFactorEnabled;
 
   if (user.mustChangePassword || adminNeedsEnrollment) {
-    await clearSession();
-    await clearAdminPendingTwoFactor();
     await createInitialSetupSession({
       uid: user.id,
       email: user.email,

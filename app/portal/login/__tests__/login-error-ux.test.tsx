@@ -7,6 +7,9 @@ const useFormStatusMock = vi.hoisted(() => vi.fn());
 const getSessionMock = vi.hoisted(() => vi.fn());
 const getAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const createSessionMock = vi.hoisted(() => vi.fn());
+const clearSessionMock = vi.hoisted(() => vi.fn());
+const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
+const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const verifyPasswordMock = vi.hoisted(() => vi.fn());
 const findUserByEmailMock = vi.hoisted(() => vi.fn());
 const checkLoginRateLimitMock = vi.hoisted(() => vi.fn());
@@ -34,6 +37,9 @@ vi.mock("@/lib/auth/session", async () => {
   const actual = await vi.importActual<typeof import("@/lib/auth/session")>("@/lib/auth/session");
   return {
     ...actual,
+    clearAdminPendingTwoFactor: clearAdminPendingTwoFactorMock,
+    clearInitialSetupSession: clearInitialSetupSessionMock,
+    clearSession: clearSessionMock,
     createSession: createSessionMock,
     getSession: getSessionMock,
     getAdminPendingTwoFactor: getAdminPendingTwoFactorMock,
@@ -121,6 +127,9 @@ describe("Portal login error UX", () => {
     getSessionMock.mockReset();
     getAdminPendingTwoFactorMock.mockReset();
     createSessionMock.mockReset();
+    clearSessionMock.mockReset();
+    clearAdminPendingTwoFactorMock.mockReset();
+    clearInitialSetupSessionMock.mockReset();
     verifyPasswordMock.mockReset();
     findUserByEmailMock.mockReset();
     checkLoginRateLimitMock.mockReset();

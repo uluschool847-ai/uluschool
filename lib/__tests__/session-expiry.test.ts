@@ -27,6 +27,7 @@ const redirectMock = vi.hoisted(() =>
 );
 const findUserByIdMock = vi.hoisted(() => vi.fn());
 const prismaFindUniqueMock = vi.hoisted(() => vi.fn());
+const TEST_AUTH_SESSION_SECRET = "test-auth-session-secret-at-least-32-chars";
 
 vi.mock("next/headers", () => ({
   cookies: vi.fn(async () => ({
@@ -98,6 +99,17 @@ async function createSignedSessionToken(input: {
   return token as string;
 }
 
+async function createSignedPendingTwoFactorToken(input: { uid?: string; email?: string } = {}) {
+  cookieSetMock.mockClear();
+  await sessionModule.createAdminPendingTwoFactor({
+    uid: input.uid ?? "admin-1",
+    email: input.email ?? "admin@example.com",
+  });
+  const token = cookieSetMock.mock.calls.find(([name]) => name === "ulu_admin_2fa_pending")?.[1];
+  expect(token).toEqual(expect.any(String));
+  return token as string;
+}
+
 async function createSignedInitialSetupToken(
   input: {
     uid?: string;
@@ -118,9 +130,32 @@ async function createSignedInitialSetupToken(
   return token as string;
 }
 
+function toBase64Url(value: string) {
+  return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function createSignedTestPayload(payload: Record<string, unknown>) {
+  const encoder = new TextEncoder();
+  const payloadBase64 = toBase64Url(JSON.stringify(payload));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(TEST_AUTH_SESSION_SECRET),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(payloadBase64));
+  const signatureString = Array.from(new Uint8Array(signature), (byte) =>
+    String.fromCharCode(byte),
+  ).join("");
+  return `${payloadBase64}.${toBase64Url(signatureString)}`;
+}
+
 describe("session validation and expiry handling", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    process.env.AUTH_SESSION_SECRET = TEST_AUTH_SESSION_SECRET;
+    process.env.NODE_ENV = "test";
     cookieDeleteMock.mockReset();
     cookieGetMock.mockReset();
     cookieSetMock.mockReset();
@@ -188,6 +223,27 @@ describe("session validation and expiry handling", () => {
       await expect(sessionModule.getInitialSetupSession()).resolves.toBeNull();
     });
 
+    it.each([
+      ["missing uid", { uid: undefined }],
+      ["invalid role", { role: "OWNER" }],
+      ["malformed expiry", { exp: "never" }],
+      ["invalid optional nextPath", { nextPath: 42 }],
+      ["unknown field", { unexpected: true }],
+    ])("rejects a signed setup payload with %s", async (_case, overrides) => {
+      const token = await createSignedTestPayload({
+        uid: "teacher-1",
+        email: "teacher@example.com",
+        role: UserRole.TEACHER,
+        purpose: "INITIAL_SETUP",
+        exp: Date.now() + 60_000,
+        ...overrides,
+      });
+      cookieGetMock.mockReturnValue({ value: token });
+
+      await expect(sessionModule.getInitialSetupSession()).resolves.toBeNull();
+      expect(findUserByIdMock).not.toHaveBeenCalled();
+    });
+
     it("rejects a tampered setup cookie", async () => {
       setDbUser(makeDbUser());
       const token = await createSignedInitialSetupToken();
@@ -208,6 +264,52 @@ describe("session validation and expiry handling", () => {
 
       await expect(sessionModule.getInitialSetupSession()).resolves.toBeNull();
       expect(findUserByIdMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects a setup cookie exactly at its expiry boundary", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-07-14T10:00:00.000Z"));
+      setDbUser(makeDbUser());
+      const token = await createSignedInitialSetupToken();
+      cookieGetMock.mockReturnValue({ value: token });
+      vi.advanceTimersByTime(15 * 60 * 1000);
+
+      await expect(sessionModule.getInitialSetupSession()).resolves.toBeNull();
+      expect(findUserByIdMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["sibling role prefix", "/portal/teacher-other", undefined],
+      ["external URL", "https://example.com/portal/teacher", undefined],
+      ["overlong path", `/portal/teacher/${"a".repeat(2048)}`, undefined],
+      [
+        "trimmed role child",
+        "  /portal/teacher/assignments?view=past  ",
+        "/portal/teacher/assignments?view=past",
+      ],
+    ])("omits an unsafe %s setup nextPath before signing", async (_case, nextPath, expected) => {
+      const dbUser = makeDbUser();
+      setDbUser(dbUser);
+      const token = await createSignedInitialSetupToken({ nextPath });
+      cookieGetMock.mockReturnValue({ value: token });
+
+      const payload = await sessionModule.getInitialSetupSession();
+
+      if (expected) {
+        expect(payload).toEqual(expect.objectContaining({ nextPath: expected }));
+      } else {
+        expect(payload).not.toHaveProperty("nextPath");
+      }
+    });
+
+    it("uses segment-aware role prefixes for final redirects", () => {
+      expect(sessionModule.getPortalRedirectPath(UserRole.TEACHER, "/portal/teacher-other")).toBe(
+        "/portal/teacher",
+      );
+      expect(sessionModule.getPortalRedirectPath(UserRole.ADMIN, "/administrator")).toBe("/admin");
+      expect(sessionModule.getPortalRedirectPath(UserRole.ADMIN, "/admin?tab=security")).toBe(
+        "/admin?tab=security",
+      );
     });
 
     it.each([
@@ -256,9 +358,126 @@ describe("session validation and expiry handling", () => {
     });
   });
 
+  describe("signed auth payload purpose separation", () => {
+    it("includes SESSION purpose and accepts a valid normal session", async () => {
+      const token = await createSignedSessionToken({ uid: "teacher-1", role: UserRole.TEACHER });
+
+      await expect(sessionModule.verifySessionToken(token)).resolves.toEqual(
+        expect.objectContaining({ purpose: "SESSION", uid: "teacher-1" }),
+      );
+    });
+
+    it("rejects a setup token in every normal-session reader before DB revalidation", async () => {
+      setDbUser(makeDbUser());
+      const token = await createSignedInitialSetupToken();
+      cookieGetMock.mockImplementation((name: string) =>
+        name === "ulu_session" ? { value: token } : undefined,
+      );
+
+      await expect(sessionModule.getSession()).resolves.toBeNull();
+      await expect(sessionModule.verifySessionToken(token)).resolves.toBeNull();
+      await expect(sessionModule.validateSession(token)).resolves.toEqual({
+        valid: false,
+        expired: false,
+        reason: "Invalid session",
+      });
+      expect(findUserByIdMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects a setup token renamed to the pending-admin cookie", async () => {
+      const token = await createSignedInitialSetupToken();
+      cookieGetMock.mockImplementation((name: string) =>
+        name === "ulu_admin_2fa_pending" ? { value: token } : undefined,
+      );
+
+      await expect(sessionModule.getAdminPendingTwoFactor()).resolves.toBeNull();
+    });
+
+    it("purpose-binds pending-admin tokens and rejects them as normal or setup sessions", async () => {
+      const token = await createSignedPendingTwoFactorToken();
+      cookieGetMock.mockImplementation((name: string) =>
+        name === "ulu_initial_setup" ? { value: token } : undefined,
+      );
+
+      await expect(sessionModule.getAdminPendingTwoFactor()).resolves.toBeNull();
+      cookieGetMock.mockImplementation((name: string) =>
+        name === "ulu_admin_2fa_pending" ? { value: token } : undefined,
+      );
+      await expect(sessionModule.getAdminPendingTwoFactor()).resolves.toEqual(
+        expect.objectContaining({ purpose: "ADMIN_PENDING_2FA" }),
+      );
+      await expect(sessionModule.verifySessionToken(token)).resolves.toBeNull();
+      cookieGetMock.mockImplementation((name: string) =>
+        name === "ulu_initial_setup" ? { value: token } : undefined,
+      );
+      await expect(sessionModule.getInitialSetupSession()).resolves.toBeNull();
+      expect(findUserByIdMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["missing purpose", { purpose: undefined }],
+      ["missing email", { email: undefined }],
+      ["malformed expiry", { exp: 1.5 }],
+      ["unknown field", { unexpected: true }],
+    ])("rejects a signed pending-admin payload with %s", async (_case, overrides) => {
+      const token = await createSignedTestPayload({
+        purpose: "ADMIN_PENDING_2FA",
+        uid: "admin-1",
+        email: "admin@example.com",
+        exp: Date.now() + 60_000,
+        ...overrides,
+      });
+      cookieGetMock.mockImplementation((name: string) =>
+        name === "ulu_admin_2fa_pending" ? { value: token } : undefined,
+      );
+
+      await expect(sessionModule.getAdminPendingTwoFactor()).resolves.toBeNull();
+    });
+
+    it("rejects a pending-admin token exactly at its expiry boundary", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-07-14T10:00:00.000Z"));
+      const token = await createSignedPendingTwoFactorToken();
+      cookieGetMock.mockReturnValue({ value: token });
+      vi.advanceTimersByTime(10 * 60 * 1000);
+
+      await expect(sessionModule.getAdminPendingTwoFactor()).resolves.toBeNull();
+    });
+
+    it.each([
+      ["missing purpose", { purpose: undefined }],
+      ["wrong purpose", { purpose: "INITIAL_SETUP" }],
+      ["missing uid", { purpose: "SESSION", uid: undefined }],
+      ["invalid role", { purpose: "SESSION", role: "OWNER" }],
+      ["invalid auth method", { purpose: "SESSION", authMethod: "magic" }],
+      ["invalid MFA value", { purpose: "SESSION", mfaVerified: "true" }],
+      ["malformed expiry", { purpose: "SESSION", exp: "never" }],
+      ["invalid optional fullName", { purpose: "SESSION", fullName: 42 }],
+      ["unknown field", { purpose: "SESSION", unexpected: true }],
+    ])("rejects a signed normal-session payload with %s", async (_case, overrides) => {
+      const token = await createSignedTestPayload({
+        purpose: "SESSION",
+        uid: "teacher-1",
+        role: UserRole.TEACHER,
+        email: "teacher@example.com",
+        fullName: null,
+        exp: Date.now() + 60_000,
+        mfaVerified: true,
+        authMethod: "password",
+        ...overrides,
+      });
+
+      await expect(sessionModule.verifySessionToken(token)).resolves.toBeNull();
+      expect(findUserByIdMock).not.toHaveBeenCalled();
+    });
+  });
+
   it("returns a valid session payload for an active session", async () => {
+    const dbUser = makeDbUser({ id: "user-1", role: UserRole.STUDENT });
+    setDbUser(dbUser);
+    const token = await createSignedSessionToken({ uid: dbUser.id, role: dbUser.role });
     const validateSession = getValidateSession();
-    const result = await validateSession?.("valid-session-token");
+    const result = await validateSession?.(token);
     expect(result).toEqual({
       valid: true,
       expired: false,
@@ -267,8 +486,12 @@ describe("session validation and expiry handling", () => {
   });
 
   it("returns expired=true for an expired session", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-05T10:00:00.000Z"));
+    const token = await createSignedSessionToken({ uid: "user-1", role: UserRole.STUDENT });
+    vi.advanceTimersByTime(7 * 24 * 60 * 60 * 1000 + 1);
     const validateSession = getValidateSession();
-    const result = await validateSession?.("expired-session-token");
+    const result = await validateSession?.(token);
     expect(result).toEqual({
       valid: false,
       expired: true,
@@ -309,8 +532,10 @@ describe("session validation and expiry handling", () => {
   it("treats a token exactly at the expiry boundary as expired", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-05T10:00:00.000Z"));
+    const token = await createSignedSessionToken({ uid: "user-1", role: UserRole.STUDENT });
+    vi.advanceTimersByTime(7 * 24 * 60 * 60 * 1000);
     const validateSession = getValidateSession();
-    const result = await validateSession?.("boundary-expired-token");
+    const result = await validateSession?.(token);
     expect(result).toEqual({
       valid: false,
       expired: true,

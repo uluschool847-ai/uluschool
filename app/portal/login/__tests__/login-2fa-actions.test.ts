@@ -11,6 +11,7 @@ const findUserByEmailMock = vi.hoisted(() => vi.fn());
 const createAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const clearSessionMock = vi.hoisted(() => vi.fn());
+const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const createInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const createSessionMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
@@ -32,10 +33,23 @@ vi.mock("@/lib/auth/session", () => ({
   createAdminPendingTwoFactor: createAdminPendingTwoFactorMock,
   clearAdminPendingTwoFactor: clearAdminPendingTwoFactorMock,
   clearSession: clearSessionMock,
+  clearInitialSetupSession: clearInitialSetupSessionMock,
   createInitialSetupSession: createInitialSetupSessionMock,
   createSession: createSessionMock,
   getPortalRedirectPath: vi.fn((role: UserRole, nextPath?: string | null) => nextPath ?? "/admin"),
 }));
+
+function expectAllAuthCookiesClearedBefore(issueMock: ReturnType<typeof vi.fn>) {
+  expect(clearSessionMock).toHaveBeenCalledOnce();
+  expect(clearAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
+  expect(clearInitialSetupSessionMock).toHaveBeenCalledOnce();
+
+  const issueOrder = issueMock.mock.invocationCallOrder[0];
+  expect(issueOrder).toBeDefined();
+  expect(clearSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
+  expect(clearAdminPendingTwoFactorMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
+  expect(clearInitialSetupSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
+}
 
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   createAdminAuditLog: createAdminAuditLogMock,
@@ -83,7 +97,9 @@ describe("portal login admin 2FA actions", () => {
       uid: "admin-1",
       email: "admin@example.com",
     });
+    expectAllAuthCookiesClearedBefore(createAdminPendingTwoFactorMock);
     expect(createSessionMock).not.toHaveBeenCalled();
+    expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
     expect(createAdminAuditLogMock).toHaveBeenCalledWith(
       expect.objectContaining({ action: "ADMIN_LOGIN_PENDING_2FA" }),
     );
@@ -110,8 +126,7 @@ describe("portal login admin 2FA actions", () => {
         loginAction({ success: false, message: "" }, makeLoginFormData()),
       ).rejects.toThrow("REDIRECT:/portal/setup/2fa");
 
-      expect(clearSessionMock).toHaveBeenCalledOnce();
-      expect(clearAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
+      expectAllAuthCookiesClearedBefore(createInitialSetupSessionMock);
       expect(createInitialSetupSessionMock).toHaveBeenCalledWith({
         uid: "admin-1",
         email: "admin@example.com",
@@ -142,6 +157,8 @@ describe("portal login admin 2FA actions", () => {
     );
 
     expect(createInitialSetupSessionMock).toHaveBeenCalled();
+    expectAllAuthCookiesClearedBefore(createInitialSetupSessionMock);
     expect(createSessionMock).not.toHaveBeenCalled();
+    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
   });
 });
