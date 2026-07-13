@@ -2,7 +2,10 @@
 
 import { verifyPassword } from "@/lib/auth/password";
 import {
+  clearAdminPendingTwoFactor,
+  clearSession,
   createAdminPendingTwoFactor,
+  createInitialSetupSession,
   createSession,
   getPortalRedirectPath,
 } from "@/lib/auth/session";
@@ -98,55 +101,37 @@ export async function loginAction(
     timestamp: new Date(),
   });
 
+  const require2FA = (process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false";
+  const adminNeedsEnrollment = user.role === UserRole.ADMIN && require2FA && !user.twoFactorEnabled;
+
+  if (user.mustChangePassword || adminNeedsEnrollment) {
+    await clearSession();
+    await clearAdminPendingTwoFactor();
+    await createInitialSetupSession({
+      uid: user.id,
+      email: user.email,
+      role: user.role,
+      ...(nextPath ? { nextPath } : {}),
+    });
+    redirect(user.mustChangePassword ? "/portal/setup/password" : "/portal/setup/2fa");
+  }
+
   if (user.role === UserRole.ADMIN) {
-    const require2FA = (process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false";
     if (require2FA) {
-      if (user.twoFactorEnabled) {
-        await createAdminAuditLog({
-          adminUserId: user.id,
-          action: "ADMIN_LOGIN_PENDING_2FA",
-          targetType: "AUTH",
-          meta: {
-            ipAddress: "127.0.0.1",
-            userAgent: "unknown",
-          },
-        });
+      await createAdminAuditLog({
+        adminUserId: user.id,
+        action: "ADMIN_LOGIN_PENDING_2FA",
+        targetType: "AUTH",
+        meta: {
+          ipAddress: "127.0.0.1",
+          userAgent: "unknown",
+        },
+      });
 
-        await createAdminPendingTwoFactor({ uid: user.id, email: user.email });
+      await createAdminPendingTwoFactor({ uid: user.id, email: user.email });
 
-        const nextQuery = nextPath ? `?next=${encodeURIComponent(nextPath)}` : "";
-        redirect(`/portal/login/verify-2fa${nextQuery}`);
-      }
-
-      if ((process.env.NODE_ENV ?? "development") !== "production") {
-        await createAdminAuditLog({
-          adminUserId: user.id,
-          action: "ADMIN_LOGIN_2FA_REQUIRED_DEV_BYPASS",
-          targetType: "AUTH",
-          meta: {
-            ipAddress: "127.0.0.1",
-            userAgent: "dev-bypass",
-            details: { note: "Bypassed 2FA UI for dev." },
-          },
-        });
-
-        await createSession({
-          uid: user.id,
-          role: user.role,
-          email: user.email,
-          fullName: user.fullName,
-          mfaVerified: true,
-          authMethod: "password",
-        });
-
-        const nextQuery = nextPath ? `&next=${encodeURIComponent(nextPath)}` : "";
-        redirect(`/admin/security?setup2fa=required${nextQuery}`);
-      }
-
-      return {
-        success: false,
-        message: "Admin 2FA is required. Contact an administrator to finish setup.",
-      };
+      const nextQuery = nextPath ? `?next=${encodeURIComponent(nextPath)}` : "";
+      redirect(`/portal/login/verify-2fa${nextQuery}`);
     }
 
     // 2FA Disabled

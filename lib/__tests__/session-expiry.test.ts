@@ -14,6 +14,7 @@ type DbUser = {
   fullName: string | null;
   role: UserRole;
   isActive: boolean;
+  mustChangePassword?: boolean;
 };
 
 const cookieDeleteMock = vi.hoisted(() => vi.fn());
@@ -97,6 +98,26 @@ async function createSignedSessionToken(input: {
   return token as string;
 }
 
+async function createSignedInitialSetupToken(
+  input: {
+    uid?: string;
+    email?: string;
+    role?: UserRole;
+    nextPath?: string;
+  } = {},
+) {
+  cookieSetMock.mockClear();
+  await sessionModule.createInitialSetupSession({
+    uid: input.uid ?? "teacher-1",
+    email: input.email ?? "teacher@example.com",
+    role: input.role ?? UserRole.TEACHER,
+    ...(input.nextPath ? { nextPath: input.nextPath } : {}),
+  });
+  const token = cookieSetMock.mock.calls.find(([name]) => name === "ulu_initial_setup")?.[1];
+  expect(token).toEqual(expect.any(String));
+  return token as string;
+}
+
 describe("session validation and expiry handling", () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -110,6 +131,129 @@ describe("session validation and expiry handling", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    Reflect.deleteProperty(process.env, "AUTH_SESSION_SECRET");
+    process.env.NODE_ENV = "test";
+  });
+
+  describe("restricted initial setup session", () => {
+    it("creates and reads a signed 15-minute purpose-bound setup cookie", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-07-14T10:00:00.000Z"));
+      const dbUser = makeDbUser();
+      setDbUser(dbUser);
+
+      const token = await createSignedInitialSetupToken({
+        uid: dbUser.id,
+        email: dbUser.email,
+        role: dbUser.role,
+        nextPath: "/portal/teacher/assignments",
+      });
+
+      expect(cookieSetMock).toHaveBeenCalledWith(
+        "ulu_initial_setup",
+        token,
+        expect.objectContaining({
+          httpOnly: true,
+          sameSite: "lax",
+          secure: false,
+          path: "/",
+          maxAge: 15 * 60,
+        }),
+      );
+
+      cookieGetMock.mockImplementation((name: string) =>
+        name === "ulu_initial_setup" ? { value: token } : undefined,
+      );
+
+      await expect(sessionModule.getInitialSetupSession()).resolves.toEqual({
+        uid: dbUser.id,
+        email: dbUser.email,
+        role: dbUser.role,
+        nextPath: "/portal/teacher/assignments",
+        purpose: "INITIAL_SETUP",
+        exp: new Date("2026-07-14T10:15:00.000Z").getTime(),
+      });
+    });
+
+    it("rejects a valid signed payload with the wrong purpose", async () => {
+      const dbUser = makeDbUser();
+      setDbUser(dbUser);
+      const normalSessionToken = await createSignedSessionToken({
+        uid: dbUser.id,
+        role: dbUser.role,
+        email: dbUser.email,
+      });
+      cookieGetMock.mockReturnValue({ value: normalSessionToken });
+
+      await expect(sessionModule.getInitialSetupSession()).resolves.toBeNull();
+    });
+
+    it("rejects a tampered setup cookie", async () => {
+      setDbUser(makeDbUser());
+      const token = await createSignedInitialSetupToken();
+      const replacement = token.startsWith("x") ? "y" : "x";
+      cookieGetMock.mockReturnValue({ value: `${replacement}${token.slice(1)}` });
+
+      await expect(sessionModule.getInitialSetupSession()).resolves.toBeNull();
+      expect(findUserByIdMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects an expired setup cookie", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-07-14T10:00:00.000Z"));
+      setDbUser(makeDbUser());
+      const token = await createSignedInitialSetupToken();
+      cookieGetMock.mockReturnValue({ value: token });
+      vi.advanceTimersByTime(15 * 60 * 1000 + 1);
+
+      await expect(sessionModule.getInitialSetupSession()).resolves.toBeNull();
+      expect(findUserByIdMock).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["deleted", null],
+      ["inactive", makeDbUser({ isActive: false })],
+      ["role-changed", makeDbUser({ role: UserRole.STUDENT })],
+    ])("rejects a setup cookie when its user is %s", async (_state, currentUser) => {
+      setDbUser(currentUser);
+      const token = await createSignedInitialSetupToken();
+      cookieGetMock.mockReturnValue({ value: token });
+
+      await expect(sessionModule.getInitialSetupSession()).resolves.toBeNull();
+    });
+
+    it("clears the restricted setup cookie", async () => {
+      await sessionModule.clearInitialSetupSession();
+
+      expect(cookieDeleteMock).toHaveBeenCalledWith("ulu_initial_setup");
+    });
+
+    it("requires at least 32 secret characters in production", async () => {
+      process.env.NODE_ENV = "production";
+      process.env.AUTH_SESSION_SECRET = "x".repeat(31);
+
+      await expect(
+        sessionModule.createInitialSetupSession({
+          uid: "teacher-1",
+          email: "teacher@example.com",
+          role: UserRole.TEACHER,
+        }),
+      ).rejects.toThrow("AUTH_SESSION_SECRET must be set and at least 32 characters.");
+      expect(cookieSetMock).not.toHaveBeenCalled();
+    });
+
+    it("accepts a 32-character production secret", async () => {
+      process.env.NODE_ENV = "production";
+      process.env.AUTH_SESSION_SECRET = "x".repeat(32);
+
+      await createSignedInitialSetupToken();
+
+      expect(cookieSetMock).toHaveBeenCalledWith(
+        "ulu_initial_setup",
+        expect.any(String),
+        expect.objectContaining({ secure: true }),
+      );
+    });
   });
 
   it("returns a valid session payload for an active session", async () => {

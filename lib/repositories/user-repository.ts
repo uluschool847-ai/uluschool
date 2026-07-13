@@ -63,10 +63,31 @@ export async function findUserById(userId: string) {
         fullName: true,
         role: true,
         isActive: true,
+        mustChangePassword: true,
         learningStatus: true,
         phoneWhatsapp: true,
         createdAt: true,
         updatedAt: true,
+      },
+    }),
+  );
+}
+
+export async function findUserForInitialSetup(userId: string) {
+  return withPrismaRetry(() =>
+    prisma.appUser.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        passwordHash: true,
+        mustChangePassword: true,
+        isActive: true,
+        twoFactorEnabled: true,
+        twoFactorSecret: true,
+        twoFactorBackupCodes: true,
       },
     }),
   );

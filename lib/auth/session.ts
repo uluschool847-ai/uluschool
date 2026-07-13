@@ -6,8 +6,10 @@ import { findUserById } from "@/lib/repositories/user-repository";
 
 const SESSION_COOKIE = "ulu_session";
 const ADMIN_PENDING_2FA_COOKIE = "ulu_admin_2fa_pending";
+const INITIAL_SETUP_COOKIE = "ulu_initial_setup";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
 const ADMIN_PENDING_2FA_DURATION_MS = 1000 * 60 * 10;
+const INITIAL_SETUP_DURATION_MS = 1000 * 60 * 15;
 
 type AuthMethod = "password" | "sso";
 
@@ -19,6 +21,15 @@ export type SessionPayload = {
   exp: number;
   mfaVerified: boolean;
   authMethod: AuthMethod;
+};
+
+export type InitialSetupPayload = {
+  uid: string;
+  email: string;
+  role: UserRole;
+  nextPath?: string;
+  purpose: "INITIAL_SETUP";
+  exp: number;
 };
 
 export type SessionValidationResult = {
@@ -41,15 +52,17 @@ type SessionReadResult = {
 
 function getSessionSecret() {
   const secret = process.env.AUTH_SESSION_SECRET ?? "";
-  if (secret && secret.length >= 16) {
+  const isProduction = (process.env.NODE_ENV ?? "development") === "production";
+  const minimumLength = isProduction ? 32 : 16;
+  if (secret && secret.length >= minimumLength) {
     return secret;
   }
 
-  if ((process.env.NODE_ENV ?? "development") !== "production") {
+  if (!isProduction) {
     return "dev-only-auth-session-secret-please-change";
   }
 
-  throw new Error("AUTH_SESSION_SECRET must be set and at least 16 characters.");
+  throw new Error("AUTH_SESSION_SECRET must be set and at least 32 characters.");
 }
 
 // Helper for Base64URL encoding/decoding without Node.js Buffer
@@ -214,6 +227,65 @@ export async function createSession(input: {
 export async function clearSession() {
   const cookieStore = await cookies();
   cookieStore.delete(SESSION_COOKIE);
+}
+
+export async function createInitialSetupSession(
+  input: Omit<InitialSetupPayload, "purpose" | "exp">,
+) {
+  const payload: InitialSetupPayload = {
+    ...input,
+    purpose: "INITIAL_SETUP",
+    exp: Date.now() + INITIAL_SETUP_DURATION_MS,
+  };
+  const cookieStore = await cookies();
+  cookieStore.set(INITIAL_SETUP_COOKIE, await encodeSignedPayload(payload), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: (process.env.NODE_ENV ?? "development") === "production",
+    path: "/",
+    maxAge: INITIAL_SETUP_DURATION_MS / 1000,
+  });
+}
+
+function isInitialSetupPayload(
+  payload: InitialSetupPayload | null,
+): payload is InitialSetupPayload {
+  return Boolean(
+    payload &&
+      payload.purpose === "INITIAL_SETUP" &&
+      typeof payload.uid === "string" &&
+      payload.uid.length > 0 &&
+      typeof payload.email === "string" &&
+      payload.email.length > 0 &&
+      Object.values(UserRole).includes(payload.role) &&
+      typeof payload.exp === "number" &&
+      (payload.nextPath === undefined || typeof payload.nextPath === "string"),
+  );
+}
+
+export async function getInitialSetupSession(): Promise<InitialSetupPayload | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(INITIAL_SETUP_COOKIE)?.value;
+  if (!token) {
+    return null;
+  }
+
+  const payload = await decodeSignedPayload<InitialSetupPayload>(token);
+  if (!isInitialSetupPayload(payload) || !isNotExpired(payload.exp)) {
+    return null;
+  }
+
+  const dbUser = await findUserById(payload.uid);
+  if (!dbUser?.isActive || dbUser.role !== payload.role) {
+    return null;
+  }
+
+  return payload;
+}
+
+export async function clearInitialSetupSession() {
+  const cookieStore = await cookies();
+  cookieStore.delete(INITIAL_SETUP_COOKIE);
 }
 
 function deleteSessionCookieIfWritable(cookieStore: Awaited<ReturnType<typeof cookies>>) {

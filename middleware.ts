@@ -92,13 +92,15 @@ export async function middleware(request: NextRequest) {
 
   // Define active route policies
   const isPortalLoginPath = matchesPrefix(pathname, "/portal/login");
+  const isPortalSetupPath = matchesPrefix(pathname, "/portal/setup");
   const isAdminPath = matchesAnyPrefix(pathname, ["/admin"]);
   const isPublicRoute = matchesAnyPrefix(pathname, PUBLIC_ROUTES);
 
   // To avoid catching dead prefixes like /api/v1 or /portal-old, only protect defined active zones
   const activeProtectedPrefixes = ["/admin", "/portal"];
 
-  const isProtectedPath = matchesAnyPrefix(pathname, activeProtectedPrefixes) && !isPortalLoginPath;
+  const isProtectedPath =
+    matchesAnyPrefix(pathname, activeProtectedPrefixes) && !isPortalLoginPath && !isPortalSetupPath;
   const isApiPath = matchesPrefix(pathname, "/api");
 
   // Public exceptions

@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const verifyPasswordMock = vi.hoisted(() => vi.fn(() => Promise.resolve(true)));
+const findUserByEmailMock = vi.hoisted(() => vi.fn());
+const createSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const createInitialSetupSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const clearSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+
 // Mock redirect to throw an error so we can catch and assert it
 const redirectMock = vi.hoisted(() =>
   vi.fn((url: string) => {
@@ -13,19 +20,11 @@ vi.mock("next/navigation", () => ({
 
 // Mock repositories and session so the action can run without database
 vi.mock("@/lib/auth/password", () => ({
-  verifyPassword: vi.fn(() => Promise.resolve(true)),
+  verifyPassword: verifyPasswordMock,
 }));
 
 vi.mock("@/lib/repositories/user-repository", () => ({
-  findUserByEmail: vi.fn(() =>
-    Promise.resolve({
-      id: "user-1",
-      email: "test@uluglobalacademy.com",
-      role: "STUDENT",
-      isActive: true,
-      passwordHash: "hashed",
-    }),
-  ),
+  findUserByEmail: findUserByEmailMock,
   findAdminUserForTwoFactor: vi.fn(() =>
     Promise.resolve({
       id: "admin-1",
@@ -42,8 +41,10 @@ vi.mock("@/lib/repositories/admin-audit-repository", () => ({
 }));
 
 vi.mock("@/lib/auth/session", () => ({
-  createSession: vi.fn(() => Promise.resolve()),
-  clearAdminPendingTwoFactor: vi.fn(() => Promise.resolve()),
+  createSession: createSessionMock,
+  createInitialSetupSession: createInitialSetupSessionMock,
+  clearSession: clearSessionMock,
+  clearAdminPendingTwoFactor: clearAdminPendingTwoFactorMock,
   getAdminPendingTwoFactor: vi.fn(() => Promise.resolve({ uid: "admin-1" })),
   getPortalRedirectPath: vi.fn((role, nextPath) => {
     // Emulate proper nextPath resolution
@@ -60,6 +61,16 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    findUserByEmailMock.mockResolvedValue({
+      id: "user-1",
+      email: "test@uluglobalacademy.com",
+      fullName: "Student User",
+      role: "STUDENT",
+      isActive: true,
+      passwordHash: "hashed",
+      mustChangePassword: false,
+      twoFactorEnabled: false,
+    });
   });
 
   it("parses the next parameter and redirects to the exact intended path upon successful login", async () => {
@@ -91,6 +102,42 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
     await expect(loginAction({ success: false, message: "" }, formData)).rejects.toThrow(
       "REDIRECT:/portal/student/assignments?view=past",
     );
+    expect(createSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ uid: "user-1", role: "STUDENT", mfaVerified: true }),
+    );
+    expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("routes a temporary-password user to password setup without a normal session", async () => {
+    findUserByEmailMock.mockResolvedValueOnce({
+      id: "user-1",
+      email: "test@uluglobalacademy.com",
+      fullName: "Student User",
+      role: "STUDENT",
+      isActive: true,
+      passwordHash: "hashed",
+      mustChangePassword: true,
+      twoFactorEnabled: false,
+    });
+    const { loginAction } = await import("@/app/portal/login/actions");
+    const formData = new FormData();
+    formData.set("email", "student@uluglobalacademy.com");
+    formData.set("password", "ValidPass123!");
+    formData.set("next", "/portal/student/assignments");
+
+    await expect(loginAction({ success: false, message: "" }, formData)).rejects.toThrow(
+      "REDIRECT:/portal/setup/password",
+    );
+
+    expect(clearSessionMock).toHaveBeenCalledOnce();
+    expect(clearAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
+    expect(createInitialSetupSessionMock).toHaveBeenCalledWith({
+      uid: "user-1",
+      email: "test@uluglobalacademy.com",
+      role: "STUDENT",
+      nextPath: "/portal/student/assignments",
+    });
+    expect(createSessionMock).not.toHaveBeenCalled();
   });
 
   it("parses the next parameter and redirects to the exact intended path upon successful 2FA", async () => {

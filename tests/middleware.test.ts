@@ -82,6 +82,29 @@ describe("Middleware Routing and Access Control", () => {
       expect(redirectUrl).toContain("reason=invalid");
       expect(redirectUrl).toContain("callbackUrl=%2Fportal%2Fteacher");
     });
+
+    it.each(["/portal/student", "/portal/teacher", "/portal/parent", "/admin"])(
+      "keeps %s protected without a normal session",
+      async (path) => {
+        await middleware(createMockRequest(path));
+
+        expect(redirectMock).toHaveBeenCalled();
+        expect(redirectMock.mock.lastCall?.[0]?.toString()).toContain("/portal/login");
+      },
+    );
+  });
+
+  describe("Restricted Initial Setup", () => {
+    it.each(["/portal/setup/password", "/portal/setup/2fa"])(
+      "allows %s to render without a normal session",
+      async (path) => {
+        const response = await middleware(createMockRequest(path));
+
+        expect(response).toEqual(expect.objectContaining({ cookies: expect.any(Object) }));
+        expect(verifySessionToken).not.toHaveBeenCalled();
+        expect(redirectMock).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe("Authorized Access", () => {

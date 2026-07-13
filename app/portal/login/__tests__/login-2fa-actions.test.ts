@@ -9,6 +9,9 @@ const redirectMock = vi.hoisted(() =>
 const verifyPasswordMock = vi.hoisted(() => vi.fn());
 const findUserByEmailMock = vi.hoisted(() => vi.fn());
 const createAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
+const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
+const clearSessionMock = vi.hoisted(() => vi.fn());
+const createInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const createSessionMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const logAuthEventMock = vi.hoisted(() => vi.fn());
@@ -27,6 +30,9 @@ vi.mock("@/lib/repositories/user-repository", () => ({
 
 vi.mock("@/lib/auth/session", () => ({
   createAdminPendingTwoFactor: createAdminPendingTwoFactorMock,
+  clearAdminPendingTwoFactor: clearAdminPendingTwoFactorMock,
+  clearSession: clearSessionMock,
+  createInitialSetupSession: createInitialSetupSessionMock,
   createSession: createSessionMock,
   getPortalRedirectPath: vi.fn((role: UserRole, nextPath?: string | null) => nextPath ?? "/admin"),
 }));
@@ -60,6 +66,7 @@ describe("portal login admin 2FA actions", () => {
       role: UserRole.ADMIN,
       isActive: true,
       passwordHash: "hashed",
+      mustChangePassword: false,
       twoFactorEnabled: true,
       twoFactorSecret: "SECRET123",
     });
@@ -82,7 +89,41 @@ describe("portal login admin 2FA actions", () => {
     );
   });
 
-  it("keeps development setup redirect only for admins without configured 2FA", async () => {
+  it.each(["development", "production"])(
+    "routes an admin without configured 2FA to restricted setup in %s",
+    async (environment) => {
+      process.env.NODE_ENV = environment;
+      findUserByEmailMock.mockResolvedValueOnce({
+        id: "admin-1",
+        email: "admin@example.com",
+        fullName: "Admin User",
+        role: UserRole.ADMIN,
+        isActive: true,
+        passwordHash: "hashed",
+        mustChangePassword: false,
+        twoFactorEnabled: false,
+        twoFactorSecret: null,
+      });
+      const { loginAction } = await import("@/app/portal/login/actions");
+
+      await expect(
+        loginAction({ success: false, message: "" }, makeLoginFormData()),
+      ).rejects.toThrow("REDIRECT:/portal/setup/2fa");
+
+      expect(clearSessionMock).toHaveBeenCalledOnce();
+      expect(clearAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
+      expect(createInitialSetupSessionMock).toHaveBeenCalledWith({
+        uid: "admin-1",
+        email: "admin@example.com",
+        role: UserRole.ADMIN,
+        nextPath: "/admin/security",
+      });
+      expect(createSessionMock).not.toHaveBeenCalled();
+      expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("routes password setup before admin 2FA enrollment", async () => {
     findUserByEmailMock.mockResolvedValueOnce({
       id: "admin-1",
       email: "admin@example.com",
@@ -90,20 +131,17 @@ describe("portal login admin 2FA actions", () => {
       role: UserRole.ADMIN,
       isActive: true,
       passwordHash: "hashed",
+      mustChangePassword: true,
       twoFactorEnabled: false,
       twoFactorSecret: null,
     });
     const { loginAction } = await import("@/app/portal/login/actions");
 
     await expect(loginAction({ success: false, message: "" }, makeLoginFormData())).rejects.toThrow(
-      "REDIRECT:/admin/security?setup2fa=required&next=%2Fadmin%2Fsecurity",
+      "REDIRECT:/portal/setup/password",
     );
 
-    expect(createSessionMock).toHaveBeenCalledWith(
-      expect.objectContaining({ uid: "admin-1", mfaVerified: true }),
-    );
-    expect(createAdminAuditLogMock).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "ADMIN_LOGIN_2FA_REQUIRED_DEV_BYPASS" }),
-    );
+    expect(createInitialSetupSessionMock).toHaveBeenCalled();
+    expect(createSessionMock).not.toHaveBeenCalled();
   });
 });
