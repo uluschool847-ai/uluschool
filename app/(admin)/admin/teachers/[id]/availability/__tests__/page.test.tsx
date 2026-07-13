@@ -132,6 +132,8 @@ const teacherAvailabilityData = {
 
 describe("Admin teacher availability page", () => {
   beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-06-01T00:00:00.000Z"));
     cleanup();
     vi.clearAllMocks();
     requireRoleMock.mockResolvedValue({ uid: "admin-1", role: UserRole.ADMIN });
@@ -142,6 +144,7 @@ describe("Admin teacher availability page", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
   });
 
   it("requires ADMIN access and renders teacher identity, rules, unavailable periods, and lessons", async () => {

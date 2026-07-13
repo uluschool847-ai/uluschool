@@ -114,6 +114,8 @@ const portalAvailabilityData = {
 
 describe("Teacher portal availability page", () => {
   beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-06-01T00:00:00.000Z"));
     cleanup();
     vi.clearAllMocks();
     requireRoleMock.mockResolvedValue({ uid: "teacher-1", role: UserRole.TEACHER });
@@ -121,6 +123,7 @@ describe("Teacher portal availability page", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
   });
 
   it("requires an authenticated TEACHER and loads only the signed-in teacher availability", async () => {
