@@ -159,6 +159,22 @@ describe("app/api/upload/route local-first upload integration", () => {
     },
   );
 
+  it("rejects an admin upload for an unapproved purpose", async () => {
+    getSessionMock.mockResolvedValueOnce({
+      uid: "admin-1",
+      role: "ADMIN",
+      email: "admin@example.com",
+      exp: Date.now() + 60_000,
+      mfaVerified: true,
+      authMethod: "password",
+    });
+
+    const response = await POST(buildUploadRequest({ purpose: "profile-photo" }));
+
+    expect(response.status).toBe(403);
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
   it("rejects an unknown upload purpose", async () => {
     const response = await POST(buildUploadRequest({ purpose: "profile-photo" }));
 
