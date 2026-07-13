@@ -177,7 +177,7 @@ describe("Student schedule Lesson Status UI consistency", () => {
     expect(rescheduledCard.textContent ?? "").toMatch(/rescheduled/i);
     expect(rescheduledCard.textContent ?? "").not.toMatch(/moved/i);
     expect(rescheduledCard.textContent ?? "").toMatch(/rescheduled from/i);
-    expect(screen.getAllByText(/europe\/kiev/i).length).toBeGreaterThanOrEqual(6);
+    expect(screen.getAllByText(/africa\/nairobi/i).length).toBeGreaterThanOrEqual(6);
   });
 
   it("keeps Join lesson enabled only in the allowed window and disabled for blocked states", async () => {

@@ -137,7 +137,7 @@ describe("Teacher portal availability page", () => {
     expect(screen.getByText(/monday|mon/i)).toBeDefined();
     expect(screen.getByText(/09:00/)).toBeDefined();
     expect(screen.getAllByText(/12:00/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/europe\/kiev/i)).toBeDefined();
+    expect(screen.getByText(/africa\/nairobi/i)).toBeDefined();
     expect(screen.getAllByText(/exam board meeting/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/other teacher/i)).toBeNull();
   });
@@ -209,7 +209,7 @@ describe("Teacher portal availability page", () => {
     ).toBeDefined();
     expect(screen.getByText(/exam board meeting/i)).toBeDefined();
     expect(screen.getByText(/past conference/i)).toBeDefined();
-    expect(screen.getAllByText(/europe\/kiev/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/africa\/nairobi/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/created/i)).toBeDefined();
     expect(screen.getByText(/updated/i)).toBeDefined();
     expect(screen.getByRole("button", { name: /edit unavailable period|edit/i })).toBeDefined();

@@ -475,7 +475,7 @@ describe("Teacher Portal misleading UI safeguards", () => {
     expect(screen.getByText(/^Upcoming lessons: 2$/i)).toBeDefined();
     expect(screen.getByText(/^Active assignments: 1$/i)).toBeDefined();
     expect(screen.getByText(/^Pending submissions: 1$/i)).toBeDefined();
-    expect(screen.getByText(/next lesson:.*Europe\/Kiev/i)).toBeDefined();
+    expect(screen.getByText(/next lesson:.*Africa\/Nairobi/i)).toBeDefined();
 
     expect(
       screen.getByRole("link", { name: /view class.*igcse geometry group a/i }),

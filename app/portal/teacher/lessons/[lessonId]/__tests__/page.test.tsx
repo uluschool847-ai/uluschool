@@ -335,7 +335,7 @@ describe("Teacher schedule lesson detail page", () => {
     expect(screen.getByText(/subject:\s*mathematics/i)).toBeDefined();
     expect(screen.getByText(/class group:\s*algebra group a/i)).toBeDefined();
     expect(screen.getByText(/status:\s*rescheduled/i)).toBeDefined();
-    expect(screen.getByText(/europe\/kiev/i)).toBeDefined();
+    expect(screen.getByText(/africa\/nairobi/i)).toBeDefined();
     expect(screen.getByText(/rescheduled from/i)).toBeDefined();
     expect(screen.getByText(/original time changed/i)).toBeDefined();
 

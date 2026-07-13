@@ -158,7 +158,7 @@ describe("Admin teacher availability page", () => {
     expect(screen.getByText(/monday|mon/i)).toBeDefined();
     expect(screen.getByText(/09:00/)).toBeDefined();
     expect(screen.getAllByText(/12:00/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/europe\/kiev/i)).toBeDefined();
+    expect(screen.getByText(/africa\/nairobi/i)).toBeDefined();
     expect(screen.getByText(/exam board meeting/i)).toBeDefined();
     expect(screen.getByText(/algebra lesson/i)).toBeDefined();
     expect(screen.getAllByText(/igcse mathematics/i).length).toBeGreaterThan(0);
@@ -225,7 +225,7 @@ describe("Admin teacher availability page", () => {
     const page = await loadTeacherAvailabilityPage();
     render(await page.default({ params: { id: "teacher-1" } }));
 
-    expect(screen.getAllByText(/europe\/kiev/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/africa\/nairobi/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/jun 3, 2026, 12:00 pm/i)).toBeDefined();
     expect(screen.getByRole("link", { name: /back to teacher|teacher profile/i })).toHaveAttribute(
       "href",

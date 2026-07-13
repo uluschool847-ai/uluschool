@@ -136,7 +136,7 @@ describe("Student schedule page", () => {
     expect(
       screen.getAllByText(/group:\s*igcse mathematics group a/i).length,
     ).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText(/europe\/kiev/i).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText(/africa\/nairobi/i).length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText(/live/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/rescheduled/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/rescheduled from/i)).toBeDefined();

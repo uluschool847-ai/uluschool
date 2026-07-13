@@ -167,7 +167,7 @@ describe("Teacher dashboard formatting consistency", () => {
     const { container } = await renderServerComponent(<TeacherDashboardPage />);
     const text = container.textContent ?? "";
 
-    expect(text).toMatch(/Europe\/Kiev/);
+    expect(text).toMatch(/Africa\/Nairobi/);
   });
 
   it("does not expose unsafe meeting URLs as visible dashboard card text or links", async () => {

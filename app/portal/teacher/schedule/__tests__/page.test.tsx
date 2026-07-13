@@ -187,7 +187,7 @@ describe("Teacher schedule page", () => {
     const cardText = card.textContent ?? "";
     expect(cardText).toMatch(/subject:\s*mathematics/i);
     expect(cardText).toMatch(/group:\s*algebra group a/i);
-    expect(cardText).toMatch(/europe\/kiev/i);
+    expect(cardText).toMatch(/africa\/nairobi/i);
     expect(cardText).toMatch(/live/i);
     expect(cardText).toMatch(/students:\s*2/i);
     expect(cardText).toMatch(/active student/i);

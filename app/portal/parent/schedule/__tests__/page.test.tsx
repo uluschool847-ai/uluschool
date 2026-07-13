@@ -186,7 +186,7 @@ describe("Parent child schedule page", () => {
     expect(
       screen.getAllByText(/group:\s*igcse mathematics group a/i).length,
     ).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText(/europe\/kiev/i).length).toBeGreaterThanOrEqual(3);
+    expect(screen.getAllByText(/africa\/nairobi/i).length).toBeGreaterThanOrEqual(3);
     expect(screen.getAllByText(/live/i).length).toBeGreaterThanOrEqual(1);
     expect(container.textContent).not.toMatch(/\bPlanned\b|\bMoved\b|\bDone\b|\bCanceled\b/);
     expect(screen.getByText(/teacher unavailable/i)).toBeDefined();
