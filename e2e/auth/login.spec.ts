@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 const VALID_EMAIL = "fixed.student@uluglobalacademy.com";
-const VALID_PASSWORD = process.env.E2E_PORTAL_PASSWORD ?? "ChangeMe123!";
+const VALID_PASSWORD =
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 
 test.describe("Login Flow", () => {
   test.describe.configure({ timeout: 60000 });

@@ -4,7 +4,8 @@ import { UserRole } from "@prisma/client";
 import { hashPassword } from "@/lib/auth/password";
 import { prisma } from "@/lib/prisma";
 
-const PASSWORD = process.env.E2E_PORTAL_PASSWORD ?? "ChangeMe123!";
+const PASSWORD =
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 const TEST_LIVE_LESSON_URL =
   process.env.E2E_LIVE_LESSON_URL ?? "https://meet.google.com/math-visibility";
 

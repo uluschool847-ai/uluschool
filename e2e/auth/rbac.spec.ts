@@ -1,6 +1,7 @@
 import { type Page, expect, test } from "@playwright/test";
 
-const PASSWORD = process.env.E2E_PORTAL_PASSWORD ?? "ChangeMe123!";
+const PASSWORD =
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 const STUDENT_ADMIN_ROUTES = [
   "/admin/students",
   "/admin/students/new",

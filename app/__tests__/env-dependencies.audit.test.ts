@@ -47,6 +47,16 @@ function sourceFiles() {
     );
 }
 
+function e2eSpecsWithLocalPortalPasswordFixture() {
+  const e2eDir = join(ROOT, "e2e");
+  if (!existsSync(e2eDir)) return [];
+
+  return walk(e2eDir).filter((filePath) => {
+    if (!filePath.endsWith(".spec.ts")) return false;
+    return readFileSync(filePath, "utf8").includes("ChangeMe123!");
+  });
+}
+
 describe("Google Calendar environment and dependency readiness", () => {
   it(".env.example declares every Google Calendar integration variable", () => {
     const envExample = readEnvExample();
@@ -85,6 +95,24 @@ describe("Google Calendar environment and dependency readiness", () => {
         }
       });
     }
+
+    expect(offenders, offenders.join("\n")).toEqual([]);
+  });
+
+  it("uses E2E, seed, then local fallbacks for every E2E portal password fixture", () => {
+    const requiredFallbackPattern =
+      /process\.env\.E2E_PORTAL_PASSWORD\s*\?\?\s*process\.env\.SEED_PORTAL_PASSWORD\s*\?\?\s*["']ChangeMe123!["']/;
+    const offenders = e2eSpecsWithLocalPortalPasswordFixture()
+      .filter((filePath) => {
+        const content = readFileSync(filePath, "utf8");
+        const localFixturesOutsideRequiredFallback = content.replace(
+          new RegExp(requiredFallbackPattern.source, "g"),
+          "",
+        );
+
+        return localFixturesOutsideRequiredFallback.includes("ChangeMe123!");
+      })
+      .map((filePath) => relative(ROOT, filePath));
 
     expect(offenders, offenders.join("\n")).toEqual([]);
   });
