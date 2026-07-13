@@ -2,6 +2,9 @@
   "name": "ulu-school",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "npm run lint && next build",
