@@ -2,6 +2,8 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
 type ParentMaterialListProps = {
   materials: Array<Record<string, unknown>>;
   studentId: string;
@@ -65,40 +67,41 @@ describe("ParentMaterialList", () => {
     ).toHaveAttribute("href", "/uploads/materials/factorization-practice.pdf");
   });
 
-  it.each(["https://cdn.school/material.pdf", "/uploads/materials/internal.pdf"])(
-    "allows safe material URLs: %s",
-    async (safeUrl) => {
-      const { ParentMaterialList } = await loadComponent();
-      render(
-        <ParentMaterialList
-          materials={[
-            material({
-              attachments: [
-                {
-                  filename: "safe-attachment.pdf",
-                  href: safeUrl,
-                  mimeType: "application/pdf",
-                  size: 123,
-                },
-              ],
-              safeFileUrl: safeUrl,
-              title: "Safe parent material",
-            }),
-          ]}
-          studentId="student-1"
-        />,
-      );
+  it.each([
+    "https://cdn.school/material.pdf",
+    "/uploads/materials/internal.pdf",
+    storageUrlForKey("private/teachers/teacher-1/materials/internal.pdf"),
+  ])("allows safe material URLs: %s", async (safeUrl) => {
+    const { ParentMaterialList } = await loadComponent();
+    render(
+      <ParentMaterialList
+        materials={[
+          material({
+            attachments: [
+              {
+                filename: "safe-attachment.pdf",
+                href: safeUrl,
+                mimeType: "application/pdf",
+                size: 123,
+              },
+            ],
+            safeFileUrl: safeUrl,
+            title: "Safe parent material",
+          }),
+        ]}
+        studentId="student-1"
+      />,
+    );
 
-      expect(screen.getByRole("link", { name: /open material|view file/i })).toHaveAttribute(
-        "href",
-        safeUrl,
-      );
-      expect(screen.getByRole("link", { name: /safe-attachment\.pdf/i })).toHaveAttribute(
-        "href",
-        safeUrl,
-      );
-    },
-  );
+    expect(screen.getByRole("link", { name: /open material|view file/i })).toHaveAttribute(
+      "href",
+      safeUrl,
+    );
+    expect(screen.getByRole("link", { name: /safe-attachment\.pdf/i })).toHaveAttribute(
+      "href",
+      safeUrl,
+    );
+  });
 
   it.each([
     "javascript:alert(1)",

@@ -1,3 +1,5 @@
+import { safeStoredFileHref } from "@/lib/security/storage-links";
+
 type SubmissionListItem = {
   id: string;
   submissionId?: string;
@@ -42,15 +44,7 @@ type SubmissionListProps = {
 };
 
 function safeContentHref(url: string | null | undefined) {
-  if (!url) return null;
-  if (url.startsWith("/uploads/")) return url;
-
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "https:" ? parsed.toString() : null;
-  } catch {
-    return null;
-  }
+  return safeStoredFileHref(url);
 }
 
 function formatSubmittedAt(value: string | Date) {

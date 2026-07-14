@@ -4,6 +4,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
 const requireRoleMock = vi.hoisted(() => vi.fn());
 const getReportSnapshotForTeacherMock = vi.hoisted(() => vi.fn());
 const listReportCommentDraftsForTeacherMock = vi.hoisted(() => vi.fn());
@@ -37,7 +39,7 @@ function loadSnapshotPage() {
   return import(/* @vite-ignore */ specifier) as Promise<SnapshotPageModule>;
 }
 
-function savedSnapshot() {
+function savedSnapshot(overrides: Record<string, unknown> = {}) {
   return {
     generatedAt: new Date("2026-05-20T10:00:00.000Z"),
     generatedByTeacherId: "teacher-1",
@@ -52,6 +54,7 @@ function savedSnapshot() {
       teacherComment: "Saved teacher comment",
     },
     snapshotVersion: 1,
+    ...overrides,
   };
 }
 
@@ -103,6 +106,18 @@ describe("Teacher saved report page", () => {
 
     await expect(page.default({ params: { snapshotId: "foreign-snapshot" } })).rejects.toThrow(
       "NEXT_NOT_FOUND",
+    );
+  });
+
+  it("links current report keys through the private application route", async () => {
+    const key = "private/teachers/teacher-1/reports/snapshot-1.pdf";
+    getReportSnapshotForTeacherMock.mockResolvedValueOnce(savedSnapshot({ pdfStorageKey: key }));
+    const page = await loadSnapshotPage();
+    render(await page.default({ params: { snapshotId: "snapshot-1" } }));
+
+    expect(screen.getByRole("link", { name: /download pdf report/i })).toHaveAttribute(
+      "href",
+      storageUrlForKey(key),
     );
   });
 });

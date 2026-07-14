@@ -122,13 +122,17 @@ async function resolvePhotoUrl(
   }
 
   if (photo) {
-    const storage = createStorageService();
-    const storageKey = await storage.upload(photo, {
-      filename: photo.name,
-      namespace: publicTeacherPhotoNamespace(adminId),
-      contentType: photo.type,
-    });
-    return { photoUrl: storage.getURL(storageKey) };
+    try {
+      const storage = createStorageService();
+      const storageKey = await storage.upload(photo, {
+        filename: photo.name,
+        namespace: publicTeacherPhotoNamespace(adminId),
+        contentType: photo.type,
+      });
+      return { photoUrl: storage.getURL(storageKey) };
+    } catch {
+      return { errors: ["Failed to store teacher photo."] };
+    }
   }
 
   if (formData.get("clearPhoto")?.toString() === "true") {
@@ -614,7 +618,7 @@ export async function deleteTeacherAction(
     if (!session) {
       throw new Error("Failed to delete teacher profile.");
     }
-    await prisma.$transaction(async (tx) => {
+    const deletedTeacher = await prisma.$transaction(async (tx) => {
       const deletedTeacher = await deleteTeacher(id, tx);
       await createAdminAuditLog(
         {
@@ -631,7 +635,19 @@ export async function deleteTeacherAction(
         },
         tx,
       );
+      return deletedTeacher;
     });
+
+    const cleanupKey = persistedTeacherPhotoStorageKey(
+      (deletedTeacher as { photoUrl?: unknown } | null)?.photoUrl,
+    );
+    if (cleanupKey) {
+      try {
+        await createStorageService().delete(cleanupKey);
+      } catch {
+        // Persisted photo cleanup is post-commit and best-effort.
+      }
+    }
     revalidateTeacherPages();
   } catch (error) {
     if (flashMode && errorRedirect) {

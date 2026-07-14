@@ -6,6 +6,7 @@ const ROOT = process.cwd();
 const APP_DIR = join(ROOT, "app");
 const API_DIR = join(APP_DIR, "api");
 const SEARCH_DIRS = [join(ROOT, "app"), join(ROOT, "components")];
+const APPLICATION_HREF_DIRS = [join(ROOT, "lib")];
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
@@ -39,6 +40,23 @@ const apiRouteFiles = walk(API_DIR).filter(
 const productionFiles = SEARCH_DIRS.flatMap((dir) => walk(dir)).filter(
   (filePath) => isCodeFile(filePath) && !isTestFile(filePath),
 );
+const applicationHrefFiles = APPLICATION_HREF_DIRS.flatMap((dir) => walk(dir)).filter(
+  (filePath) => isCodeFile(filePath) && !isTestFile(filePath),
+);
+
+function hasAuthorizedApplicationHrefGenerator(routePath: string) {
+  if (!/\/\[[^/]+\]$/.test(routePath)) return false;
+  const routePrefix = routePath.replace(/\/\[[^/]+\]$/, "");
+
+  return applicationHrefFiles.some((filePath) => {
+    const content = readFileSync(filePath, "utf8");
+    return (
+      /export function \w*(?:Href|Url)\w*\s*\(/i.test(content) &&
+      content.includes(`"${routePrefix}"`) &&
+      /return\s+`[^`]*\$\{[^}]+\}\/\$\{[^}]+\}[^`]*`/.test(content)
+    );
+  });
+}
 
 describe("API routes connectivity", () => {
   it("every route under app/api/ has at least one client-side caller", () => {
@@ -46,13 +64,15 @@ describe("API routes connectivity", () => {
 
     for (const routeFile of apiRouteFiles) {
       const routePath = routePathFromFile(routeFile);
-      const hasCaller = productionFiles.some((filePath) => {
-        const content = readFileSync(filePath, "utf8");
-        return new RegExp(
-          `fetch\\([^)]*["']${routePath}|axios\\.[a-z]+\\([^)]*["']${routePath}|new URL\\(["']${routePath}`,
-          "m",
-        ).test(content);
-      });
+      const hasCaller =
+        hasAuthorizedApplicationHrefGenerator(routePath) ||
+        productionFiles.some((filePath) => {
+          const content = readFileSync(filePath, "utf8");
+          return new RegExp(
+            `fetch\\([^)]*["']${routePath}|axios\\.[a-z]+\\([^)]*["']${routePath}|new URL\\(["']${routePath}`,
+            "m",
+          ).test(content);
+        });
 
       if (!hasCaller) {
         orphaned.push(`API route has no caller: ${routePath} (${relative(ROOT, routeFile)})`);

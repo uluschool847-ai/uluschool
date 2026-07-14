@@ -2,6 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SubmissionHistory } from "@/app/portal/student/components/SubmissionHistory";
+import { storageUrlForKey } from "@/lib/storage/storage-url";
 
 function submission(overrides: Record<string, unknown> = {}) {
   return {
@@ -58,6 +59,22 @@ describe("SubmissionHistory", () => {
     expect(screen.getByRole("link", { name: /submitted work|view work/i })).toHaveAttribute(
       "href",
       "/uploads/submissions/work.pdf",
+    );
+  });
+
+  it("shows canonical application work links", () => {
+    const href = storageUrlForKey("private/students/student-1/submissions/work.pdf");
+    render(
+      <SubmissionHistory
+        submissions={[
+          submission({ id: "sub-current", contentUrl: href, submittedWorkHref: href }) as never,
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /submitted work|view work/i })).toHaveAttribute(
+      "href",
+      href,
     );
   });
 

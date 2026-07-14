@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { safeCourseMaterialHref } from "@/lib/security/course-material-links";
+import { preferredStoredFileHref, storageHrefForKey } from "@/lib/security/storage-links";
 import { isTeacherMaterialStorageKey, validateLegacyStorageKey } from "@/lib/storage/storage-key";
 import {
   legacyStorageKeyFromUrl,
@@ -258,23 +258,8 @@ function validateUpdateFileUrl(
   return validatedFileUrl;
 }
 
-function storageKeyPublicUrl(storageKey: string) {
-  const normalized = storageKey.replace(/^\/+/, "").replace(/^public[\\\/]/, "");
-  return `/${normalized.startsWith("uploads/") ? normalized : `uploads/${normalized}`}`;
-}
-
 function attachmentHref(storageKey: string | null | undefined) {
-  const trimmed = storageKey?.trim() ?? "";
-  if (!trimmed) return null;
-  try {
-    return storageUrlForKey(trimmed);
-  } catch {
-    try {
-      return safeCourseMaterialHref(storageKeyPublicUrl(validateLegacyStorageKey(trimmed)));
-    } catch {
-      return null;
-    }
-  }
+  return storageHrefForKey(storageKey);
 }
 
 function fileUrlFromInput(
@@ -666,7 +651,7 @@ export async function listStudentCourseMaterials(
       title: material.title,
       description: material.description ?? null,
       fileUrl: material.fileUrl,
-      safeFileUrl: safeCourseMaterialHref(material.fileUrl),
+      safeFileUrl: preferredStoredFileHref(material.attachments[0]?.storageKey, material.fileUrl),
       attachments: material.attachments.map((attachment) => ({
         filename: attachment.filename,
         href: attachmentHref(attachment.storageKey),

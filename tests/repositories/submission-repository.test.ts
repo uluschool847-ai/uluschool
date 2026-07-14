@@ -356,7 +356,7 @@ describe("submission-repository ownership contract", () => {
         status: "Graded",
         grade: 87,
         feedback: "Clear factoring.",
-        submittedWorkHref: "https://drive.test/submission-v1",
+        submittedWorkHref: "/uploads/submissions/quadratic-work.pdf",
         student: expect.objectContaining({
           fullName: "Amina Yusuf",
           email: "amina@example.com",

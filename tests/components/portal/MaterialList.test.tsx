@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
 const deleteCourseMaterialActionMock = vi.hoisted(() => vi.fn());
 const unlinkAttachmentActionMock = vi.hoisted(() => vi.fn());
 
@@ -150,6 +152,34 @@ describe("MaterialList", () => {
       "href",
       "/uploads/teacher/worksheet.pdf",
     );
+  });
+
+  it("renders a server-derived private attachment URL without rebuilding its storage key", async () => {
+    const href = storageUrlForKey("private/teachers/teacher-1/materials/worksheet.pdf");
+    const MaterialList = await loadMaterialList();
+    render(
+      <MaterialList
+        materials={[
+          material({
+            fileUrl: "https://cdn.example.com/stale.pdf",
+            attachments: [
+              {
+                id: "attachment-current",
+                filename: "worksheet.pdf",
+                storageKey: "private/teachers/attacker/materials/forged.pdf",
+                publicUrl: href,
+              },
+            ],
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /view worksheet\.pdf/i })).toHaveAttribute(
+      "href",
+      href,
+    );
+    expect(document.body.innerHTML).not.toContain("private/teachers/attacker");
   });
 
   it("attachment unlink submits only materialId and attachmentId, not trusted storageKey", async () => {

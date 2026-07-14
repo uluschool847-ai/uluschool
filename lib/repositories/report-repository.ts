@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { type Prisma, UserRole } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
@@ -416,7 +417,7 @@ export async function exportReportSnapshotPdf(teacherId: string, snapshotId: str
   const storageKey = await storage.upload(Buffer.from(rendered.bytes), {
     filename: rendered.filename,
     namespace: teacherReportNamespace(teacherId),
-    contentType: rendered.contentType,
+    contentType: "application/pdf",
   });
   const pdfGeneratedAt = new Date();
   const updatedSnapshot = await prisma.reportSnapshot.update({

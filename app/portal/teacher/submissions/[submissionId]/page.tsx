@@ -6,6 +6,7 @@ import { notFound } from "next/navigation";
 import { SubmissionReviewForm } from "@/app/portal/teacher/components/SubmissionReviewForm";
 import { requireRole } from "@/lib/auth/session";
 import { getSubmissionForTeacher } from "@/lib/repositories/submission-repository";
+import { safeStoredFileHref } from "@/lib/security/storage-links";
 
 export const metadata: Metadata = {
   title: "Review Submission - mathSchool",
@@ -43,15 +44,7 @@ function formatDateTime(value: Date | string | null | undefined) {
 }
 
 function safeSubmittedWorkHref(url: string | null | undefined) {
-  if (!url) return null;
-  if (url.startsWith("/uploads/")) return url;
-
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "https:" ? parsed.toString() : null;
-  } catch {
-    return null;
-  }
+  return safeStoredFileHref(url);
 }
 
 function getBackToSubmissionsHref(searchParams: Record<string, string | undefined>) {

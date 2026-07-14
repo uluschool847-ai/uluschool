@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { requireRole } from "@/lib/auth/session";
 import { getReportSnapshotForStudent } from "@/lib/repositories/report-repository";
+import { preferredStoredFileHref } from "@/lib/security/storage-links";
 
 type PageProps = {
   params: Promise<{ snapshotId: string }> | { snapshotId: string };
@@ -47,12 +48,7 @@ function scoreText(value: unknown) {
 }
 
 function pdfHref(snapshot: { id: string; pdfStorageKey?: string | null }) {
-  const storageKey = snapshot.pdfStorageKey?.trim();
-  if (!storageKey) return null;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(storageKey)) return null;
-  if (storageKey.includes("\\") || storageKey.includes("..")) return null;
-  const normalized = storageKey.replace(/^\/+/, "").replace(/^public\//, "");
-  return normalized.startsWith("uploads/") ? `/${normalized}` : `/uploads/${normalized}`;
+  return preferredStoredFileHref(snapshot.pdfStorageKey, snapshot.pdfStorageKey);
 }
 
 export default async function StudentReportSnapshotPage({ params }: PageProps) {

@@ -1,3 +1,5 @@
+import { safeStoredFileHref } from "@/lib/security/storage-links";
+
 type StudentMaterial = {
   id: string;
   title: string;
@@ -24,28 +26,8 @@ type StudentMaterialListProps = {
   emptyMessage?: string;
 };
 
-function isSafeHref(value: string | null | undefined) {
-  const trimmed = value?.trim() ?? "";
-  if (!trimmed) return false;
-  if (trimmed.startsWith("/uploads/")) return true;
-
-  try {
-    const url = new URL(trimmed);
-    if (
-      url.protocol === "http:" &&
-      ["localhost", "127.0.0.1", "::1"].includes(url.hostname) &&
-      url.pathname.startsWith("/e2e-assets/")
-    ) {
-      return true;
-    }
-    return url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
 function safeHref(value: string | null | undefined) {
-  return isSafeHref(value) ? (value?.trim() ?? null) : null;
+  return safeStoredFileHref(value);
 }
 
 function formatDate(value: Date | string | null | undefined) {

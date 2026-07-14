@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
 const prismaMock = vi.hoisted(() => ({
   appUser: {
     findFirst: vi.fn(),
@@ -162,6 +164,71 @@ function lessonRecord(overrides: Record<string, unknown> = {}) {
 describe("student-schedule-repository access contract", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+  });
+
+  it("presents current, legacy, and external lesson materials without exposing raw keys", async () => {
+    const currentKey = "private/teachers/teacher-1/materials/schedule.pdf";
+    const external = "https://cdn.example.com/schedule%20notes.pdf?download=1";
+    prismaMock.scheduledClass.findMany.mockResolvedValueOnce([
+      lessonRecord({
+        courseMaterials: [
+          {
+            id: "current-material",
+            title: "Current",
+            fileUrl: "https://cdn.example.com/stale.pdf",
+            attachments: [
+              {
+                id: "current-attachment",
+                filename: "schedule.pdf",
+                storageKey: currentKey,
+                mimeType: "application/pdf",
+                size: 20,
+              },
+            ],
+          },
+          {
+            id: "legacy-material",
+            title: "Legacy",
+            fileUrl: "/uploads/materials/legacy.pdf",
+            attachments: [
+              {
+                id: "legacy-attachment",
+                filename: "legacy.pdf",
+                storageKey: "uploads/materials/legacy.pdf",
+                mimeType: "application/pdf",
+                size: 20,
+              },
+            ],
+          },
+          { id: "external-material", title: "External", fileUrl: external, attachments: [] },
+          {
+            id: "unsafe-material",
+            title: "Unsafe",
+            fileUrl: "javascript:alert(1)",
+            attachments: [],
+          },
+        ],
+        _count: { courseMaterials: 4 },
+      }),
+    ]);
+
+    const { listStudentSchedule } = await loadStudentScheduleRepository();
+    const [lesson] = await listStudentSchedule({ studentId: "student-1", from, to });
+
+    expect(lesson.materials).toEqual([
+      expect.objectContaining({
+        id: "current-material",
+        safeFileUrl: storageUrlForKey(currentKey),
+        attachments: [expect.objectContaining({ href: storageUrlForKey(currentKey) })],
+      }),
+      expect.objectContaining({
+        id: "legacy-material",
+        safeFileUrl: "/uploads/materials/legacy.pdf",
+        attachments: [expect.objectContaining({ href: "/uploads/materials/legacy.pdf" })],
+      }),
+      expect.objectContaining({ id: "external-material", safeFileUrl: external }),
+      expect.objectContaining({ id: "unsafe-material", safeFileUrl: null }),
+    ]);
   });
 
   it("lists only lessons accessible by the student through ClassGroup or direct lesson enrolment", async () => {

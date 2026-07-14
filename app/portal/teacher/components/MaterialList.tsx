@@ -34,6 +34,7 @@ type MaterialListProps = {
 
 function isSafeMaterialUrl(value: string | null | undefined) {
   if (!value) return false;
+  if (/^\/api\/files\/[A-Za-z0-9_-]+$/.test(value)) return true;
   if (value.startsWith("/uploads/")) return true;
 
   try {
@@ -44,11 +45,7 @@ function isSafeMaterialUrl(value: string | null | undefined) {
 }
 
 function attachmentUrl(attachment: MaterialAttachment) {
-  const value =
-    attachment.publicUrl ??
-    (attachment.storageKey
-      ? `/${attachment.storageKey.replace(/^\/+/, "").replace(/^public[\\\/]/, "")}`
-      : null);
+  const value = attachment.publicUrl ?? null;
   return isSafeMaterialUrl(value) ? value : null;
 }
 

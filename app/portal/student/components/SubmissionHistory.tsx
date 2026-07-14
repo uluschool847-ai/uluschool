@@ -1,3 +1,5 @@
+import { safeStoredFileHref } from "@/lib/security/storage-links";
+
 type SubmissionHistoryItem = {
   id: string;
   contentUrl?: string | null;
@@ -26,15 +28,7 @@ function formatDate(value: Date | string) {
 }
 
 function safeHref(href: string | null | undefined) {
-  if (!href) return null;
-  if (href.startsWith("/uploads/")) return href;
-
-  try {
-    const parsed = new URL(href);
-    return parsed.protocol === "https:" ? parsed.toString() : null;
-  } catch {
-    return null;
-  }
+  return safeStoredFileHref(href);
 }
 
 export function SubmissionHistory({ submissions }: SubmissionHistoryProps) {

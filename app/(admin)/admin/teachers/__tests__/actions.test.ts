@@ -305,6 +305,28 @@ describe("Admin teacher profile actions", () => {
     expect(auditPayload.after?.role).toBeUndefined();
   });
 
+  it("bounds teacher photo storage failures without exposing infrastructure details", async () => {
+    storageUploadMock.mockRejectedValueOnce(
+      new Error("R2 secret access key leaked from private/teachers/admin-1/photo.webp"),
+    );
+    const { createTeacherAction } = await loadTeachersActions();
+    const formData = buildBaseFormData();
+    formData.set(
+      "photo",
+      new File([new Uint8Array([1, 2, 3])], "teacher.webp", { type: "image/webp" }),
+    );
+
+    const result = await createTeacherAction(formData);
+
+    expect(result).toEqual({
+      success: false,
+      errors: { photo: ["Failed to store teacher photo."] },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/secret|r2|private\/teachers|photo\.webp/i);
+    expect(createTeacherMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
   it("creates a teacher profile and revalidates both public and admin pages", async () => {
     createTeacherMock.mockResolvedValueOnce({
       id: "teacher-1",
@@ -622,6 +644,53 @@ describe("Admin teacher profile actions", () => {
     if (result !== undefined) {
       expect(result).toEqual(expect.objectContaining({ success: true }));
     }
+  });
+
+  it("deletes the persisted canonical photo key only after the teacher delete audit commits", async () => {
+    const events: string[] = [];
+    const photoKey = "public/teachers/admin-1/deleted-photo.webp";
+    deleteTeacherMock.mockResolvedValueOnce({
+      id: "teacher-1",
+      photoUrl: storageUrlForKey(photoKey),
+    });
+    createAdminAuditLogMock.mockImplementationOnce(async () => {
+      events.push("audit");
+    });
+    prismaMock.$transaction.mockImplementationOnce(async (callback: (tx: unknown) => unknown) => {
+      const result = await callback(transactionClientMock);
+      events.push("commit");
+      return result;
+    });
+    storageDeleteMock.mockImplementationOnce(async (key: string) => {
+      events.push(`cleanup:${key}`);
+    });
+
+    const { deleteTeacherAction } = await loadTeachersActions();
+    const formData = new FormData();
+    formData.set("id", "teacher-1");
+    const result = await deleteTeacherAction(formData);
+
+    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(storageDeleteMock).toHaveBeenCalledWith(photoKey);
+    expect(events).toEqual(["audit", "commit", `cleanup:${photoKey}`]);
+  });
+
+  it("keeps audited teacher deletion successful when trusted legacy photo cleanup fails", async () => {
+    deleteTeacherMock.mockResolvedValueOnce({
+      id: "teacher-1",
+      photoUrl: "/uploads/teachers/deleted-photo.webp",
+    });
+    storageDeleteMock.mockRejectedValueOnce(new Error("cleanup unavailable"));
+
+    const { deleteTeacherAction } = await loadTeachersActions();
+    const formData = new FormData();
+    formData.set("id", "teacher-1");
+    const result = await deleteTeacherAction(formData);
+
+    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(storageDeleteMock).toHaveBeenCalledWith("uploads/teachers/deleted-photo.webp");
+    expect(createAdminAuditLogMock).toHaveBeenCalled();
+    expect(revalidatePathMock).toHaveBeenCalledWith("/teachers");
   });
 
   it("fails the teacher delete transaction when audit logging fails", async () => {
