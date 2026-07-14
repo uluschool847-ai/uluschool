@@ -14,10 +14,18 @@ const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const id = (name: string) => `s3-${runId}-${name}`;
 
 const keys = {
-  material: `private/teachers/${id("teacher-a")}/materials/lesson.pdf`,
-  submission: `private/teachers/${id("teacher-a")}/submissions/work.pdf`,
-  report: `private/teachers/${id("teacher-a")}/reports/report.pdf`,
-  orphan: `private/teachers/${id("teacher-a")}/materials/orphan.pdf`,
+  teacherDirect: `private/teachers/${id("fixture-teacher")}/materials/teacher-direct.pdf`,
+  teacherScheduledClass: `private/teachers/${id("fixture-teacher")}/materials/teacher-class.pdf`,
+  teacherClassGroup: `private/teachers/${id("fixture-teacher")}/materials/teacher-group.pdf`,
+  studentDirect: `private/teachers/${id("fixture-teacher")}/materials/student-direct.pdf`,
+  studentClassGroup: `private/teachers/${id("fixture-teacher")}/materials/student-group.pdf`,
+  parentDirect: `private/teachers/${id("fixture-teacher")}/materials/parent-direct.pdf`,
+  parentClassGroup: `private/teachers/${id("fixture-teacher")}/materials/parent-group.pdf`,
+  submission: `private/teachers/${id("teacher-direct")}/submissions/work.pdf`,
+  report: `private/teachers/${id("teacher-direct")}/reports/report.pdf`,
+  detachedAttachment: `private/teachers/${id("fixture-teacher")}/materials/detached.pdf`,
+  nullReportProbe: `private/teachers/${id("fixture-teacher")}/reports/null-report.pdf`,
+  orphan: `private/teachers/${id("fixture-teacher")}/materials/orphan.pdf`,
   photo: `public/teachers/${id("admin")}/photo.webp`,
   inactivePhoto: `public/teachers/${id("admin")}/inactive.webp`,
   externalPhoto: `public/teachers/${id("admin")}/external.webp`,
@@ -40,81 +48,299 @@ suite("file access PostgreSQL IDOR relations", { timeout: 60_000 }, () => {
     await prisma.appUser.createMany({
       data: [
         user(id("admin"), UserRole.ADMIN),
-        user(id("teacher-a"), UserRole.TEACHER),
-        user(id("teacher-b"), UserRole.TEACHER),
-        user(id("student-a"), UserRole.STUDENT),
-        user(id("student-b"), UserRole.STUDENT),
-        user(id("parent-a"), UserRole.PARENT),
-        user(id("parent-b"), UserRole.PARENT),
+        user(id("fixture-teacher"), UserRole.TEACHER),
+        user(id("teacher-direct"), UserRole.TEACHER),
+        user(id("teacher-class"), UserRole.TEACHER),
+        user(id("teacher-group"), UserRole.TEACHER),
+        user(id("teacher-unrelated"), UserRole.TEACHER),
+        user(id("student-direct"), UserRole.STUDENT),
+        user(id("student-group"), UserRole.STUDENT),
+        user(id("student-unrelated"), UserRole.STUDENT),
+        user(id("child-direct"), UserRole.STUDENT),
+        user(id("child-group"), UserRole.STUDENT),
+        user(id("parent-direct"), UserRole.PARENT),
+        user(id("parent-group"), UserRole.PARENT),
+        user(id("parent-unrelated"), UserRole.PARENT),
       ],
     });
+
     await prisma.appUser.update({
-      where: { id: id("student-a") },
-      data: { parents: { connect: { id: id("parent-a") } } },
+      where: { id: id("child-direct") },
+      data: { parents: { connect: { id: id("parent-direct") } } },
     });
-    await prisma.classGroup.create({
-      data: {
-        id: id("group"),
-        name: "S3 group",
-        teacherId: id("teacher-a"),
-        students: { connect: { id: id("student-a") } },
-      },
+    await prisma.appUser.update({
+      where: { id: id("child-group") },
+      data: { parents: { connect: { id: id("parent-group") } } },
     });
-    await prisma.scheduledClass.create({
-      data: {
-        id: id("class"),
-        title: "S3 class",
-        startAt: new Date("2026-07-14T10:00:00.000Z"),
-        endAt: new Date("2026-07-14T11:00:00.000Z"),
-        teacherId: id("teacher-a"),
-        classGroupId: id("group"),
-        students: { connect: { id: id("student-a") } },
-      },
-    });
-    await prisma.courseMaterial.create({
-      data: {
-        id: id("material"),
-        title: "S3 material",
-        fileUrl: storageUrlForKey(keys.material),
-        scheduledClassId: id("class"),
-        teacherId: id("teacher-a"),
-        attachments: {
-          create: {
-            id: id("material-attachment"),
-            filename: "lesson.pdf",
-            storageKey: keys.material,
-            mimeType: "application/pdf",
-            size: 10,
-          },
+
+    await prisma.classGroup.createMany({
+      data: [
+        {
+          id: id("teacher-direct-group"),
+          name: "S3 teacher direct group",
+          teacherId: id("fixture-teacher"),
         },
-      },
+        {
+          id: id("teacher-class-group"),
+          name: "S3 teacher class group",
+          teacherId: id("fixture-teacher"),
+        },
+        {
+          id: id("teacher-group-group"),
+          name: "S3 teacher group branch",
+          teacherId: id("teacher-group"),
+        },
+        {
+          id: id("student-direct-group"),
+          name: "S3 student direct group",
+          teacherId: id("fixture-teacher"),
+        },
+        {
+          id: id("student-group-group"),
+          name: "S3 student group branch",
+          teacherId: id("fixture-teacher"),
+        },
+        {
+          id: id("parent-direct-group"),
+          name: "S3 parent direct group",
+          teacherId: id("fixture-teacher"),
+        },
+        {
+          id: id("parent-group-group"),
+          name: "S3 parent group branch",
+          teacherId: id("fixture-teacher"),
+        },
+      ],
     });
+    await prisma.classGroup.update({
+      where: { id: id("student-group-group") },
+      data: { students: { connect: { id: id("student-group") } } },
+    });
+    await prisma.classGroup.update({
+      where: { id: id("parent-group-group") },
+      data: { students: { connect: { id: id("child-group") } } },
+    });
+
+    const startAt = new Date("2026-07-14T10:00:00.000Z");
+    const endAt = new Date("2026-07-14T11:00:00.000Z");
+    await prisma.scheduledClass.createMany({
+      data: [
+        {
+          id: id("teacher-direct-class"),
+          title: "S3 teacher direct class",
+          startAt,
+          endAt,
+          teacherId: id("fixture-teacher"),
+          classGroupId: id("teacher-direct-group"),
+        },
+        {
+          id: id("teacher-class-class"),
+          title: "S3 teacher scheduled class",
+          startAt,
+          endAt,
+          teacherId: id("teacher-class"),
+          classGroupId: id("teacher-class-group"),
+        },
+        {
+          id: id("teacher-group-class"),
+          title: "S3 teacher class group",
+          startAt,
+          endAt,
+          teacherId: id("fixture-teacher"),
+          classGroupId: id("teacher-group-group"),
+        },
+        {
+          id: id("student-direct-class"),
+          title: "S3 student direct class",
+          startAt,
+          endAt,
+          teacherId: id("fixture-teacher"),
+          classGroupId: id("student-direct-group"),
+        },
+        {
+          id: id("student-group-class"),
+          title: "S3 student class group",
+          startAt,
+          endAt,
+          teacherId: id("fixture-teacher"),
+          classGroupId: id("student-group-group"),
+        },
+        {
+          id: id("parent-direct-class"),
+          title: "S3 parent direct class",
+          startAt,
+          endAt,
+          teacherId: id("fixture-teacher"),
+          classGroupId: id("parent-direct-group"),
+        },
+        {
+          id: id("parent-group-class"),
+          title: "S3 parent class group",
+          startAt,
+          endAt,
+          teacherId: id("fixture-teacher"),
+          classGroupId: id("parent-group-group"),
+        },
+      ],
+    });
+    await prisma.scheduledClass.update({
+      where: { id: id("student-direct-class") },
+      data: { students: { connect: { id: id("student-direct") } } },
+    });
+    await prisma.scheduledClass.update({
+      where: { id: id("parent-direct-class") },
+      data: { students: { connect: { id: id("child-direct") } } },
+    });
+
+    await prisma.courseMaterial.createMany({
+      data: [
+        {
+          id: id("teacher-direct-material"),
+          title: "S3 teacher direct material",
+          fileUrl: storageUrlForKey(keys.teacherDirect),
+          scheduledClassId: id("teacher-direct-class"),
+          teacherId: id("teacher-direct"),
+        },
+        {
+          id: id("teacher-class-material"),
+          title: "S3 teacher scheduled class material",
+          fileUrl: storageUrlForKey(keys.teacherScheduledClass),
+          scheduledClassId: id("teacher-class-class"),
+          teacherId: id("fixture-teacher"),
+        },
+        {
+          id: id("teacher-group-material"),
+          title: "S3 teacher class group material",
+          fileUrl: storageUrlForKey(keys.teacherClassGroup),
+          scheduledClassId: id("teacher-group-class"),
+          teacherId: id("fixture-teacher"),
+        },
+        {
+          id: id("student-direct-material"),
+          title: "S3 student direct material",
+          fileUrl: storageUrlForKey(keys.studentDirect),
+          scheduledClassId: id("student-direct-class"),
+          teacherId: id("fixture-teacher"),
+        },
+        {
+          id: id("student-group-material"),
+          title: "S3 student class group material",
+          fileUrl: storageUrlForKey(keys.studentClassGroup),
+          scheduledClassId: id("student-group-class"),
+          teacherId: id("fixture-teacher"),
+        },
+        {
+          id: id("parent-direct-material"),
+          title: "S3 parent direct material",
+          fileUrl: storageUrlForKey(keys.parentDirect),
+          scheduledClassId: id("parent-direct-class"),
+          teacherId: id("fixture-teacher"),
+        },
+        {
+          id: id("parent-group-material"),
+          title: "S3 parent class group material",
+          fileUrl: storageUrlForKey(keys.parentClassGroup),
+          scheduledClassId: id("parent-group-class"),
+          teacherId: id("fixture-teacher"),
+        },
+      ],
+    });
+
     await prisma.assignment.create({
       data: {
         id: id("assignment"),
         title: "S3 assignment",
         description: "S3",
         dueDate: new Date("2026-07-20T10:00:00.000Z"),
-        scheduledClassId: id("class"),
-        teacherId: id("teacher-a"),
-        submissions: {
-          create: {
-            id: id("submission"),
-            studentId: id("student-a"),
-            contentUrl: storageUrlForKey(keys.submission),
-            attachments: {
-              create: {
-                id: id("submission-attachment"),
-                filename: "work.pdf",
-                storageKey: keys.submission,
-                mimeType: "application/pdf",
-                size: 10,
-              },
-            },
-          },
-        },
+        scheduledClassId: id("parent-direct-class"),
+        teacherId: id("teacher-direct"),
       },
     });
+    await prisma.submission.create({
+      data: {
+        id: id("submission"),
+        assignmentId: id("assignment"),
+        studentId: id("child-direct"),
+        contentUrl: storageUrlForKey(keys.submission),
+      },
+    });
+
+    await prisma.attachment.createMany({
+      data: [
+        {
+          id: id("teacher-direct-attachment"),
+          filename: "teacher-direct.pdf",
+          storageKey: keys.teacherDirect,
+          mimeType: "application/pdf",
+          size: 10,
+          courseMaterialId: id("teacher-direct-material"),
+        },
+        {
+          id: id("teacher-class-attachment"),
+          filename: "teacher-class.pdf",
+          storageKey: keys.teacherScheduledClass,
+          mimeType: "application/pdf",
+          size: 10,
+          courseMaterialId: id("teacher-class-material"),
+        },
+        {
+          id: id("teacher-group-attachment"),
+          filename: "teacher-group.pdf",
+          storageKey: keys.teacherClassGroup,
+          mimeType: "application/pdf",
+          size: 10,
+          courseMaterialId: id("teacher-group-material"),
+        },
+        {
+          id: id("student-direct-attachment"),
+          filename: "student-direct.pdf",
+          storageKey: keys.studentDirect,
+          mimeType: "application/pdf",
+          size: 10,
+          courseMaterialId: id("student-direct-material"),
+        },
+        {
+          id: id("student-group-attachment"),
+          filename: "student-group.pdf",
+          storageKey: keys.studentClassGroup,
+          mimeType: "application/pdf",
+          size: 10,
+          courseMaterialId: id("student-group-material"),
+        },
+        {
+          id: id("parent-direct-attachment"),
+          filename: "parent-direct.pdf",
+          storageKey: keys.parentDirect,
+          mimeType: "application/pdf",
+          size: 10,
+          courseMaterialId: id("parent-direct-material"),
+        },
+        {
+          id: id("parent-group-attachment"),
+          filename: "parent-group.pdf",
+          storageKey: keys.parentClassGroup,
+          mimeType: "application/pdf",
+          size: 10,
+          courseMaterialId: id("parent-group-material"),
+        },
+        {
+          id: id("submission-attachment"),
+          filename: "work.pdf",
+          storageKey: keys.submission,
+          mimeType: "application/pdf",
+          size: 10,
+          submissionId: id("submission"),
+        },
+        {
+          id: id("detached-attachment"),
+          filename: "detached.pdf",
+          storageKey: keys.detachedAttachment,
+          mimeType: "application/pdf",
+          size: 10,
+        },
+      ],
+    });
+
     await prisma.academicTerm.create({
       data: {
         id: id("term"),
@@ -123,17 +349,29 @@ suite("file access PostgreSQL IDOR relations", { timeout: 60_000 }, () => {
         endDate: new Date("2026-07-31T23:59:59.000Z"),
       },
     });
-    await prisma.reportSnapshot.create({
-      data: {
-        id: id("report"),
-        studentId: id("student-a"),
-        classGroupId: id("group"),
-        academicTermId: id("term"),
-        generatedByTeacherId: id("teacher-a"),
-        snapshotData: {},
-        pdfStorageKey: keys.report,
-      },
+    await prisma.reportSnapshot.createMany({
+      data: [
+        {
+          id: id("report"),
+          studentId: id("child-direct"),
+          classGroupId: id("parent-direct-group"),
+          academicTermId: id("term"),
+          generatedByTeacherId: id("teacher-direct"),
+          snapshotData: {},
+          pdfStorageKey: keys.report,
+        },
+        {
+          id: id("null-report"),
+          studentId: id("child-direct"),
+          classGroupId: id("parent-direct-group"),
+          academicTermId: id("term"),
+          generatedByTeacherId: id("teacher-direct"),
+          snapshotData: {},
+          pdfStorageKey: null,
+        },
+      ],
     });
+
     await prisma.teacher.createMany({
       data: [
         {
@@ -165,43 +403,336 @@ suite("file access PostgreSQL IDOR relations", { timeout: 60_000 }, () => {
   }, 60_000);
 
   afterAll(async () => {
-    await prisma.teacher.deleteMany({ where: { id: { startsWith: `s3-${runId}-` } } });
-    await prisma.reportSnapshot.deleteMany({ where: { id: id("report") } });
-    await prisma.academicTerm.deleteMany({ where: { id: id("term") } });
-    await prisma.assignment.deleteMany({ where: { id: id("assignment") } });
-    await prisma.courseMaterial.deleteMany({ where: { id: id("material") } });
-    await prisma.scheduledClass.deleteMany({ where: { id: id("class") } });
-    await prisma.classGroup.deleteMany({ where: { id: id("group") } });
-    await prisma.appUser.deleteMany({ where: { id: { startsWith: `s3-${runId}-` } } });
+    const fixtureIds = { startsWith: `s3-${runId}-` };
+    await prisma.teacher.deleteMany({ where: { id: fixtureIds } });
+    await prisma.attachment.deleteMany({ where: { id: fixtureIds } });
+    await prisma.reportSnapshot.deleteMany({ where: { id: fixtureIds } });
+    await prisma.academicTerm.deleteMany({ where: { id: fixtureIds } });
+    await prisma.assignment.deleteMany({ where: { id: fixtureIds } });
+    await prisma.courseMaterial.deleteMany({ where: { id: fixtureIds } });
+    await prisma.scheduledClass.deleteMany({ where: { id: fixtureIds } });
+    await prisma.classGroup.deleteMany({ where: { id: fixtureIds } });
+    await prisma.appUser.deleteMany({ where: { id: fixtureIds } });
     await prisma.$disconnect();
   }, 60_000);
 
-  it("enforces referenced admin, teacher, student, and parent ownership", async () => {
-    await expect(
-      canAccessPrivateStorageKey({ uid: id("admin"), role: UserRole.ADMIN }, keys.material),
-    ).resolves.toBe(true);
-    await expect(
-      canAccessPrivateStorageKey({ uid: id("admin"), role: UserRole.ADMIN }, keys.orphan),
-    ).resolves.toBe(false);
+  it("allows an admin only referenced attachment and report keys", async () => {
+    for (const key of [keys.teacherDirect, keys.submission, keys.report, keys.detachedAttachment]) {
+      await expect(
+        canAccessPrivateStorageKey({ uid: id("admin"), role: UserRole.ADMIN }, key),
+      ).resolves.toBe(true);
+    }
 
-    for (const key of [keys.material, keys.submission, keys.report]) {
+    for (const key of [keys.nullReportProbe, keys.orphan]) {
       await expect(
-        canAccessPrivateStorageKey({ uid: id("teacher-a"), role: UserRole.TEACHER }, key),
+        canAccessPrivateStorageKey({ uid: id("admin"), role: UserRole.ADMIN }, key),
+      ).resolves.toBe(false);
+    }
+  });
+
+  it("isolates direct course material teacher ownership", async () => {
+    const material = await prisma.courseMaterial.findUniqueOrThrow({
+      where: { id: id("teacher-direct-material") },
+      select: {
+        teacherId: true,
+        scheduledClass: {
+          select: { teacherId: true, classGroup: { select: { teacherId: true } } },
+        },
+      },
+    });
+    expect(material).toEqual({
+      teacherId: id("teacher-direct"),
+      scheduledClass: {
+        teacherId: id("fixture-teacher"),
+        classGroup: { teacherId: id("fixture-teacher") },
+      },
+    });
+
+    await expect(
+      canAccessPrivateStorageKey(
+        { uid: id("teacher-direct"), role: UserRole.TEACHER },
+        keys.teacherDirect,
+      ),
+    ).resolves.toBe(true);
+    for (const teacher of ["teacher-class", "teacher-group", "teacher-unrelated"]) {
+      await expect(
+        canAccessPrivateStorageKey(
+          { uid: id(teacher), role: UserRole.TEACHER },
+          keys.teacherDirect,
+        ),
+      ).resolves.toBe(false);
+    }
+  });
+
+  it("isolates scheduled class teacher ownership", async () => {
+    const material = await prisma.courseMaterial.findUniqueOrThrow({
+      where: { id: id("teacher-class-material") },
+      select: {
+        teacherId: true,
+        scheduledClass: {
+          select: { teacherId: true, classGroup: { select: { teacherId: true } } },
+        },
+      },
+    });
+    expect(material).toEqual({
+      teacherId: id("fixture-teacher"),
+      scheduledClass: {
+        teacherId: id("teacher-class"),
+        classGroup: { teacherId: id("fixture-teacher") },
+      },
+    });
+
+    await expect(
+      canAccessPrivateStorageKey(
+        { uid: id("teacher-class"), role: UserRole.TEACHER },
+        keys.teacherScheduledClass,
+      ),
+    ).resolves.toBe(true);
+    for (const teacher of ["teacher-direct", "teacher-group", "teacher-unrelated"]) {
+      await expect(
+        canAccessPrivateStorageKey(
+          { uid: id(teacher), role: UserRole.TEACHER },
+          keys.teacherScheduledClass,
+        ),
+      ).resolves.toBe(false);
+    }
+  });
+
+  it("isolates class group teacher ownership", async () => {
+    const material = await prisma.courseMaterial.findUniqueOrThrow({
+      where: { id: id("teacher-group-material") },
+      select: {
+        teacherId: true,
+        scheduledClass: {
+          select: { teacherId: true, classGroup: { select: { teacherId: true } } },
+        },
+      },
+    });
+    expect(material).toEqual({
+      teacherId: id("fixture-teacher"),
+      scheduledClass: {
+        teacherId: id("fixture-teacher"),
+        classGroup: { teacherId: id("teacher-group") },
+      },
+    });
+
+    await expect(
+      canAccessPrivateStorageKey(
+        { uid: id("teacher-group"), role: UserRole.TEACHER },
+        keys.teacherClassGroup,
+      ),
+    ).resolves.toBe(true);
+    for (const teacher of ["teacher-direct", "teacher-class", "teacher-unrelated"]) {
+      await expect(
+        canAccessPrivateStorageKey(
+          { uid: id(teacher), role: UserRole.TEACHER },
+          keys.teacherClassGroup,
+        ),
+      ).resolves.toBe(false);
+    }
+  });
+
+  it("isolates direct scheduled class student membership", async () => {
+    const material = await prisma.courseMaterial.findUniqueOrThrow({
+      where: { id: id("student-direct-material") },
+      select: {
+        scheduledClass: {
+          select: {
+            students: { select: { id: true } },
+            classGroup: { select: { students: { select: { id: true } } } },
+          },
+        },
+      },
+    });
+    expect(material).toEqual({
+      scheduledClass: {
+        students: [{ id: id("student-direct") }],
+        classGroup: { students: [] },
+      },
+    });
+
+    await expect(
+      canAccessPrivateStorageKey(
+        { uid: id("student-direct"), role: UserRole.STUDENT },
+        keys.studentDirect,
+      ),
+    ).resolves.toBe(true);
+    for (const student of ["student-group", "student-unrelated"]) {
+      await expect(
+        canAccessPrivateStorageKey(
+          { uid: id(student), role: UserRole.STUDENT },
+          keys.studentDirect,
+        ),
+      ).resolves.toBe(false);
+    }
+  });
+
+  it("isolates class group student membership", async () => {
+    const material = await prisma.courseMaterial.findUniqueOrThrow({
+      where: { id: id("student-group-material") },
+      select: {
+        scheduledClass: {
+          select: {
+            students: { select: { id: true } },
+            classGroup: { select: { students: { select: { id: true } } } },
+          },
+        },
+      },
+    });
+    expect(material).toEqual({
+      scheduledClass: {
+        students: [],
+        classGroup: { students: [{ id: id("student-group") }] },
+      },
+    });
+
+    await expect(
+      canAccessPrivateStorageKey(
+        { uid: id("student-group"), role: UserRole.STUDENT },
+        keys.studentClassGroup,
+      ),
+    ).resolves.toBe(true);
+    for (const student of ["student-direct", "student-unrelated"]) {
+      await expect(
+        canAccessPrivateStorageKey(
+          { uid: id(student), role: UserRole.STUDENT },
+          keys.studentClassGroup,
+        ),
+      ).resolves.toBe(false);
+    }
+  });
+
+  it("isolates a linked child with direct scheduled class membership", async () => {
+    const material = await prisma.courseMaterial.findUniqueOrThrow({
+      where: { id: id("parent-direct-material") },
+      select: {
+        scheduledClass: {
+          select: {
+            students: {
+              select: { id: true, parents: { select: { id: true } } },
+            },
+            classGroup: {
+              select: {
+                students: {
+                  select: { id: true, parents: { select: { id: true } } },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(material).toEqual({
+      scheduledClass: {
+        students: [{ id: id("child-direct"), parents: [{ id: id("parent-direct") }] }],
+        classGroup: { students: [] },
+      },
+    });
+
+    await expect(
+      canAccessPrivateStorageKey(
+        { uid: id("parent-direct"), role: UserRole.PARENT },
+        keys.parentDirect,
+      ),
+    ).resolves.toBe(true);
+    for (const parent of ["parent-group", "parent-unrelated"]) {
+      await expect(
+        canAccessPrivateStorageKey({ uid: id(parent), role: UserRole.PARENT }, keys.parentDirect),
+      ).resolves.toBe(false);
+    }
+  });
+
+  it("isolates a linked child with class group membership", async () => {
+    const material = await prisma.courseMaterial.findUniqueOrThrow({
+      where: { id: id("parent-group-material") },
+      select: {
+        scheduledClass: {
+          select: {
+            students: {
+              select: { id: true, parents: { select: { id: true } } },
+            },
+            classGroup: {
+              select: {
+                students: {
+                  select: { id: true, parents: { select: { id: true } } },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(material).toEqual({
+      scheduledClass: {
+        students: [],
+        classGroup: {
+          students: [{ id: id("child-group"), parents: [{ id: id("parent-group") }] }],
+        },
+      },
+    });
+
+    await expect(
+      canAccessPrivateStorageKey(
+        { uid: id("parent-group"), role: UserRole.PARENT },
+        keys.parentClassGroup,
+      ),
+    ).resolves.toBe(true);
+    for (const parent of ["parent-direct", "parent-unrelated"]) {
+      await expect(
+        canAccessPrivateStorageKey(
+          { uid: id(parent), role: UserRole.PARENT },
+          keys.parentClassGroup,
+        ),
+      ).resolves.toBe(false);
+    }
+  });
+
+  it("keeps submission and report access scoped to their exact actors", async () => {
+    for (const key of [keys.submission, keys.report]) {
+      await expect(
+        canAccessPrivateStorageKey({ uid: id("teacher-direct"), role: UserRole.TEACHER }, key),
       ).resolves.toBe(true);
       await expect(
-        canAccessPrivateStorageKey({ uid: id("teacher-b"), role: UserRole.TEACHER }, key),
+        canAccessPrivateStorageKey({ uid: id("child-direct"), role: UserRole.STUDENT }, key),
+      ).resolves.toBe(true);
+      await expect(
+        canAccessPrivateStorageKey({ uid: id("parent-direct"), role: UserRole.PARENT }, key),
+      ).resolves.toBe(true);
+
+      await expect(
+        canAccessPrivateStorageKey({ uid: id("teacher-class"), role: UserRole.TEACHER }, key),
       ).resolves.toBe(false);
       await expect(
-        canAccessPrivateStorageKey({ uid: id("student-a"), role: UserRole.STUDENT }, key),
-      ).resolves.toBe(true);
-      await expect(
-        canAccessPrivateStorageKey({ uid: id("student-b"), role: UserRole.STUDENT }, key),
+        canAccessPrivateStorageKey({ uid: id("student-unrelated"), role: UserRole.STUDENT }, key),
       ).resolves.toBe(false);
       await expect(
-        canAccessPrivateStorageKey({ uid: id("parent-a"), role: UserRole.PARENT }, key),
-      ).resolves.toBe(true);
+        canAccessPrivateStorageKey({ uid: id("parent-group"), role: UserRole.PARENT }, key),
+      ).resolves.toBe(false);
+    }
+  });
+
+  it("denies nullable attachment relations, null report keys, and unrelated actors", async () => {
+    const detachedAttachment = await prisma.attachment.findUniqueOrThrow({
+      where: { id: id("detached-attachment") },
+      select: { courseMaterialId: true, submissionId: true },
+    });
+    expect(detachedAttachment).toEqual({ courseMaterialId: null, submissionId: null });
+
+    const nullReport = await prisma.reportSnapshot.findUniqueOrThrow({
+      where: { id: id("null-report") },
+      select: { pdfStorageKey: true },
+    });
+    expect(nullReport).toEqual({ pdfStorageKey: null });
+
+    for (const key of [keys.detachedAttachment, keys.nullReportProbe, keys.orphan]) {
       await expect(
-        canAccessPrivateStorageKey({ uid: id("parent-b"), role: UserRole.PARENT }, key),
+        canAccessPrivateStorageKey({ uid: id("teacher-unrelated"), role: UserRole.TEACHER }, key),
+      ).resolves.toBe(false);
+      await expect(
+        canAccessPrivateStorageKey({ uid: id("student-unrelated"), role: UserRole.STUDENT }, key),
+      ).resolves.toBe(false);
+      await expect(
+        canAccessPrivateStorageKey({ uid: id("parent-unrelated"), role: UserRole.PARENT }, key),
       ).resolves.toBe(false);
     }
   });
@@ -210,6 +741,6 @@ suite("file access PostgreSQL IDOR relations", { timeout: 60_000 }, () => {
     await expect(isPublishedTeacherPhoto(keys.photo)).resolves.toBe(true);
     await expect(isPublishedTeacherPhoto(keys.inactivePhoto)).resolves.toBe(false);
     await expect(isPublishedTeacherPhoto(keys.externalPhoto)).resolves.toBe(false);
-    await expect(isPublishedTeacherPhoto(keys.material)).resolves.toBe(false);
+    await expect(isPublishedTeacherPhoto(keys.teacherDirect)).resolves.toBe(false);
   });
 });
