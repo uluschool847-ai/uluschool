@@ -55,3 +55,4 @@ export {
   storageUrlForKey,
   storageUrlMatchesKey,
 } from "@/lib/storage/storage-url";
+export { StorageOperationError } from "@/lib/storage/R2StorageService";

@@ -52,7 +52,8 @@ vi.mock("@aws-sdk/s3-request-presigner", () => ({
 import { type R2StorageConfig, R2StorageService } from "@/lib/storage/R2StorageService";
 import { storageUrlForKey } from "@/lib/storage/storage-url";
 
-const endpoint = "https://account-id.r2.cloudflarestorage.com";
+const accountId = "0123456789abcdef0123456789abcdef";
+const endpoint = `https://${accountId}.r2.cloudflarestorage.com`;
 const bucket = "ulu-school-private";
 const accessKeyId = "r2-access-key-value";
 const secretAccessKey = "r2-secret-key-value";
@@ -80,6 +81,63 @@ function setR2Env(overrides: Partial<NodeJS.ProcessEnv> = {}) {
   Object.assign(process.env, overrides);
 }
 
+function serializeError(error: unknown) {
+  if (!(error instanceof Error)) return JSON.stringify(error);
+  const record = error as Error & Record<string, unknown>;
+  return JSON.stringify({
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+    code: record.code,
+    cause: record.cause,
+    ownProperties: { ...record },
+  });
+}
+
+function sdkFailureWithSensitiveMetadata() {
+  const signedUrl =
+    "https://signed.example/private?X-Amz-Credential=fake-access&X-Amz-Signature=fake-signature";
+  const requestId = "sdk-request-id-sensitive";
+  const marker = "sdk-original-message-sensitive";
+  const error = new Error(
+    [
+      marker,
+      "UploadValidationError Invalid storage key Invalid download URL expiry Storage upload failed",
+      endpoint,
+      bucket,
+      accessKeyId,
+      secretAccessKey,
+      validKey,
+      signedUrl,
+      requestId,
+    ].join(" | "),
+  );
+  Object.assign(error, {
+    $metadata: { requestId },
+    requestId,
+    endpoint,
+    bucket,
+    accessKeyId,
+    secretAccessKey,
+    storageKey: validKey,
+    signedUrl,
+  });
+  return {
+    error,
+    sensitiveValues: [
+      marker,
+      endpoint,
+      bucket,
+      accessKeyId,
+      secretAccessKey,
+      validKey,
+      signedUrl,
+      requestId,
+      error.message,
+    ],
+  };
+}
+
 describe("R2StorageService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -95,22 +153,36 @@ describe("R2StorageService", () => {
     vi.resetModules();
   });
 
-  it("trims validated configuration and constructs a Cloudflare R2 S3 client", () => {
-    createService({
-      endpoint: `  ${endpoint}  `,
-      bucket: `  ${bucket}  `,
-      accessKeyId: `  ${accessKeyId}  `,
-      secretAccessKey: `  ${secretAccessKey}  `,
-    });
+  it.each([
+    [`  ${endpoint}  `, endpoint],
+    [`${endpoint}/`, endpoint],
+    [
+      `https://${accountId}.eu.r2.cloudflarestorage.com`,
+      `https://${accountId}.eu.r2.cloudflarestorage.com`,
+    ],
+    [
+      `https://${accountId}.fedramp.r2.cloudflarestorage.com`,
+      `https://${accountId}.fedramp.r2.cloudflarestorage.com`,
+    ],
+  ])(
+    "accepts a documented Cloudflare R2 account endpoint: %s",
+    (configuredEndpoint, expectedEndpoint) => {
+      createService({
+        endpoint: configuredEndpoint,
+        bucket: `  ${bucket}  `,
+        accessKeyId: `  ${accessKeyId}  `,
+        secretAccessKey: `  ${secretAccessKey}  `,
+      });
 
-    expect(sdkMocks.clientConfigs).toEqual([
-      {
-        region: "auto",
-        endpoint,
-        credentials: { accessKeyId, secretAccessKey },
-      },
-    ]);
-  });
+      expect(sdkMocks.clientConfigs).toEqual([
+        {
+          region: "auto",
+          endpoint: expectedEndpoint,
+          credentials: { accessKeyId, secretAccessKey },
+        },
+      ]);
+    },
+  );
 
   it.each([
     ["endpoint", "R2_ENDPOINT"],
@@ -123,13 +195,24 @@ describe("R2StorageService", () => {
   });
 
   it.each([
-    ["http://account-id.r2.cloudflarestorage.com", "R2_ENDPOINT"],
-    ["https://user:password@account-id.r2.cloudflarestorage.com", "R2_ENDPOINT"],
-    [`${endpoint}?token=secret`, "R2_ENDPOINT"],
-    [`${endpoint}#fragment`, "R2_ENDPOINT"],
-    ["not-a-url", "R2_ENDPOINT"],
-    [`https://${"a".repeat(2_050)}.example.com`, "R2_ENDPOINT"],
-  ])("rejects an invalid endpoint without exposing its value", (invalidEndpoint, variableName) => {
+    ["non-HTTPS", `http://${accountId}.r2.cloudflarestorage.com`],
+    ["unrelated host", "https://example.com"],
+    ["suffix trick", `${endpoint}.example.com`],
+    ["bucket-prefixed host", `https://private.${accountId}.r2.cloudflarestorage.com`],
+    ["unsupported jurisdiction", `https://${accountId}.apac.r2.cloudflarestorage.com`],
+    ["misplaced jurisdiction", `https://eu.${accountId}.r2.cloudflarestorage.com`],
+    ["missing account ID", "https://r2.cloudflarestorage.com"],
+    ["short account ID", "https://0123456789abcdef.r2.cloudflarestorage.com"],
+    ["non-hex account ID", `https://${"g".repeat(32)}.r2.cloudflarestorage.com`],
+    ["path", `${endpoint}/objects`],
+    ["explicit default port", `https://${accountId}.r2.cloudflarestorage.com:443`],
+    ["explicit non-default port", `https://${accountId}.r2.cloudflarestorage.com:8443`],
+    ["credentials", `https://user:password@${accountId}.r2.cloudflarestorage.com`],
+    ["query", `${endpoint}?token=secret`],
+    ["fragment", `${endpoint}#fragment`],
+    ["malformed URL", "not-a-url"],
+    ["unbounded URL", `https://${"a".repeat(2_050)}.r2.cloudflarestorage.com`],
+  ])("rejects an endpoint with %s without exposing its value", (_, invalidEndpoint) => {
     let thrown: unknown;
     try {
       createService({ endpoint: invalidEndpoint });
@@ -138,7 +221,7 @@ describe("R2StorageService", () => {
     }
 
     expect(thrown).toBeInstanceOf(Error);
-    expect((thrown as Error).message).toContain(variableName);
+    expect((thrown as Error).message).toBe("Invalid R2 configuration variable: R2_ENDPOINT");
     expect((thrown as Error).message).not.toContain(invalidEndpoint);
     expect((thrown as Error).message).not.toContain(bucket);
     expect((thrown as Error).message).not.toContain(accessKeyId);
@@ -146,8 +229,45 @@ describe("R2StorageService", () => {
     expect(sdkMocks.clientConfigs).toHaveLength(0);
   });
 
+  it.each(["abc", "a-b", `a${"b".repeat(61)}c`])(
+    "accepts a documented R2 bucket name: %s",
+    (validBucket) => {
+      createService({ bucket: `  ${validBucket}  ` });
+
+      expect(sdkMocks.clientConfigs).toEqual([
+        expect.objectContaining({
+          credentials: { accessKeyId, secretAccessKey },
+        }),
+      ]);
+    },
+  );
+
   it.each([
-    ["bucket", "b".repeat(256), "R2_BUCKET_NAME"],
+    ["too short", "ab"],
+    ["too long", `a${"b".repeat(62)}c`],
+    ["uppercase", "School-files"],
+    ["underscore", "school_files"],
+    ["dot", "school.files"],
+    ["leading hyphen", "-school"],
+    ["trailing hyphen", "school-"],
+    ["non-ASCII", "school-files-\u00e9"],
+  ])("rejects a bucket that is %s without exposing its value", (_, invalidBucket) => {
+    let thrown: unknown;
+    try {
+      createService({ bucket: invalidBucket });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe("Invalid R2 configuration variable: R2_BUCKET_NAME");
+    expect((thrown as Error).message).not.toContain(endpoint);
+    expect((thrown as Error).message).not.toContain(accessKeyId);
+    expect((thrown as Error).message).not.toContain(secretAccessKey);
+    expect(sdkMocks.clientConfigs).toHaveLength(0);
+  });
+
+  it.each([
     ["accessKeyId", "a".repeat(513), "R2_ACCESS_KEY_ID"],
     ["secretAccessKey", "s".repeat(1_025), "R2_SECRET_ACCESS_KEY"],
   ] as const)("rejects an unbounded %s without exposing config", (field, value, variableName) => {
@@ -285,25 +405,30 @@ describe("R2StorageService", () => {
     expect(sdkMocks.send).not.toHaveBeenCalled();
   });
 
-  it.each(["upload", "sign", "delete"] as const)(
-    "propagates %s backend failures without adding endpoint or bucket values",
-    async (operation) => {
-      const service = createService();
-      const backendError = new Error(`${operation} backend unavailable`);
+  it.each([
+    ["upload", "STORAGE_UPLOAD_FAILED", "Storage upload failed"],
+    ["download", "STORAGE_DOWNLOAD_FAILED", "Storage download failed"],
+    ["delete", "STORAGE_DELETE_FAILED", "Storage delete failed"],
+  ] as const)(
+    "bounds %s SDK failures with a typed, value-free operation error",
+    async (operation, expectedCode, expectedMessage) => {
+      const adapterModule = await import("@/lib/storage/R2StorageService");
+      const service = new adapterModule.R2StorageService(config);
+      const failure = sdkFailureWithSensitiveMetadata();
       let promise: Promise<unknown>;
 
       if (operation === "upload") {
-        sdkMocks.send.mockRejectedValueOnce(backendError);
+        sdkMocks.send.mockRejectedValueOnce(failure.error);
         promise = service.upload(Buffer.from(uploadFixtures.pdf), {
           filename: "lesson.pdf",
           namespace: "private/teachers/teacher-1/materials",
           contentType: "application/pdf",
         });
-      } else if (operation === "sign") {
-        sdkMocks.getSignedUrl.mockRejectedValueOnce(backendError);
+      } else if (operation === "download") {
+        sdkMocks.getSignedUrl.mockRejectedValueOnce(failure.error);
         promise = service.createDownloadURL(validKey);
       } else {
-        sdkMocks.send.mockRejectedValueOnce(backendError);
+        sdkMocks.send.mockRejectedValueOnce(failure.error);
         promise = service.delete(validKey);
       }
 
@@ -313,11 +438,30 @@ describe("R2StorageService", () => {
       } catch (error) {
         thrown = error;
       }
-      expect(thrown).toBe(backendError);
-      expect((thrown as Error).message).not.toContain(endpoint);
-      expect((thrown as Error).message).not.toContain(bucket);
+
+      expect(adapterModule.StorageOperationError).toBeTypeOf("function");
+      expect(thrown).toBeInstanceOf(adapterModule.StorageOperationError);
+      expect(thrown).toMatchObject({
+        name: "StorageOperationError",
+        code: expectedCode,
+        message: expectedMessage,
+      });
+      expect("cause" in (thrown as Error)).toBe(false);
+
+      const serialized = serializeError(thrown);
+      for (const sensitiveValue of failure.sensitiveValues) {
+        expect(serialized).not.toContain(sensitiveValue);
+      }
     },
   );
+
+  it("exports StorageOperationError from the public storage module", async () => {
+    const adapterModule = await import("@/lib/storage/R2StorageService");
+    const publicModule = await import("@/lib/storage");
+
+    expect(adapterModule.StorageOperationError).toBeTypeOf("function");
+    expect(publicModule.StorageOperationError).toBe(adapterModule.StorageOperationError);
+  });
 
   describe("storage factory", () => {
     it("selects R2 from trimmed case-insensitive env and caches by normalized driver", async () => {

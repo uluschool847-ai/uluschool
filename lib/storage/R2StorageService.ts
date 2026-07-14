@@ -14,9 +14,13 @@ import { normalizeUploadInput } from "@/lib/storage/upload-input";
 const DEFAULT_DOWNLOAD_EXPIRY_SECONDS = 60;
 const MAX_DOWNLOAD_EXPIRY_SECONDS = 60;
 const MAX_ENDPOINT_LENGTH = 2_048;
-const MAX_BUCKET_LENGTH = 255;
+const MIN_BUCKET_LENGTH = 3;
+const MAX_BUCKET_LENGTH = 63;
 const MAX_ACCESS_KEY_ID_LENGTH = 512;
 const MAX_SECRET_ACCESS_KEY_LENGTH = 1_024;
+const R2_ENDPOINT_PATTERN =
+  /^https:\/\/[a-f0-9]{32}(?:\.(?:eu|fedramp))?\.r2\.cloudflarestorage\.com\/?$/;
+const R2_BUCKET_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])$/;
 
 export type R2StorageConfig = {
   endpoint: string;
@@ -24,6 +28,35 @@ export type R2StorageConfig = {
   accessKeyId: string;
   secretAccessKey: string;
 };
+
+const STORAGE_OPERATION_ERRORS = {
+  upload: {
+    code: "STORAGE_UPLOAD_FAILED",
+    message: "Storage upload failed",
+  },
+  download: {
+    code: "STORAGE_DOWNLOAD_FAILED",
+    message: "Storage download failed",
+  },
+  delete: {
+    code: "STORAGE_DELETE_FAILED",
+    message: "Storage delete failed",
+  },
+} as const;
+
+type StorageOperation = keyof typeof STORAGE_OPERATION_ERRORS;
+export type StorageOperationCode = (typeof STORAGE_OPERATION_ERRORS)[StorageOperation]["code"];
+
+export class StorageOperationError extends Error {
+  readonly name = "StorageOperationError";
+  readonly code: StorageOperationCode;
+
+  constructor(operation: StorageOperation) {
+    const definition = STORAGE_OPERATION_ERRORS[operation];
+    super(definition.message);
+    this.code = definition.code;
+  }
+}
 
 function requireConfigValue(value: string, variableName: string, maximumLength: number) {
   const trimmed = typeof value === "string" ? value.trim() : "";
@@ -50,17 +83,27 @@ function validateEndpoint(value: string) {
     parsed.username ||
     parsed.password ||
     parsed.search ||
-    parsed.hash
+    parsed.hash ||
+    parsed.pathname !== "/" ||
+    !R2_ENDPOINT_PATTERN.test(endpoint)
   ) {
     throw new Error("Invalid R2 configuration variable: R2_ENDPOINT");
   }
-  return endpoint;
+  return parsed.origin;
+}
+
+function validateBucket(value: string) {
+  const bucket = requireConfigValue(value, "R2_BUCKET_NAME", MAX_BUCKET_LENGTH);
+  if (bucket.length < MIN_BUCKET_LENGTH || !R2_BUCKET_PATTERN.test(bucket)) {
+    throw new Error("Invalid R2 configuration variable: R2_BUCKET_NAME");
+  }
+  return bucket;
 }
 
 function validateConfig(config: R2StorageConfig): R2StorageConfig {
   return {
     endpoint: validateEndpoint(config.endpoint),
-    bucket: requireConfigValue(config.bucket, "R2_BUCKET_NAME", MAX_BUCKET_LENGTH),
+    bucket: validateBucket(config.bucket),
     accessKeyId: requireConfigValue(
       config.accessKeyId,
       "R2_ACCESS_KEY_ID",
@@ -102,14 +145,17 @@ export class R2StorageService implements StorageService {
   async upload(file: UploadInput, options: UploadOptions): Promise<string> {
     const normalized = await normalizeUploadInput(file, options);
     const storageKey = buildStorageKey(options.namespace, options.filename);
-    await this.client.send(
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: storageKey,
-        ContentType: normalized.contentType,
-        Body: normalized.bytes,
-      }),
-    );
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: storageKey,
+      ContentType: normalized.contentType,
+      Body: normalized.bytes,
+    });
+    try {
+      await this.client.send(command);
+    } catch {
+      throw new StorageOperationError("upload");
+    }
     return storageKey;
   }
 
@@ -120,15 +166,21 @@ export class R2StorageService implements StorageService {
   async createDownloadURL(storageKey: string, expiresInSeconds?: number): Promise<string> {
     const validStorageKey = validateStorageKey(storageKey);
     const expiry = validateExpiry(expiresInSeconds);
-    return getSignedUrl(
-      this.client,
-      new GetObjectCommand({ Bucket: this.bucket, Key: validStorageKey }),
-      { expiresIn: expiry },
-    );
+    const command = new GetObjectCommand({ Bucket: this.bucket, Key: validStorageKey });
+    try {
+      return await getSignedUrl(this.client, command, { expiresIn: expiry });
+    } catch {
+      throw new StorageOperationError("download");
+    }
   }
 
   async delete(storageKey: string): Promise<void> {
     const validStorageKey = validateStorageKey(storageKey);
-    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: validStorageKey }));
+    const command = new DeleteObjectCommand({ Bucket: this.bucket, Key: validStorageKey });
+    try {
+      await this.client.send(command);
+    } catch {
+      throw new StorageOperationError("delete");
+    }
   }
 }
