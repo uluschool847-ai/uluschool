@@ -7,6 +7,7 @@ test-results
 *.log
 *.tsbuildinfo
 public/uploads
+.data/
 .env
 .env.local
 .env.development.local

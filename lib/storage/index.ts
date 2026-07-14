@@ -13,6 +13,9 @@ function resolveStorageDriver() {
 
 export function createStorageService(): StorageService {
   const driver = resolveStorageDriver();
+  if (driver === "local" && process.env.NODE_ENV === "production") {
+    throw new Error("Local storage is unavailable in production without authorized delivery");
+  }
   const cached = serviceCache.get(driver);
   if (cached) return cached;
 
@@ -32,10 +35,14 @@ export {
   publicTeacherPhotoNamespace,
   teacherMaterialNamespace,
   teacherReportNamespace,
+  validateLegacyStorageKey,
   validateStorageKey,
 } from "@/lib/storage/storage-key";
 export {
   decodeStorageToken,
   encodeStorageKey,
+  legacyStorageKeyFromUrl,
+  storageKeyFromUrl,
   storageUrlForKey,
+  storageUrlMatchesKey,
 } from "@/lib/storage/storage-url";

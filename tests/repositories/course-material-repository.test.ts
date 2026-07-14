@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
 const prismaMock = vi.hoisted(() => ({
   attachment: {
     create: vi.fn(),
@@ -50,6 +52,10 @@ type CourseMaterialRepositoryModule = {
     teacherId: string,
     scheduledClassId: string,
   ) => Promise<unknown[]>;
+  listStudentCourseMaterials: (
+    studentId: string,
+    filters?: Record<string, unknown>,
+  ) => Promise<Array<Record<string, unknown>>>;
   unlinkCourseMaterialAttachmentForTeacher: (
     teacherId: string,
     materialId: string,
@@ -242,6 +248,31 @@ describe("course-material-repository teacher ownership contract", () => {
     expect(prismaMock.courseMaterial.delete).not.toHaveBeenCalled();
   });
 
+  it("rejects an owned material with a cross-teacher stored key before update mutation", async () => {
+    prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(
+      material({
+        attachments: [
+          {
+            id: "attachment-foreign",
+            storageKey:
+              "private/teachers/teacher-2/materials/00000000-0000-4000-8000-000000000002-foreign.pdf",
+          },
+        ],
+      }),
+    );
+
+    const { updateCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+
+    await expect(
+      updateCourseMaterialForTeacher("material-1", "teacher-1", {
+        title: "Must not mutate",
+      }),
+    ).rejects.toThrow(/owned by this teacher/i);
+    expect(prismaMock.courseMaterial.update).not.toHaveBeenCalled();
+    expect(prismaMock.attachment.deleteMany).not.toHaveBeenCalled();
+    expect(storageDeleteMock).not.toHaveBeenCalled();
+  });
+
   it("lists only teacher-scoped materials and rejects listing a foreign class", async () => {
     prismaMock.courseMaterial.findMany.mockResolvedValueOnce([material()]);
     prismaMock.scheduledClass.findFirst.mockResolvedValueOnce(null);
@@ -284,7 +315,7 @@ describe("course-material-repository teacher ownership contract", () => {
     expect(prismaMock.courseMaterial.create).not.toHaveBeenCalled();
   });
 
-  it.each(["https://cdn.school/materials/algebra.pdf", "/uploads/teacher/algebra.pdf"])(
+  it.each(["https://cdn.school/materials/algebra.pdf"])(
     "accepts safe fileUrl policy: %s",
     async (fileUrl) => {
       prismaMock.scheduledClass.findFirst.mockResolvedValueOnce({
@@ -305,6 +336,31 @@ describe("course-material-repository teacher ownership contract", () => {
     },
   );
 
+  it("rejects a legacy upload URL as new material input", async () => {
+    const { createCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+
+    await expect(
+      createCourseMaterialForTeacher({ ...createInput, fileUrl: "/uploads/teacher/algebra.pdf" }),
+    ).rejects.toThrow(/file url|legacy|internal upload/i);
+    expect(prismaMock.scheduledClass.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.courseMaterial.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a new internal application URL without matching attachment metadata", async () => {
+    const storageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-algebra.pdf";
+    const { createCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+
+    await expect(
+      createCourseMaterialForTeacher({
+        ...createInput,
+        fileUrl: storageUrlForKey(storageKey),
+      }),
+    ).rejects.toThrow(/attachment|storage key|internal upload/i);
+    expect(prismaMock.scheduledClass.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.courseMaterial.create).not.toHaveBeenCalled();
+  });
+
   it("deletes only the owned material attachments and queues storage cleanup for attached files", async () => {
     prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(
       material({
@@ -315,8 +371,6 @@ describe("course-material-repository teacher ownership contract", () => {
       }),
     );
     prismaMock.courseMaterial.delete.mockResolvedValueOnce(material());
-    storageDeleteMock.mockResolvedValue(undefined);
-
     const { deleteCourseMaterialForTeacher } = await loadCourseMaterialRepository();
     const result = await deleteCourseMaterialForTeacher("material-1", "teacher-1");
 
@@ -329,18 +383,44 @@ describe("course-material-repository teacher ownership contract", () => {
     expect(prismaMock.courseMaterial.delete).toHaveBeenCalledWith({
       where: { id: "material-1" },
     });
-    expect(storageDeleteMock).toHaveBeenCalledWith("uploads/material-1.pdf");
-    expect(storageDeleteMock).toHaveBeenCalledWith("uploads/material-1-extra.pdf");
-    expect(storageDeleteMock).not.toHaveBeenCalledWith("uploads/unrelated.pdf");
+    expect(storageDeleteMock).not.toHaveBeenCalled();
     expect(result).toEqual(
       expect.objectContaining({
         success: true,
-        cleanup: expect.objectContaining({ deleted: 2 }),
+        cleanup: expect.objectContaining({
+          deleted: 0,
+          storageKeys: ["uploads/material-1.pdf", "uploads/material-1-extra.pdf"],
+        }),
       }),
     );
   });
 
+  it("rejects a cross-teacher stored key before deleting the material or storage", async () => {
+    prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(
+      material({
+        attachments: [
+          {
+            id: "attachment-foreign",
+            storageKey:
+              "private/teachers/teacher-2/materials/00000000-0000-4000-8000-000000000002-foreign.pdf",
+          },
+        ],
+      }),
+    );
+
+    const { deleteCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+    await expect(deleteCourseMaterialForTeacher("material-1", "teacher-1")).rejects.toThrow(
+      /owned by this teacher/i,
+    );
+
+    expect(prismaMock.courseMaterial.delete).not.toHaveBeenCalled();
+    expect(storageDeleteMock).not.toHaveBeenCalled();
+  });
+
   it("creates linked Attachment records when uploaded file metadata is provided", async () => {
+    const storageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-algebra.pdf";
+    const fileUrl = storageUrlForKey(storageKey);
     prismaMock.scheduledClass.findFirst.mockResolvedValueOnce({
       id: "lesson-1",
       teacherId: "teacher-1",
@@ -348,12 +428,12 @@ describe("course-material-repository teacher ownership contract", () => {
     });
     prismaMock.courseMaterial.create.mockResolvedValueOnce(
       material({
-        fileUrl: "/uploads/teacher/algebra.pdf",
+        fileUrl,
         attachments: [
           {
             id: "attachment-1",
             filename: "algebra.pdf",
-            storageKey: "uploads/teacher/algebra.pdf",
+            storageKey,
             mimeType: "application/pdf",
             size: 2048,
           },
@@ -364,11 +444,11 @@ describe("course-material-repository teacher ownership contract", () => {
     const { createCourseMaterialForTeacher } = await loadCourseMaterialRepository();
     await createCourseMaterialForTeacher({
       ...createInput,
-      fileUrl: "/uploads/teacher/algebra.pdf",
+      fileUrl,
       attachments: [
         {
           filename: "algebra.pdf",
-          storageKey: "uploads/teacher/algebra.pdf",
+          storageKey,
           mimeType: "application/pdf",
           size: 2048,
         },
@@ -378,12 +458,12 @@ describe("course-material-repository teacher ownership contract", () => {
     expect(prismaMock.courseMaterial.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          fileUrl: "/uploads/teacher/algebra.pdf",
+          fileUrl,
           attachments: {
             create: [
               expect.objectContaining({
                 filename: "algebra.pdf",
-                storageKey: "uploads/teacher/algebra.pdf",
+                storageKey,
                 mimeType: "application/pdf",
                 size: 2048,
               }),
@@ -392,6 +472,108 @@ describe("course-material-repository teacher ownership contract", () => {
         }),
       }),
     );
+  });
+
+  it("persists a namespaced attachment only with its exact application URL", async () => {
+    const storageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-algebra.pdf";
+    const fileUrl = storageUrlForKey(storageKey);
+    prismaMock.scheduledClass.findFirst.mockResolvedValue({
+      id: "lesson-1",
+      teacherId: "teacher-1",
+      classGroup: null,
+    });
+    prismaMock.courseMaterial.create.mockResolvedValue(material({ fileUrl }));
+
+    const { createCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+    await createCourseMaterialForTeacher({
+      ...createInput,
+      fileUrl,
+      attachments: [
+        {
+          filename: "algebra.pdf",
+          storageKey,
+          mimeType: "application/pdf",
+          size: 2048,
+        },
+      ],
+    });
+
+    expect(prismaMock.courseMaterial.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          fileUrl,
+          attachments: { create: [expect.objectContaining({ storageKey })] },
+        }),
+      }),
+    );
+  });
+
+  it("returns namespaced application URLs as safe student material links", async () => {
+    const storageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-algebra.pdf";
+    const fileUrl = storageUrlForKey(storageKey);
+    prismaMock.courseMaterial.findMany.mockResolvedValueOnce([
+      material({
+        fileUrl,
+        scheduledClassId: "lesson-1",
+        attachments: [
+          {
+            id: "attachment-1",
+            filename: "algebra.pdf",
+            storageKey,
+            mimeType: "application/pdf",
+            size: 2048,
+          },
+        ],
+        scheduledClass: {
+          id: "lesson-1",
+          title: "Algebra lesson",
+          startAt: null,
+          subject: { id: "subject-1", name: "Mathematics" },
+          classGroup: { id: "group-1", name: "Group 1" },
+        },
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+        updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      }),
+    ]);
+
+    const { listStudentCourseMaterials } = await loadCourseMaterialRepository();
+    const [result] = await listStudentCourseMaterials("student-1");
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        fileUrl,
+        safeFileUrl: fileUrl,
+        attachments: [expect.objectContaining({ storageKey, href: fileUrl })],
+      }),
+    );
+  });
+
+  it("rejects a mismatched attachment URL before any repository mutation", async () => {
+    const storageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-algebra.pdf";
+    const otherKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000002-other.pdf";
+
+    const { createCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+    await expect(
+      createCourseMaterialForTeacher({
+        ...createInput,
+        fileUrl: storageUrlForKey(otherKey),
+        attachments: [
+          {
+            filename: "algebra.pdf",
+            storageKey,
+            mimeType: "application/pdf",
+            size: 2048,
+          },
+        ],
+      }),
+    ).rejects.toThrow(/url.*storage key/i);
+
+    expect(prismaMock.scheduledClass.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.courseMaterial.create).not.toHaveBeenCalled();
   });
 
   it("updates material metadata without replacing existing attachments", async () => {
@@ -424,7 +606,54 @@ describe("course-material-repository teacher ownership contract", () => {
     expect(storageDeleteMock).not.toHaveBeenCalled();
   });
 
+  it("rejects changing to an internal application URL without a matching replacement", async () => {
+    const storageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000002-new.pdf";
+    prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(material({ attachments: [] }));
+
+    const { updateCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+    await expect(
+      updateCourseMaterialForTeacher("material-1", "teacher-1", {
+        fileUrl: storageUrlForKey(storageKey),
+      }),
+    ).rejects.toThrow(/attachment|storage key|internal upload/i);
+
+    expect(prismaMock.courseMaterial.update).not.toHaveBeenCalled();
+    expect(prismaMock.attachment.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unchanged persisted internal application URL during metadata-only edits", async () => {
+    const storageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-algebra.pdf";
+    const fileUrl = storageUrlForKey(storageKey);
+    prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(
+      material({
+        fileUrl,
+        attachments: [{ id: "attachment-1", storageKey }],
+      }),
+    );
+    prismaMock.courseMaterial.update.mockResolvedValueOnce(
+      material({
+        title: "Updated worksheet",
+        fileUrl,
+        attachments: [{ id: "attachment-1", storageKey }],
+      }),
+    );
+
+    const { updateCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+    await updateCourseMaterialForTeacher("material-1", "teacher-1", {
+      title: "Updated worksheet",
+      fileUrl,
+    });
+
+    expect(prismaMock.courseMaterial.update).toHaveBeenCalled();
+    expect(prismaMock.attachment.deleteMany).not.toHaveBeenCalled();
+  });
+
   it("replaces a material file only after ownership passes and returns old storage keys for cleanup", async () => {
+    const newStorageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000002-new.pdf";
+    const newFileUrl = storageUrlForKey(newStorageKey);
     prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(
       material({
         attachments: [{ id: "attachment-old", storageKey: "uploads/teacher/old.pdf" }],
@@ -432,18 +661,18 @@ describe("course-material-repository teacher ownership contract", () => {
     );
     prismaMock.courseMaterial.update.mockResolvedValueOnce(
       material({
-        fileUrl: "/uploads/teacher/new.pdf",
-        attachments: [{ id: "attachment-new", storageKey: "uploads/teacher/new.pdf" }],
+        fileUrl: newFileUrl,
+        attachments: [{ id: "attachment-new", storageKey: newStorageKey }],
       }),
     );
 
     const { updateCourseMaterialForTeacher } = await loadCourseMaterialRepository();
     const result = await updateCourseMaterialForTeacher("material-1", "teacher-1", {
-      fileUrl: "/uploads/teacher/new.pdf",
+      fileUrl: newFileUrl,
       attachments: [
         {
           filename: "new.pdf",
-          storageKey: "uploads/teacher/new.pdf",
+          storageKey: newStorageKey,
           mimeType: "application/pdf",
           size: 4096,
         },
@@ -458,11 +687,11 @@ describe("course-material-repository teacher ownership contract", () => {
     expect(prismaMock.courseMaterial.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          fileUrl: "/uploads/teacher/new.pdf",
+          fileUrl: newFileUrl,
           attachments: {
             create: [
               expect.objectContaining({
-                storageKey: "uploads/teacher/new.pdf",
+                storageKey: newStorageKey,
               }),
             ],
           },
@@ -479,6 +708,8 @@ describe("course-material-repository teacher ownership contract", () => {
   });
 
   it("keeps the old material and file intact when replacement attachment creation fails", async () => {
+    const newStorageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000002-new.pdf";
     prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(
       material({
         attachments: [{ id: "attachment-old", storageKey: "uploads/teacher/old.pdf" }],
@@ -490,11 +721,11 @@ describe("course-material-repository teacher ownership contract", () => {
 
     await expect(
       updateCourseMaterialForTeacher("material-1", "teacher-1", {
-        fileUrl: "/uploads/teacher/new.pdf",
+        fileUrl: storageUrlForKey(newStorageKey),
         attachments: [
           {
             filename: "new.pdf",
-            storageKey: "uploads/teacher/new.pdf",
+            storageKey: newStorageKey,
             mimeType: "application/pdf",
             size: 4096,
           },
@@ -553,6 +784,24 @@ describe("course-material-repository teacher ownership contract", () => {
         storageKey: "uploads/teacher/material.pdf",
       }),
     );
+  });
+
+  it("rejects a cross-teacher stored key before unlinking the attachment", async () => {
+    prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(material());
+    prismaMock.attachment.findFirst.mockResolvedValueOnce({
+      id: "attachment-1",
+      courseMaterialId: "material-1",
+      storageKey:
+        "private/teachers/teacher-2/materials/00000000-0000-4000-8000-000000000002-foreign.pdf",
+    });
+
+    const { unlinkCourseMaterialAttachmentForTeacher } = await loadCourseMaterialRepository();
+    await expect(
+      unlinkCourseMaterialAttachmentForTeacher("teacher-1", "material-1", "attachment-1"),
+    ).rejects.toThrow(/owned by this teacher/i);
+
+    expect(prismaMock.attachment.delete).not.toHaveBeenCalled();
+    expect(storageDeleteMock).not.toHaveBeenCalled();
   });
 
   it("rejects unlinking another teacher's attachment before loading cleanup keys", async () => {

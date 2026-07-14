@@ -10,11 +10,16 @@ vi.mock("@/app/portal/teacher/actions/material-actions", () => ({
 }));
 
 import { MaterialForm } from "@/app/portal/teacher/components/MaterialForm";
+import { storageUrlForKey } from "@/lib/storage/storage-url";
 
 const lessons = [
   { id: "lesson-1", title: "Algebra Group A lesson" },
   { id: "lesson-2", title: "Geometry lesson" },
 ];
+
+const uploadedStorageKey =
+  "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-worksheet.pdf";
+const uploadedPublicUrl = storageUrlForKey(uploadedStorageKey);
 
 describe("MaterialForm", () => {
   beforeEach(() => {
@@ -92,32 +97,61 @@ describe("MaterialForm", () => {
     expect(submitCourseMaterialActionMock).not.toHaveBeenCalled();
   });
 
-  it.each(["https://cdn.school/material.pdf", "/uploads/teacher/material.pdf"])(
-    "submits safe file URL %s",
-    async (fileUrl) => {
-      submitCourseMaterialActionMock.mockResolvedValue({
-        success: true,
-        data: { id: "material-1" },
-      });
+  it.each(["https://cdn.school/material.pdf"])("submits safe file URL %s", async (fileUrl) => {
+    submitCourseMaterialActionMock.mockResolvedValue({
+      success: true,
+      data: { id: "material-1" },
+    });
 
-      render(<MaterialForm mode="create" lessons={lessons} />);
+    render(<MaterialForm mode="create" lessons={lessons} />);
 
-      fireEvent.change(screen.getByLabelText(/^title$/i), { target: { value: "Material" } });
-      fireEvent.change(screen.getByLabelText(/lesson|scheduled class/i), {
-        target: { value: "lesson-1" },
-      });
-      fireEvent.change(screen.getByLabelText(/file url/i), { target: { value: fileUrl } });
-      fireEvent.click(screen.getByRole("button", { name: /create material|submit/i }));
+    fireEvent.change(screen.getByLabelText(/^title$/i), { target: { value: "Material" } });
+    fireEvent.change(screen.getByLabelText(/lesson|scheduled class/i), {
+      target: { value: "lesson-1" },
+    });
+    fireEvent.change(screen.getByLabelText(/file url/i), { target: { value: fileUrl } });
+    fireEvent.click(screen.getByRole("button", { name: /create material|submit/i }));
 
-      expect(submitCourseMaterialActionMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          fileUrl,
-          scheduledClassId: "lesson-1",
-          title: "Material",
-        }),
-      );
-    },
-  );
+    expect(submitCourseMaterialActionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileUrl,
+        scheduledClassId: "lesson-1",
+        title: "Material",
+      }),
+    );
+  });
+
+  it("rejects a manually entered internal application URL without upload metadata", async () => {
+    render(<MaterialForm mode="create" lessons={lessons} />);
+
+    fireEvent.change(screen.getByLabelText(/^title$/i), { target: { value: "Material" } });
+    fireEvent.change(screen.getByLabelText(/lesson|scheduled class/i), {
+      target: { value: "lesson-1" },
+    });
+    fireEvent.change(screen.getByLabelText(/file url/i), {
+      target: { value: uploadedPublicUrl },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create material|submit/i }));
+
+    expect(await screen.findByText(/safe https|internal upload|invalid file url/i)).toBeDefined();
+    expect(submitCourseMaterialActionMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an untrusted legacy upload URL in create mode", async () => {
+    render(<MaterialForm mode="create" lessons={lessons} />);
+
+    fireEvent.change(screen.getByLabelText(/^title$/i), { target: { value: "Material" } });
+    fireEvent.change(screen.getByLabelText(/lesson|scheduled class/i), {
+      target: { value: "lesson-1" },
+    });
+    fireEvent.change(screen.getByLabelText(/file url/i), {
+      target: { value: "/uploads/teacher/material.pdf" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create material|submit/i }));
+
+    expect(await screen.findByText(/safe https|internal upload|invalid file url/i)).toBeDefined();
+    expect(submitCourseMaterialActionMock).not.toHaveBeenCalled();
+  });
 
   it("calls updateCourseMaterialAction in edit mode and shows server errors", async () => {
     updateCourseMaterialActionMock.mockResolvedValue({
@@ -175,6 +209,7 @@ describe("MaterialForm", () => {
     ],
     ["ZIP", "archive.zip", "application/zip"],
     ["image", "diagram.png", "image/png"],
+    ["text", "notes.txt", "text/plain"],
   ])("accepts supported upload file type: %s", async (_label, filename, mimeType) => {
     render(<MaterialForm mode="create" lessons={lessons} />);
 
@@ -208,7 +243,7 @@ describe("MaterialForm", () => {
     expect(await screen.findByText(/5mb|too large|size/i)).toBeDefined();
 
     fireEvent.change(fileInput, {
-      target: { files: [new File(["html"], "x.html", { type: "text/html" })] },
+      target: { files: [new File(["<svg />"], "x.svg", { type: "image/svg+xml" })] },
     });
     expect(await screen.findByText(/unsupported|not allowed|invalid file type/i)).toBeDefined();
   });
@@ -221,8 +256,8 @@ describe("MaterialForm", () => {
         new Response(
           JSON.stringify({
             success: true,
-            storageKey: "uploads/teacher/worksheet.pdf",
-            publicUrl: "/uploads/teacher/worksheet.pdf",
+            storageKey: uploadedStorageKey,
+            publicUrl: uploadedPublicUrl,
             filename: "worksheet.pdf",
             mimeType: "application/pdf",
             size: 5,
@@ -264,8 +299,8 @@ describe("MaterialForm", () => {
         new Response(
           JSON.stringify({
             success: true,
-            storageKey: "uploads/teacher/worksheet.pdf",
-            publicUrl: "/uploads/teacher/worksheet.pdf",
+            storageKey: uploadedStorageKey,
+            publicUrl: uploadedPublicUrl,
             filename: "worksheet.pdf",
             mimeType: "application/pdf",
             size: 5,
@@ -295,13 +330,57 @@ describe("MaterialForm", () => {
 
     expect(submitCourseMaterialActionMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        fileUrl: "/uploads/teacher/worksheet.pdf",
+        fileUrl: uploadedPublicUrl,
         attachment: {
           filename: "worksheet.pdf",
-          storageKey: "uploads/teacher/worksheet.pdf",
+          storageKey: uploadedStorageKey,
           mimeType: "application/pdf",
           size: 5,
         },
+      }),
+    );
+  });
+
+  it("submits an opaque private application URL returned by the upload route", async () => {
+    const storageKey = uploadedStorageKey;
+    const publicUrl = uploadedPublicUrl;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            success: true,
+            storageKey,
+            publicUrl,
+            filename: "worksheet.pdf",
+            mimeType: "application/pdf",
+            size: 5,
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+    submitCourseMaterialActionMock.mockResolvedValue({
+      success: true,
+      data: { id: "material-1" },
+    });
+
+    render(<MaterialForm mode="create" lessons={lessons} />);
+    fireEvent.change(screen.getByLabelText(/^title$/i), { target: { value: "Material" } });
+    fireEvent.change(screen.getByLabelText(/lesson|scheduled class/i), {
+      target: { value: "lesson-1" },
+    });
+    fireEvent.change(screen.getByLabelText(/upload file|file upload|choose file/i), {
+      target: { files: [new File(["hello"], "worksheet.pdf", { type: "application/pdf" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    expect(await screen.findByText(/uploaded|upload complete/i)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: /create material/i }));
+
+    expect(submitCourseMaterialActionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileUrl: publicUrl,
+        attachment: expect.objectContaining({ storageKey }),
       }),
     );
   });
@@ -313,8 +392,8 @@ describe("MaterialForm", () => {
         new Response(
           JSON.stringify({
             success: true,
-            storageKey: "uploads/teacher/replacement.pdf",
-            publicUrl: "/uploads/teacher/replacement.pdf",
+            storageKey: uploadedStorageKey,
+            publicUrl: uploadedPublicUrl,
             filename: "replacement.pdf",
             mimeType: "application/pdf",
             size: 11,
@@ -370,12 +449,35 @@ describe("MaterialForm", () => {
     expect(updateCourseMaterialActionMock).toHaveBeenLastCalledWith(
       "material-1",
       expect.objectContaining({
-        fileUrl: "/uploads/teacher/replacement.pdf",
+        fileUrl: uploadedPublicUrl,
         attachment: expect.objectContaining({
-          storageKey: "uploads/teacher/replacement.pdf",
+          storageKey: uploadedStorageKey,
         }),
       }),
     );
+  });
+
+  it("rejects changing a trusted persisted legacy URL to a different legacy URL", async () => {
+    render(
+      <MaterialForm
+        mode="edit"
+        materialId="material-1"
+        lessons={lessons}
+        initialValues={{
+          fileUrl: "/uploads/teacher/existing.pdf",
+          scheduledClassId: "lesson-1",
+          title: "Existing material",
+        }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText(/file url/i), {
+      target: { value: "/uploads/teacher/foreign.pdf" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    expect(await screen.findByText(/safe https|internal upload|invalid file url/i)).toBeDefined();
+    expect(updateCourseMaterialActionMock).not.toHaveBeenCalled();
   });
 
   it("keeps the existing file visible when replacement upload fails and still supports external fileUrl fallback", async () => {

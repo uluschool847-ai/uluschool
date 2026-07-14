@@ -1,6 +1,8 @@
 import { UserRole } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
 const requireRoleMock = vi.hoisted(() => vi.fn());
 const createTeacherMock = vi.hoisted(() => vi.fn());
 const updateTeacherMock = vi.hoisted(() => vi.fn());
@@ -10,7 +12,7 @@ const revalidatePathMock = vi.hoisted(() => vi.fn());
 const redirectMock = vi.hoisted(() => vi.fn());
 const storageUploadMock = vi.hoisted(() => vi.fn());
 const storageDeleteMock = vi.hoisted(() => vi.fn());
-const storageGetUrlMock = vi.hoisted(() => vi.fn((key: string) => `/uploads/${key}`));
+const storageGetUrlMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const transactionClientMock = vi.hoisted(() => ({ tx: true }));
 const prismaMock = vi.hoisted(() => ({
@@ -148,7 +150,7 @@ describe("Admin teacher profile actions", () => {
     redirectMock.mockReset();
     storageUploadMock.mockReset();
     storageDeleteMock.mockReset();
-    storageGetUrlMock.mockImplementation((key: string) => `/uploads/${key}`);
+    storageGetUrlMock.mockImplementation((key: string) => storageUrlForKey(key));
   });
 
   it("returns validation errors for empty or short teacher fields", async () => {
@@ -242,8 +244,9 @@ describe("Admin teacher profile actions", () => {
   });
 
   it("uploads a teacher photo on create and persists the public URL", async () => {
-    storageUploadMock.mockResolvedValueOnce("teacher-1/jane-doe.webp");
-    storageGetUrlMock.mockReturnValueOnce("/uploads/teacher-1/jane-doe.webp");
+    const storageKey = "public/teachers/admin-1/00000000-0000-4000-8000-000000000001-jane-doe.webp";
+    const publicUrl = storageUrlForKey(storageKey);
+    storageUploadMock.mockResolvedValueOnce(storageKey);
     createTeacherMock.mockResolvedValueOnce({ id: "teacher-1" });
 
     const { createTeacherAction } = await loadTeachersActions();
@@ -268,7 +271,7 @@ describe("Admin teacher profile actions", () => {
         fullName: "Jane Doe",
         title: "Mathematics Teacher",
         bio: "Cambridge mathematics specialist with more than eight years of online teaching experience.",
-        photoUrl: "/uploads/teacher-1/jane-doe.webp",
+        photoUrl: publicUrl,
         subjects: ["subject-1", "subject-2"],
         cabinetUserId: "teacher-123",
         displayOrder: 1,
@@ -288,7 +291,7 @@ describe("Admin teacher profile actions", () => {
           fullName: "Jane Doe",
           title: "Mathematics Teacher",
           bio: "Cambridge mathematics specialist with more than eight years of online teaching experience.",
-          photoUrl: "/uploads/teacher-1/jane-doe.webp",
+          photoUrl: publicUrl,
           subjects: ["subject-1", "subject-2"],
           cabinetUserId: "teacher-123",
           displayOrder: 1,
@@ -408,6 +411,7 @@ describe("Admin teacher profile actions", () => {
     if (result !== undefined) {
       expect(result).toEqual(expect.objectContaining({ success: true }));
     }
+    expect(storageDeleteMock).toHaveBeenCalledWith("uploads/teacher-1/old-photo.webp");
     expectTeacherAuditTarget("TEACHER_PROFILE_UPDATED");
     expect(getTeacherAuditPayload("TEACHER_PROFILE_UPDATED")).toEqual(
       expect.objectContaining({
@@ -428,8 +432,10 @@ describe("Admin teacher profile actions", () => {
   });
 
   it("updates an existing teacher profile with a replacement photo and removes the previous upload", async () => {
-    storageUploadMock.mockResolvedValueOnce("teacher-1/jane-updated.webp");
-    storageGetUrlMock.mockReturnValueOnce("/uploads/teacher-1/jane-updated.webp");
+    const newStorageKey =
+      "public/teachers/admin-1/00000000-0000-4000-8000-000000000002-jane-updated.webp";
+    storageUploadMock.mockResolvedValueOnce(newStorageKey);
+    storageGetUrlMock.mockReturnValueOnce(storageUrlForKey(newStorageKey));
     updateTeacherMock.mockResolvedValueOnce({
       id: "teacher-1",
       before: {
@@ -438,7 +444,7 @@ describe("Admin teacher profile actions", () => {
       },
       after: {
         id: "teacher-1",
-        photoUrl: "/uploads/teacher-1/jane-updated.webp",
+        photoUrl: storageUrlForKey(newStorageKey),
       },
     });
 
@@ -448,7 +454,7 @@ describe("Admin teacher profile actions", () => {
       cabinetUserId: "teacher-123",
     });
     formData.set("id", "teacher-1");
-    formData.set("photoUrl", "/uploads/teacher-1/old-photo.webp");
+    formData.set("photoUrl", "/uploads/attacker/forged.webp");
     formData.set(
       "photo",
       new File([new Uint8Array([4, 5, 6])], "jane-updated.webp", { type: "image/webp" }),
@@ -461,7 +467,7 @@ describe("Admin teacher profile actions", () => {
       namespace: "public/teachers/admin-1",
       contentType: "image/webp",
     });
-    expect(storageDeleteMock).toHaveBeenCalledWith("/uploads/teacher-1/old-photo.webp");
+    expect(storageDeleteMock).toHaveBeenCalledWith("uploads/teacher-1/old-photo.webp");
     expect(updateTeacherMock).toHaveBeenCalledWith(
       "teacher-1",
       expect.objectContaining({
@@ -469,7 +475,7 @@ describe("Admin teacher profile actions", () => {
         title: "Mathematics Teacher",
         subjects: ["subject-1", "subject-2"],
         cabinetUserId: "teacher-123",
-        photoUrl: "/uploads/teacher-1/jane-updated.webp",
+        photoUrl: storageUrlForKey(newStorageKey),
       }),
       transactionClientMock,
     );
@@ -485,10 +491,41 @@ describe("Admin teacher profile actions", () => {
         }),
         after: expect.objectContaining({
           id: "teacher-1",
-          photoUrl: "/uploads/teacher-1/jane-updated.webp",
+          photoUrl: storageUrlForKey(newStorageKey),
         }),
       }),
     );
+  });
+
+  it("deletes the decoded key for a replaced opaque application photo URL", async () => {
+    const oldStorageKey =
+      "public/teachers/admin-1/00000000-0000-4000-8000-000000000001-old-photo.webp";
+    const newStorageKey =
+      "public/teachers/admin-1/00000000-0000-4000-8000-000000000002-new-photo.webp";
+    storageUploadMock.mockResolvedValueOnce(newStorageKey);
+    storageGetUrlMock.mockReturnValueOnce(storageUrlForKey(newStorageKey));
+    updateTeacherMock.mockResolvedValueOnce({
+      id: "teacher-1",
+      before: { id: "teacher-1", photoUrl: storageUrlForKey(oldStorageKey) },
+      after: { id: "teacher-1", photoUrl: storageUrlForKey(newStorageKey) },
+    });
+
+    const { updateTeacherAction } = await loadTeachersActions();
+    const formData = buildBaseFormData();
+    formData.set("id", "teacher-1");
+    formData.set("photoUrl", "/uploads/attacker/forged.webp");
+    formData.set(
+      "photo",
+      new File([new Uint8Array([0x52, 0x49, 0x46, 0x46])], "new-photo.webp", {
+        type: "image/webp",
+      }),
+    );
+
+    const result = await updateTeacherAction(formData);
+
+    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(storageDeleteMock).toHaveBeenCalledWith(oldStorageKey);
+    expect(storageDeleteMock).not.toHaveBeenCalledWith("/uploads/attacker/forged.webp");
   });
 
   it("toggles teacher public visibility and revalidates the teachers page", async () => {

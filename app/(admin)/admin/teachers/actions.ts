@@ -14,7 +14,12 @@ import {
   setTeacherActive,
   updateTeacher,
 } from "@/lib/repositories/cms-repository";
-import { createStorageService, publicTeacherPhotoNamespace } from "@/lib/storage";
+import {
+  createStorageService,
+  legacyStorageKeyFromUrl,
+  publicTeacherPhotoNamespace,
+  storageKeyFromUrl,
+} from "@/lib/storage";
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpg", "image/jpeg", "image/png", "image/webp"]);
@@ -160,6 +165,23 @@ function readTeacherLinks(formData: FormData) {
 function teacherAuditSnapshot(value: Record<string, unknown>) {
   const { role: _role, ...rest } = value;
   return rest;
+}
+
+function persistedTeacherPhotoStorageKey(photoUrl: unknown) {
+  if (typeof photoUrl !== "string") return null;
+  if (photoUrl.startsWith("/api/public-files/")) {
+    try {
+      const storageKey = storageKeyFromUrl(photoUrl);
+      return storageKey.startsWith("public/") ? storageKey : null;
+    } catch {
+      return null;
+    }
+  }
+  try {
+    return legacyStorageKeyFromUrl(photoUrl);
+  } catch {
+    return null;
+  }
 }
 
 function extractFormData(firstArg: TeacherActionState | FormData, secondArg?: FormData): FormData {
@@ -355,7 +377,7 @@ export async function updateTeacherAction(
     if (!session) {
       throw new Error("Failed to update teacher profile.");
     }
-    await prisma.$transaction(async (tx) => {
+    const updatedTeacher = await prisma.$transaction(async (tx) => {
       const updatedTeacher = await updateTeacher(
         parsed.data.id,
         {
@@ -401,16 +423,20 @@ export async function updateTeacherAction(
         },
         tx,
       );
+      return updatedTeacher;
     });
 
-    if (
-      currentPhotoUrl &&
-      currentPhotoUrl !== photoResult.photoUrl &&
-      currentPhotoUrl.startsWith("/uploads/")
-    ) {
-      const storage = createStorageService();
+    const persistedResult = updatedTeacher as {
+      before?: { photoUrl?: unknown } | null;
+      after?: { photoUrl?: unknown } | null;
+    } | null;
+    const previousPhotoUrl = persistedResult?.before?.photoUrl;
+    const nextPhotoUrl = persistedResult?.after?.photoUrl;
+    const cleanupKey =
+      previousPhotoUrl !== nextPhotoUrl ? persistedTeacherPhotoStorageKey(previousPhotoUrl) : null;
+    if (cleanupKey) {
       try {
-        await storage.delete(currentPhotoUrl);
+        await createStorageService().delete(cleanupKey);
       } catch {
         // Ignore local cleanup failures.
       }

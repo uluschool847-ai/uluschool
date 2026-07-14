@@ -50,11 +50,21 @@ const ALLOWED_MIME_TYPES = new Set([
   "image/jpg",
   "image/webp",
   "image/gif",
+  "text/plain",
 ]);
 
-function isSafeMaterialUrl(value: string) {
+function isLegacyMaterialUrl(value: string) {
+  return value.startsWith("/uploads/") || value.startsWith("/public/uploads/");
+}
+
+function isSafeMaterialUrl(value: string, trustedStorageUrl?: string) {
   const trimmed = value.trim();
-  if (trimmed.startsWith("/uploads/")) return true;
+  if (isLegacyMaterialUrl(trimmed)) {
+    return Boolean(trustedStorageUrl && trimmed === trustedStorageUrl.trim());
+  }
+  if (/^\/api\/(?:public-)?files\/[A-Za-z0-9_-]+$/.test(trimmed)) {
+    return Boolean(trustedStorageUrl && trimmed === trustedStorageUrl.trim());
+  }
 
   try {
     return new URL(trimmed).protocol === "https:";
@@ -64,7 +74,7 @@ function isSafeMaterialUrl(value: string) {
 }
 
 function isAllowedFileType(file: File) {
-  return file.type.startsWith("image/") || ALLOWED_MIME_TYPES.has(file.type);
+  return ALLOWED_MIME_TYPES.has(file.type);
 }
 
 function formatFileSize(size: number) {
@@ -73,7 +83,7 @@ function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function validate(values: MaterialFormValues): FormErrors {
+function validate(values: MaterialFormValues, trustedStorageUrl?: string): FormErrors {
   const errors: FormErrors = {};
 
   if (!values.title.trim()) {
@@ -84,7 +94,7 @@ function validate(values: MaterialFormValues): FormErrors {
   }
   if (!values.fileUrl.trim()) {
     errors.fileUrl = "File URL is required";
-  } else if (!isSafeMaterialUrl(values.fileUrl)) {
+  } else if (!isSafeMaterialUrl(values.fileUrl, trustedStorageUrl)) {
     errors.fileUrl = "File URL must be a safe HTTPS URL or internal upload path.";
   }
 
@@ -159,7 +169,12 @@ export function MaterialForm({
       fileUrl: fileUrl,
       scheduledClassId: formData.get("scheduledClassId")?.toString() ?? "",
     };
-    const nextErrors = validate(submittedValues);
+    const trustedStorageUrl = attachment
+      ? submittedValues.fileUrl
+      : mode === "edit"
+        ? initialValues?.fileUrl
+        : undefined;
+    const nextErrors = validate(submittedValues, trustedStorageUrl);
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
       return;
@@ -307,7 +322,7 @@ export function MaterialForm({
           id="material-upload-file"
           name="uploadFile"
           type="file"
-          accept=".pdf,.doc,.docx,.ppt,.pptx,.zip,image/*"
+          accept=".pdf,.doc,.docx,.ppt,.pptx,.zip,.txt,.png,.jpg,.jpeg,.webp,.gif"
           onChange={(event) => onFileChange(event.currentTarget.files?.[0] ?? null)}
         />
         {selectedFile && !uploadError ? (

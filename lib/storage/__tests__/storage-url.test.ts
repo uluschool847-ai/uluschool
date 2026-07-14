@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeStorageToken, encodeStorageKey, storageUrlForKey } from "@/lib/storage/storage-url";
+import {
+  decodeStorageToken,
+  encodeStorageKey,
+  legacyStorageKeyFromUrl,
+  storageKeyFromUrl,
+  storageUrlForKey,
+  storageUrlMatchesKey,
+} from "@/lib/storage/storage-url";
 
 describe("storage application URLs", () => {
   it("round-trips private storage keys through an opaque application URL", () => {
@@ -19,6 +26,49 @@ describe("storage application URLs", () => {
       /^\/api\/public-files\//,
     );
     expect(storageUrlForKey("private/teachers/admin-1/photo.webp")).toMatch(/^\/api\/files\//);
+  });
+
+  it("derives storage keys only from matching opaque application routes", () => {
+    const privateKey = "private/teachers/teacher-1/materials/a.pdf";
+    const publicKey = "public/teachers/admin-1/photo.webp";
+
+    expect(storageKeyFromUrl(storageUrlForKey(privateKey))).toBe(privateKey);
+    expect(storageKeyFromUrl(storageUrlForKey(publicKey))).toBe(publicKey);
+    expect(() =>
+      storageKeyFromUrl(storageUrlForKey(privateKey).replace("/api/files/", "/api/public-files/")),
+    ).toThrow(/storage url/i);
+    expect(() => storageKeyFromUrl(`${storageUrlForKey(privateKey)}?download=1`)).toThrow(
+      /storage url/i,
+    );
+  });
+
+  it("requires an application URL to identify the exact storage key", () => {
+    const first = "private/teachers/teacher-1/materials/a.pdf";
+    const second = "private/teachers/teacher-1/materials/b.pdf";
+
+    expect(storageUrlMatchesKey(storageUrlForKey(first), first)).toBe(true);
+    expect(storageUrlMatchesKey(storageUrlForKey(first), second)).toBe(false);
+    expect(storageUrlMatchesKey("https://example.com/a.pdf", first)).toBe(false);
+  });
+
+  it("derives legacy keys only through the explicit trusted legacy URL parser", () => {
+    expect(legacyStorageKeyFromUrl("/uploads/teacher-1/old-photo.webp")).toBe(
+      "uploads/teacher-1/old-photo.webp",
+    );
+    expect(legacyStorageKeyFromUrl("/public/uploads/teacher-1/old-photo.webp")).toBe(
+      "uploads/teacher-1/old-photo.webp",
+    );
+    expect(() => legacyStorageKeyFromUrl("/uploads/../private.txt")).toThrow(/legacy storage url/i);
+    expect(() => storageKeyFromUrl("/uploads/teacher-1/old-photo.webp")).toThrow(/storage url/i);
+  });
+
+  it("rejects a Base64URL token with non-zero unused padding bits", () => {
+    const canonical = encodeStorageKey("private/a/a");
+    expect(canonical.endsWith("E")).toBe(true);
+
+    const nonCanonical = `${canonical.slice(0, -1)}F`;
+    expect(Buffer.from(nonCanonical, "base64url")).toEqual(Buffer.from(canonical, "base64url"));
+    expect(() => decodeStorageToken(nonCanonical)).toThrow(/storage token/i);
   });
 
   it.each([

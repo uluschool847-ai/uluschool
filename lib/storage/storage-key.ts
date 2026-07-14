@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 
 const NAMESPACE_SEGMENT_PATTERN = /^[A-Za-z0-9_-]+$/;
 const STORAGE_FILENAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const LEGACY_SEGMENT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9._% -]*$/;
 const MAX_NAMESPACE_LENGTH = 512;
 const MAX_NAMESPACE_SEGMENT_LENGTH = 64;
 const MAX_CLIENT_FILENAME_LENGTH = 255;
 const MAX_STORAGE_FILENAME_LENGTH = 255;
 export const MAX_STORAGE_KEY_LENGTH = 1_024;
+const WINDOWS_RESERVED_DEVICE_PATTERN = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
 
 function hasControlCharacters(value: string) {
   for (const character of value) {
@@ -20,7 +22,9 @@ function validateNamespaceSegment(segment: string) {
   if (
     !segment ||
     segment.length > MAX_NAMESPACE_SEGMENT_LENGTH ||
-    !NAMESPACE_SEGMENT_PATTERN.test(segment)
+    !NAMESPACE_SEGMENT_PATTERN.test(segment) ||
+    WINDOWS_RESERVED_DEVICE_PATTERN.test(segment) ||
+    /[. ]$/.test(segment)
   ) {
     throw new Error("Invalid namespace segment");
   }
@@ -58,11 +62,19 @@ export function validateStorageNamespace(namespace: string) {
 }
 
 export function sanitizeStorageFilename(raw: string) {
-  if (typeof raw !== "string" || !raw || raw.length > MAX_CLIENT_FILENAME_LENGTH) {
+  if (
+    typeof raw !== "string" ||
+    !raw ||
+    raw.length > MAX_CLIENT_FILENAME_LENGTH ||
+    hasControlCharacters(raw)
+  ) {
     throw new Error("Invalid filename");
   }
 
-  const basename = raw.split(/[\\/]/).at(-1)?.trim() ?? "";
+  const basename = raw.split(/[\\/]/).at(-1) ?? "";
+  if (/[. ]$/.test(basename) || WINDOWS_RESERVED_DEVICE_PATTERN.test(basename)) {
+    throw new Error("Invalid filename");
+  }
   const sanitized = basename
     .replace(/[^A-Za-z0-9._-]/g, "-")
     .replace(/-+/g, "-")
@@ -72,6 +84,7 @@ export function sanitizeStorageFilename(raw: string) {
   if (
     !sanitized ||
     sanitized.length > MAX_STORAGE_FILENAME_LENGTH - 37 ||
+    WINDOWS_RESERVED_DEVICE_PATTERN.test(sanitized) ||
     !STORAGE_FILENAME_PATTERN.test(sanitized)
   ) {
     throw new Error("Invalid filename");
@@ -97,20 +110,67 @@ export function validateStorageKey(storageKey: string) {
 
   const filename = segments.at(-1) ?? "";
   const namespaceSegments = segments.slice(0, -1);
+  let validNamespaceSegments = true;
+  try {
+    namespaceSegments.forEach(validateNamespaceSegment);
+  } catch {
+    validNamespaceSegments = false;
+  }
   if (
-    !namespaceSegments.every(
-      (segment) =>
-        segment.length > 0 &&
-        segment.length <= MAX_NAMESPACE_SEGMENT_LENGTH &&
-        NAMESPACE_SEGMENT_PATTERN.test(segment),
-    ) ||
+    !validNamespaceSegments ||
     !filename ||
     filename.length > MAX_STORAGE_FILENAME_LENGTH ||
     filename === "." ||
     filename === ".." ||
+    /[. ]$/.test(filename) ||
+    WINDOWS_RESERVED_DEVICE_PATTERN.test(filename) ||
     !STORAGE_FILENAME_PATTERN.test(filename)
   ) {
     throw new Error("Invalid storage key");
+  }
+  return storageKey;
+}
+
+export function validateLegacyStorageKey(value: string) {
+  if (typeof value !== "string" || !value || value.length > MAX_STORAGE_KEY_LENGTH) {
+    throw new Error("Invalid legacy storage key");
+  }
+
+  let storageKey = value;
+  if (storageKey.startsWith("/public/uploads/")) {
+    storageKey = `uploads/${storageKey.slice("/public/uploads/".length)}`;
+  } else if (storageKey.startsWith("public/uploads/")) {
+    storageKey = `uploads/${storageKey.slice("public/uploads/".length)}`;
+  } else if (storageKey.startsWith("/uploads/")) {
+    storageKey = storageKey.slice(1);
+  }
+
+  if (
+    !storageKey.startsWith("uploads/") ||
+    storageKey.includes("\\") ||
+    hasControlCharacters(storageKey)
+  ) {
+    throw new Error("Invalid legacy storage key");
+  }
+
+  const segments = storageKey.split("/");
+  if (
+    segments.length < 2 ||
+    segments[0] !== "uploads" ||
+    segments
+      .slice(1)
+      .some(
+        (segment) =>
+          !segment ||
+          segment.length > MAX_STORAGE_FILENAME_LENGTH ||
+          segment === "." ||
+          segment === ".." ||
+          /[. ]$/.test(segment) ||
+          WINDOWS_RESERVED_DEVICE_PATTERN.test(segment) ||
+          !LEGACY_SEGMENT_PATTERN.test(segment),
+      )
+  ) {
+    throw new Error("Invalid legacy storage key");
   }
   return storageKey;
 }

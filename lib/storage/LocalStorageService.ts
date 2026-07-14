@@ -2,20 +2,27 @@ import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { StorageService, UploadInput, UploadOptions } from "@/lib/storage/StorageService";
-import { buildStorageKey, validateStorageKey } from "@/lib/storage/storage-key";
+import {
+  buildStorageKey,
+  validateLegacyStorageKey,
+  validateStorageKey,
+} from "@/lib/storage/storage-key";
 import { storageUrlForKey } from "@/lib/storage/storage-url";
 import { normalizeUploadInput } from "@/lib/storage/upload-input";
 
-const DEFAULT_UPLOAD_ROOT = path.join(process.cwd(), "public", "uploads");
+const DEFAULT_UPLOAD_ROOT = path.join(process.cwd(), ".data", "uploads");
+const DEFAULT_LEGACY_UPLOAD_ROOT = path.join(process.cwd(), "public", "uploads");
 
 export class LocalStorageService implements StorageService {
-  constructor(private readonly uploadRoot = DEFAULT_UPLOAD_ROOT) {}
+  constructor(
+    private readonly uploadRoot = DEFAULT_UPLOAD_ROOT,
+    private readonly legacyUploadRoot = DEFAULT_LEGACY_UPLOAD_ROOT,
+  ) {}
 
-  private resolveStoragePath(storageKey: string) {
-    const validStorageKey = validateStorageKey(storageKey);
-    const uploadRoot = path.resolve(this.uploadRoot);
-    const absolutePath = path.resolve(uploadRoot, ...validStorageKey.split("/"));
-    const relativePath = path.relative(uploadRoot, absolutePath);
+  private resolveContainedPath(root: string, segments: string[]) {
+    const resolvedRoot = path.resolve(root);
+    const absolutePath = path.resolve(resolvedRoot, ...segments);
+    const relativePath = path.relative(resolvedRoot, absolutePath);
 
     if (
       !relativePath ||
@@ -26,6 +33,16 @@ export class LocalStorageService implements StorageService {
       throw new Error("Invalid storage key path");
     }
     return absolutePath;
+  }
+
+  private resolveStoragePath(storageKey: string) {
+    const validStorageKey = validateStorageKey(storageKey);
+    return this.resolveContainedPath(this.uploadRoot, validStorageKey.split("/"));
+  }
+
+  private resolveLegacyStoragePath(storageKey: string) {
+    const validStorageKey = validateLegacyStorageKey(storageKey);
+    return this.resolveContainedPath(this.legacyUploadRoot, validStorageKey.split("/").slice(1));
   }
 
   async upload(file: UploadInput, options: UploadOptions): Promise<string> {
@@ -45,7 +62,7 @@ export class LocalStorageService implements StorageService {
   async createDownloadURL(storageKey: string): Promise<string> {
     const validStorageKey = validateStorageKey(storageKey);
     this.resolveStoragePath(validStorageKey);
-    return `/uploads/${validStorageKey}`;
+    throw new Error("Local storage delivery is unavailable");
   }
 
   async delete(storageKey: string): Promise<void> {
@@ -53,7 +70,11 @@ export class LocalStorageService implements StorageService {
     try {
       absolutePath = this.resolveStoragePath(storageKey);
     } catch {
-      return;
+      try {
+        absolutePath = this.resolveLegacyStoragePath(storageKey);
+      } catch {
+        return;
+      }
     }
 
     try {

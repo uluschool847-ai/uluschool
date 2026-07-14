@@ -2,7 +2,13 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { safeCourseMaterialHref } from "@/lib/security/course-material-links";
-import { createStorageService } from "@/lib/storage";
+import { isTeacherMaterialStorageKey, validateLegacyStorageKey } from "@/lib/storage/storage-key";
+import {
+  legacyStorageKeyFromUrl,
+  storageKeyFromUrl,
+  storageUrlForKey,
+  storageUrlMatchesKey,
+} from "@/lib/storage/storage-url";
 
 type MaterialDatabase = typeof prisma | Prisma.TransactionClient;
 
@@ -95,10 +101,23 @@ function hasAttachment(input: { attachments?: CourseMaterialAttachmentInput[] | 
   return Array.isArray(input.attachments) && input.attachments.length > 0;
 }
 
-export function validateCourseMaterialFileUrl(fileUrl: string | null | undefined) {
+export function validateCourseMaterialFileUrl(
+  fileUrl: string | null | undefined,
+  options: { allowTrustedLegacy?: boolean } = {},
+) {
   const value = fileUrl?.trim() ?? "";
   if (!value) return null;
-  if (value.startsWith("/uploads/")) return value;
+  if (value.startsWith("/uploads/") || value.startsWith("/public/uploads/")) {
+    if (!options.allowTrustedLegacy) {
+      throw new Error("Legacy upload URLs cannot be submitted as new material files.");
+    }
+    legacyStorageKeyFromUrl(value);
+    return value;
+  }
+  if (value.startsWith("/api/")) {
+    storageKeyFromUrl(value);
+    return value;
+  }
 
   let parsed: URL;
   try {
@@ -122,6 +141,9 @@ function assertFileUrlOrAttachment(input: {
   if (!fileUrl && !hasAttachment(input)) {
     throw new Error("File URL is required.");
   }
+  if (fileUrl?.startsWith("/api/") && !hasAttachment(input)) {
+    throw new Error("Internal upload URLs require matching attachment metadata.");
+  }
   return fileUrl;
 }
 
@@ -136,6 +158,68 @@ function attachmentCreateData(attachments: CourseMaterialAttachmentInput[] | nul
   }));
 }
 
+function assertTeacherOwnsAttachmentInputs(
+  attachments: CourseMaterialAttachmentInput[] | null | undefined,
+  teacherId: string,
+  fileUrl: string | null,
+) {
+  if (!attachments?.length) return;
+  for (const attachment of attachments) {
+    if (!isTeacherMaterialStorageKey(attachment.storageKey, teacherId)) {
+      throw new Error("Uploaded file is not owned by this teacher.");
+    }
+  }
+  if (fileUrl && !storageUrlMatchesKey(fileUrl, attachments[0].storageKey)) {
+    throw new Error("Uploaded file URL does not match its storage key.");
+  }
+}
+
+function validateStoredCleanupKey(storageKey: unknown, teacherId: string) {
+  if (typeof storageKey !== "string") {
+    throw new Error("Uploaded file is not owned by this teacher.");
+  }
+  if (isTeacherMaterialStorageKey(storageKey, teacherId)) return storageKey;
+  try {
+    return validateLegacyStorageKey(storageKey);
+  } catch {
+    throw new Error("Uploaded file is not owned by this teacher.");
+  }
+}
+
+function validateStoredCleanupKeys(attachments: Array<{ storageKey: unknown }>, teacherId: string) {
+  return attachments.map((attachment) =>
+    validateStoredCleanupKey(attachment.storageKey, teacherId),
+  );
+}
+
+function validateUpdateFileUrl(
+  fileUrl: string | null,
+  existingFileUrl: string,
+  hasReplacement: boolean,
+) {
+  const value = fileUrl?.trim() ?? "";
+  if (!value) {
+    if (hasReplacement) return null;
+    throw new Error("File URL is required.");
+  }
+  if (value.startsWith("/uploads/") || value.startsWith("/public/uploads/")) {
+    const legacyUrl = validateCourseMaterialFileUrl(value, { allowTrustedLegacy: true });
+    if (legacyUrl !== existingFileUrl.trim()) {
+      throw new Error("Legacy upload URLs cannot be submitted as new material files.");
+    }
+    return legacyUrl;
+  }
+  const validatedFileUrl = validateCourseMaterialFileUrl(value);
+  if (
+    validatedFileUrl?.startsWith("/api/") &&
+    !hasReplacement &&
+    validatedFileUrl !== existingFileUrl.trim()
+  ) {
+    throw new Error("Internal upload URLs require matching attachment metadata.");
+  }
+  return validatedFileUrl;
+}
+
 function storageKeyPublicUrl(storageKey: string) {
   const normalized = storageKey.replace(/^\/+/, "").replace(/^public[\\\/]/, "");
   return `/${normalized.startsWith("uploads/") ? normalized : `uploads/${normalized}`}`;
@@ -144,18 +228,24 @@ function storageKeyPublicUrl(storageKey: string) {
 function attachmentHref(storageKey: string | null | undefined) {
   const trimmed = storageKey?.trim() ?? "";
   if (!trimmed) return null;
-  const normalized = trimmed.replace(/^\/+/, "").replace(/^public[\\\/]/, "");
-  if (!normalized.startsWith("uploads/")) return null;
-  return safeCourseMaterialHref(storageKeyPublicUrl(normalized));
+  try {
+    return storageUrlForKey(trimmed);
+  } catch {
+    try {
+      return safeCourseMaterialHref(storageKeyPublicUrl(validateLegacyStorageKey(trimmed)));
+    } catch {
+      return null;
+    }
+  }
 }
 
 function fileUrlFromInput(
   fileUrl: string | null,
   attachments: CourseMaterialAttachmentInput[] | null | undefined,
 ) {
-  if (fileUrl) return fileUrl;
   const firstStorageKey = attachments?.[0]?.storageKey?.trim();
-  return firstStorageKey ? storageKeyPublicUrl(firstStorageKey) : "";
+  if (firstStorageKey) return storageUrlForKey(firstStorageKey);
+  return fileUrl ?? "";
 }
 
 export async function assertTeacherOwnsMaterialClass(
@@ -213,6 +303,7 @@ export async function createCourseMaterialForTeacher(
   const scheduledClassId = input.scheduledClassId?.trim() ?? "";
   if (!scheduledClassId) throw new Error("Scheduled class is required.");
   const fileUrl = assertFileUrlOrAttachment(input);
+  assertTeacherOwnsAttachmentInputs(input.attachments, input.teacherId, fileUrl);
   const attachments = attachmentCreateData(input.attachments);
   const scheduledClass = await assertTeacherOwnsMaterialClass(
     input.teacherId,
@@ -242,9 +333,16 @@ export async function updateCourseMaterialForTeacher(
   const existing = await assertTeacherOwnsMaterial(teacherId, id, database);
   const data: Prisma.CourseMaterialUpdateInput = {};
   const isReplacingFile = hasAttachment(input);
-  const oldStorageKeys = isReplacingFile
-    ? existing.attachments.map((attachment) => attachment.storageKey).filter(Boolean)
-    : [];
+  const validatedStoredKeys = validateStoredCleanupKeys(existing.attachments, teacherId);
+  const oldStorageKeys = isReplacingFile ? validatedStoredKeys : [];
+  const validatedFileUrl =
+    input.fileUrl === undefined
+      ? null
+      : validateUpdateFileUrl(input.fileUrl, existing.fileUrl, isReplacingFile);
+
+  if (isReplacingFile) {
+    assertTeacherOwnsAttachmentInputs(input.attachments, teacherId, validatedFileUrl);
+  }
 
   if (input.title !== undefined) {
     assertTitle(input.title);
@@ -254,17 +352,13 @@ export async function updateCourseMaterialForTeacher(
     data.description = input.description?.trim() ?? null;
   }
   if (input.fileUrl !== undefined) {
-    const fileUrl = assertFileUrlOrAttachment(input);
-    if (fileUrl) data.fileUrl = fileUrl;
+    if (validatedFileUrl) data.fileUrl = validatedFileUrl;
   }
   if (isReplacingFile) {
     const attachments = attachmentCreateData(input.attachments);
     if (attachments) {
       data.attachments = { create: attachments };
-      data.fileUrl = fileUrlFromInput(
-        input.fileUrl !== undefined ? validateCourseMaterialFileUrl(input.fileUrl) : null,
-        input.attachments,
-      );
+      data.fileUrl = fileUrlFromInput(validatedFileUrl, input.attachments);
     }
   }
   if (input.scheduledClassId !== undefined) {
@@ -385,25 +479,16 @@ export async function deleteCourseMaterialForTeacher(
     throw new Error("Material not found or not owned by teacher.");
   }
 
-  const storageKeys = existing.attachments
-    .map((attachment) => attachment.storageKey)
-    .filter(Boolean);
+  const storageKeys = validateStoredCleanupKeys(existing.attachments, teacherId);
 
   await database.courseMaterial.delete({ where: { id: existing.id } });
-
-  const storage = createStorageService();
-  let deleted = 0;
-  for (const storageKey of storageKeys) {
-    await storage.delete(storageKey);
-    deleted += 1;
-  }
 
   return {
     ...existing,
     success: true as const,
     cleanup: {
       queued: storageKeys.length > 0,
-      deleted,
+      deleted: 0,
       storageKeys,
     },
   };
@@ -415,7 +500,8 @@ export async function unlinkCourseMaterialAttachmentForTeacher(
   attachmentId: string,
   database: MaterialDatabase = prisma,
 ) {
-  await assertTeacherOwnsMaterial(teacherId, materialId, database);
+  const material = await assertTeacherOwnsMaterial(teacherId, materialId, database);
+  validateStoredCleanupKeys(material.attachments, teacherId);
 
   const attachment = await database.attachment.findFirst({
     where: {
@@ -428,6 +514,8 @@ export async function unlinkCourseMaterialAttachmentForTeacher(
     throw new Error("Material attachment not found or not owned by teacher.");
   }
 
+  const storageKey = validateStoredCleanupKey(attachment.storageKey, teacherId);
+
   await database.attachment.delete({
     where: { id: attachment.id },
   });
@@ -435,7 +523,7 @@ export async function unlinkCourseMaterialAttachmentForTeacher(
   return {
     attachmentId: attachment.id,
     materialId,
-    storageKey: attachment.storageKey,
+    storageKey,
   };
 }
 

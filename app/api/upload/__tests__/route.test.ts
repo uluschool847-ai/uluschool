@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const uploadMock = vi.hoisted(() => vi.fn());
@@ -29,6 +31,19 @@ vi.mock("next/server", () => ({
 }));
 
 import { POST } from "@/app/api/upload/route";
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
+const MAX_UPLOAD_FILE_COUNT = 10;
+const MAX_UPLOAD_AGGREGATE_BYTES = 20 * 1024 * 1024;
+const MAX_UPLOAD_REQUEST_BYTES = 21 * 1024 * 1024;
+
+function requestFromForm(form: FormData, headers?: HeadersInit) {
+  return new Request("http://localhost/api/upload", {
+    method: "POST",
+    headers,
+    body: form,
+  });
+}
 
 function buildUploadRequest(
   input: {
@@ -42,10 +57,7 @@ function buildUploadRequest(
   const file = input.file ?? new File(["content"], "lesson.pdf", { type: "application/pdf" });
   form.append("file", file, file.name);
 
-  return {
-    formData: async () => form,
-    headers: new Headers(input.roleHeader ? { "x-role": input.roleHeader } : undefined),
-  } as unknown as Request;
+  return requestFromForm(form, input.roleHeader ? { "x-role": input.roleHeader } : undefined);
 }
 
 describe("app/api/upload/route local-first upload integration", () => {
@@ -62,8 +74,10 @@ describe("app/api/upload/route local-first upload integration", () => {
   });
 
   it("returns 201 with upload metadata for an authorized teacher", async () => {
-    uploadMock.mockResolvedValueOnce("private/teachers/teacher-1/materials/1234-homework.pdf");
-    getURLMock.mockReturnValueOnce("/api/files/private-token");
+    const storageKey = "private/teachers/teacher-1/materials/1234-homework.pdf";
+    const publicUrl = storageUrlForKey(storageKey);
+    uploadMock.mockResolvedValueOnce(storageKey);
+    getURLMock.mockReturnValueOnce(publicUrl);
 
     const response = await POST(
       buildUploadRequest({
@@ -80,10 +94,10 @@ describe("app/api/upload/route local-first upload integration", () => {
     expect(await response.json()).toEqual(
       expect.objectContaining({
         success: true,
-        fileId: "private/teachers/teacher-1/materials/1234-homework.pdf",
-        url: "/api/files/private-token",
-        storageKey: "private/teachers/teacher-1/materials/1234-homework.pdf",
-        publicUrl: "/api/files/private-token",
+        fileId: storageKey,
+        url: publicUrl,
+        storageKey,
+        publicUrl,
         filename: expect.any(String),
         mimeType: "application/pdf",
         size: expect.any(Number),
@@ -143,8 +157,13 @@ describe("app/api/upload/route local-first upload integration", () => {
         mfaVerified: true,
         authMethod: "password",
       });
-      uploadMock.mockResolvedValueOnce(`uploads/admin/${purpose}.pdf`);
-      getURLMock.mockReturnValueOnce(`/uploads/admin/${purpose}.pdf`);
+      const storageKey =
+        purpose === "teacher-photo"
+          ? "public/teachers/admin-1/00000000-0000-4000-8000-000000000001-teacher-photo.pdf"
+          : "private/teachers/admin-1/materials/00000000-0000-4000-8000-000000000001-course-material.pdf";
+      const publicUrl = storageUrlForKey(storageKey);
+      uploadMock.mockResolvedValueOnce(storageKey);
+      getURLMock.mockReturnValueOnce(publicUrl);
 
       const response = await POST(buildUploadRequest({ purpose }));
 
@@ -160,8 +179,8 @@ describe("app/api/upload/route local-first upload integration", () => {
       expect(await response.json()).toEqual(
         expect.objectContaining({
           success: true,
-          storageKey: `uploads/admin/${purpose}.pdf`,
-          publicUrl: `/uploads/admin/${purpose}.pdf`,
+          storageKey,
+          publicUrl,
           filename: expect.any(String),
           mimeType: "application/pdf",
           size: expect.any(Number),
@@ -229,6 +248,129 @@ describe("app/api/upload/route local-first upload integration", () => {
     });
   });
 
+  it("rejects a declared oversized body before formData parsing", async () => {
+    const formData = vi.fn(async () => new FormData());
+    const response = await POST({
+      headers: new Headers({ "content-length": String(MAX_UPLOAD_REQUEST_BYTES + 1) }),
+      formData,
+    } as unknown as Request);
+
+    expect(response.status).toBe(413);
+    expect(formData).not.toHaveBeenCalled();
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed instead of parsing an unbounded bodyless formData shim", async () => {
+    const form = new FormData();
+    form.append("purpose", "course-material");
+    form.append("file", new File(["note"], "note.txt", { type: "text/plain" }));
+    const formData = vi.fn(async () => form);
+
+    const response = await POST({ headers: new Headers(), formData } as unknown as Request);
+
+    expect(response.status).toBe(400);
+    expect(formData).not.toHaveBeenCalled();
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized stream when Content-Length is absent", async () => {
+    const request = new Request("http://localhost/api/upload", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=bounded" },
+      body: new Uint8Array(MAX_UPLOAD_REQUEST_BYTES + 1),
+    });
+    expect(request.headers.has("content-length")).toBe(false);
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(413);
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects excessive file count before any storage upload", async () => {
+    const form = new FormData();
+    form.append("purpose", "course-material");
+    for (let index = 0; index <= MAX_UPLOAD_FILE_COUNT; index += 1) {
+      form.append(
+        "files",
+        new File(["note"], `note-${index}.txt`, { type: "text/plain" }),
+        `note-${index}.txt`,
+      );
+    }
+
+    const response = await POST(requestFromForm(form));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ success: false, error: "Too many files" });
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("counts files in unexpected multipart fields toward the file-count limit", async () => {
+    const form = new FormData();
+    form.append("purpose", "course-material");
+    form.append("file", new File(["note"], "note.txt", { type: "text/plain" }));
+    for (let index = 0; index < MAX_UPLOAD_FILE_COUNT; index += 1) {
+      form.append(
+        `unexpected-${index}`,
+        new File(["note"], `extra-${index}.txt`, { type: "text/plain" }),
+      );
+    }
+
+    const response = await POST(requestFromForm(form));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ success: false, error: "Too many files" });
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects excessive aggregate file bytes before any storage upload", async () => {
+    const form = new FormData();
+    form.append("purpose", "course-material");
+    const perFileBytes = Math.floor(MAX_UPLOAD_AGGREGATE_BYTES / 5) + 1;
+    for (let index = 0; index < 5; index += 1) {
+      form.append(
+        "files",
+        new File([new Uint8Array(perFileBytes)], `bundle-${index}.zip`, {
+          type: "application/zip",
+        }),
+        `bundle-${index}.zip`,
+      );
+    }
+
+    const response = await POST(requestFromForm(form));
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: "Combined files are too large",
+    });
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("counts files in unexpected multipart fields toward the aggregate limit", async () => {
+    const form = new FormData();
+    form.append("purpose", "course-material");
+    form.append("file", new File(["note"], "note.txt", { type: "text/plain" }));
+    const perFileBytes = Math.floor(MAX_UPLOAD_AGGREGATE_BYTES / 5) + 1;
+    for (let index = 0; index < 5; index += 1) {
+      form.append(
+        `unexpected-${index}`,
+        new File([new Uint8Array(perFileBytes)], `extra-${index}.zip`, {
+          type: "application/zip",
+        }),
+      );
+    }
+
+    const response = await POST(requestFromForm(form));
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: "Combined files are too large",
+    });
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid MIME type", async () => {
     const form = new FormData();
     form.append("purpose", "course-material");
@@ -273,8 +415,9 @@ describe("app/api/upload/route local-first upload integration", () => {
   });
 
   it("ignores client namespace input and derives it from the signed session", async () => {
-    uploadMock.mockResolvedValueOnce("private/teachers/teacher-1/materials/1234-lesson.pdf");
-    getURLMock.mockReturnValueOnce("/api/files/private-token");
+    const storageKey = "private/teachers/teacher-1/materials/1234-lesson.pdf";
+    uploadMock.mockResolvedValueOnce(storageKey);
+    getURLMock.mockReturnValueOnce(storageUrlForKey(storageKey));
     const form = new FormData();
     form.append("purpose", "course-material");
     form.append("namespace", "private/teachers/teacher-2/materials");
@@ -284,7 +427,7 @@ describe("app/api/upload/route local-first upload integration", () => {
       "lesson.pdf",
     );
 
-    const response = await POST({ formData: async () => form } as unknown as Request);
+    const response = await POST(requestFromForm(form));
 
     expect(response.status).toBe(201);
     expect(uploadMock).toHaveBeenCalledWith(expect.any(File), {
@@ -311,8 +454,10 @@ describe("app/api/upload/route local-first upload integration", () => {
     ["ZIP", "materials.zip", "application/zip"],
     ["PNG image", "diagram.png", "image/png"],
   ])("accepts allowed course material MIME type: %s", async (_label, filename, mimeType) => {
-    uploadMock.mockResolvedValueOnce(`uploads/teacher/${filename}`);
-    getURLMock.mockReturnValueOnce(`/uploads/teacher/${filename}`);
+    const storageKey = `private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-${filename}`;
+    const publicUrl = storageUrlForKey(storageKey);
+    uploadMock.mockResolvedValueOnce(storageKey);
+    getURLMock.mockReturnValueOnce(publicUrl);
 
     const form = new FormData();
     form.append("purpose", "course-material");
@@ -329,8 +474,8 @@ describe("app/api/upload/route local-first upload integration", () => {
     expect(await response.json()).toEqual(
       expect.objectContaining({
         success: true,
-        storageKey: `uploads/teacher/${filename}`,
-        publicUrl: `/uploads/teacher/${filename}`,
+        storageKey,
+        publicUrl,
         filename,
         mimeType,
         size: expect.any(Number),
@@ -343,11 +488,7 @@ describe("app/api/upload/route local-first upload integration", () => {
     const form = new FormData();
     form.append("purpose", "course-material");
     form.append("file", new File([sixMb], "big.zip", { type: "application/zip" }), "big.zip");
-    const req = {
-      formData: async () => form,
-    } as unknown as Request;
-
-    const response = await POST(req);
+    const response = await POST(requestFromForm(form));
 
     expect(response.status).toBe(413);
     expect(await response.json()).toEqual({
@@ -364,11 +505,7 @@ describe("app/api/upload/route local-first upload integration", () => {
       new File([new Uint8Array(0)], "empty.pdf", { type: "application/pdf" }),
       "empty.pdf",
     );
-    const req = {
-      formData: async () => form,
-    } as unknown as Request;
-
-    const response = await POST(req);
+    const response = await POST(requestFromForm(form));
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
@@ -378,13 +515,17 @@ describe("app/api/upload/route local-first upload integration", () => {
   });
 
   it("should report partial failure in batch upload when one file is invalid", async () => {
+    const pdfKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-a.pdf";
+    const zipKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000002-c.zip";
     uploadMock
-      .mockResolvedValueOnce("uploads/teacher/a.pdf")
+      .mockResolvedValueOnce(pdfKey)
       .mockRejectedValueOnce(new Error("MIME type not allowed"))
-      .mockResolvedValueOnce("uploads/teacher/c.zip");
+      .mockResolvedValueOnce(zipKey);
     getURLMock
-      .mockReturnValueOnce("/public/uploads/teacher/a.pdf")
-      .mockReturnValueOnce("/public/uploads/teacher/c.zip");
+      .mockReturnValueOnce(storageUrlForKey(pdfKey))
+      .mockReturnValueOnce(storageUrlForKey(zipKey));
 
     const form = new FormData();
     form.append("purpose", "course-material");
@@ -410,16 +551,17 @@ describe("app/api/upload/route local-first upload integration", () => {
   });
 
   it("bounds unexpected storage errors in batch responses", async () => {
+    const storageKey = "private/teachers/teacher-1/materials/c.zip";
     uploadMock
       .mockRejectedValueOnce(new Error("backend-secret: bucket unavailable"))
-      .mockResolvedValueOnce("private/teachers/teacher-1/materials/c.zip");
-    getURLMock.mockReturnValueOnce("/api/files/c-token");
+      .mockResolvedValueOnce(storageKey);
+    getURLMock.mockReturnValueOnce(storageUrlForKey(storageKey));
     const form = new FormData();
     form.append("purpose", "course-material");
     form.append("files", new File(["a"], "a.pdf", { type: "application/pdf" }), "a.pdf");
     form.append("files", new File(["c"], "c.zip", { type: "application/zip" }), "c.zip");
 
-    const response = await POST({ formData: async () => form } as unknown as Request);
+    const response = await POST(requestFromForm(form));
     const payload = await response.json();
 
     expect(response.status).toBe(207);
@@ -428,14 +570,18 @@ describe("app/api/upload/route local-first upload integration", () => {
   });
 
   it("should keep storage integrity under concurrent upload requests for the same file", async () => {
+    const storageKeys = [1, 2, 3].map(
+      (index) =>
+        `private/teachers/teacher-1/materials/00000000-0000-4000-8000-00000000000${index}-same.pdf`,
+    );
     uploadMock
-      .mockResolvedValueOnce("uploads/teacher/same-1.pdf")
-      .mockResolvedValueOnce("uploads/teacher/same-2.pdf")
-      .mockResolvedValueOnce("uploads/teacher/same-3.pdf");
+      .mockResolvedValueOnce(storageKeys[0])
+      .mockResolvedValueOnce(storageKeys[1])
+      .mockResolvedValueOnce(storageKeys[2]);
     getURLMock
-      .mockReturnValueOnce("/public/uploads/teacher/same-1.pdf")
-      .mockReturnValueOnce("/public/uploads/teacher/same-2.pdf")
-      .mockReturnValueOnce("/public/uploads/teacher/same-3.pdf");
+      .mockReturnValueOnce(storageUrlForKey(storageKeys[0]))
+      .mockReturnValueOnce(storageUrlForKey(storageKeys[1]))
+      .mockReturnValueOnce(storageUrlForKey(storageKeys[2]));
 
     const makeRequest = () => {
       const form = new FormData();
@@ -463,8 +609,10 @@ describe("app/api/upload/route local-first upload integration", () => {
   });
 
   it("should sanitize dangerous filenames and keep final path within uploads root", async () => {
-    uploadMock.mockResolvedValueOnce("uploads/teacher/safe-secret.txt");
-    getURLMock.mockReturnValueOnce("/public/uploads/teacher/safe-secret.txt");
+    const storageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-safe-secret.txt";
+    uploadMock.mockResolvedValueOnce(storageKey);
+    getURLMock.mockReturnValueOnce(storageUrlForKey(storageKey));
 
     const form = new FormData();
     form.append("purpose", "course-material");
@@ -484,12 +632,15 @@ describe("app/api/upload/route local-first upload integration", () => {
     expect(response.status).toBe(201);
     const payload = await response.json();
     expect(payload.fileId).not.toMatch(/\.\./);
-    expect(payload.url).toMatch(/^\/(public\/)?uploads\//i);
+    expect(payload.url).toMatch(/^\/api\/files\//i);
   });
 
   it("returns upload metadata using storageKey/publicUrl rather than trusting path traversal filename", async () => {
-    uploadMock.mockResolvedValueOnce("uploads/teacher/safe-secret.pdf");
-    getURLMock.mockReturnValueOnce("/uploads/teacher/safe-secret.pdf");
+    const storageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-safe-secret.pdf";
+    const publicUrl = storageUrlForKey(storageKey);
+    uploadMock.mockResolvedValueOnce(storageKey);
+    getURLMock.mockReturnValueOnce(publicUrl);
 
     const form = new FormData();
     form.append("purpose", "course-material");
@@ -510,35 +661,42 @@ describe("app/api/upload/route local-first upload integration", () => {
     expect(await response.json()).toEqual(
       expect.objectContaining({
         success: true,
-        storageKey: "uploads/teacher/safe-secret.pdf",
-        publicUrl: "/uploads/teacher/safe-secret.pdf",
-        filename: "safe-secret.pdf",
+        storageKey,
+        publicUrl,
+        filename: "secret.pdf",
         mimeType: "application/pdf",
         size: expect.any(Number),
       }),
     );
   });
 
-  it("returns 507 when underlying storage reports disk full", async () => {
-    uploadMock.mockRejectedValueOnce(new Error("ENOSPC: no space left on device"));
+  it.each([
+    "ENOSPC: no space left on C:\\private\\uploads",
+    "filename index failed at /srv/private/uploads/a.pdf",
+    "content type table size overflow at D:\\storage\\private",
+  ])(
+    "masks backend failures even when their message collides with validation keywords: %s",
+    async (backendMessage) => {
+      uploadMock.mockRejectedValueOnce(new Error(backendMessage));
 
-    const form = new FormData();
-    form.append("purpose", "course-material");
-    form.append("file", new File(["x"], "ok.pdf", { type: "application/pdf" }), "ok.pdf");
+      const form = new FormData();
+      form.append("purpose", "course-material");
+      form.append("file", new File(["x"], "ok.pdf", { type: "application/pdf" }), "ok.pdf");
 
-    const response = await POST(
-      new Request("http://localhost/api/upload", {
-        method: "POST",
-        body: form,
-      }),
-    );
+      const response = await POST(
+        new Request("http://localhost/api/upload", {
+          method: "POST",
+          body: form,
+        }),
+      );
 
-    expect(response.status).toBe(507);
-    expect(await response.json()).toEqual({
-      success: false,
-      error: expect.stringMatching(/(space|disk|enospc)/i),
-    });
-  });
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        success: false,
+        error: "Upload failed",
+      });
+    },
+  );
 
   it("returns 500 on unexpected storage failure", async () => {
     uploadMock.mockRejectedValueOnce(new Error("unexpected failure"));

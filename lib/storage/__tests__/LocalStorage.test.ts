@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { UserRole } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { uploadFixtures } from "@/tests/helpers/upload-fixtures";
 
 vi.mock("@/lib/auth/session", () => ({
   requireRole: vi.fn(async (allowedRoles: UserRole[]) => {
@@ -44,7 +46,7 @@ describe("lib/storage local-first contract", () => {
     const { createStorageService } = await import("@/lib/storage");
 
     const service = createStorageService();
-    const file = new File(["hello"], "sample.pdf", { type: "application/pdf" });
+    const file = new File([uploadFixtures.pdf], "sample.pdf", { type: "application/pdf" });
 
     const location = await service.upload(file, {
       filename: file.name,
@@ -55,13 +57,14 @@ describe("lib/storage local-first contract", () => {
     expect(typeof location).toBe("string");
     expect(location.length).toBeGreaterThan(3);
     expect(location).toMatch(/^private\/teachers\/teacher-1\/materials\/[0-9a-f-]+-sample\.pdf$/i);
+    await service.delete(location);
   });
 
   it("should generate deterministic but unique keys for image uploads", async () => {
     const { createStorageService } = await import("@/lib/storage");
 
     const service = createStorageService();
-    const image = new File(["image-bytes"], "avatar.png", { type: "image/png" });
+    const image = new File([uploadFixtures.png], "avatar.png", { type: "image/png" });
 
     const options = {
       filename: image.name,
@@ -74,6 +77,8 @@ describe("lib/storage local-first contract", () => {
     expect(keyA).toMatch(/^public\/teachers\/admin-1\/[0-9a-f-]+-avatar\.png$/i);
     expect(keyB).toMatch(/^public\/teachers\/admin-1\/[0-9a-f-]+-avatar\.png$/i);
     expect(keyA).not.toBe(keyB);
+    await service.delete(keyA);
+    await service.delete(keyB);
   });
 
   it("StorageService getURL() should resolve to local relative path in developer mode", async () => {
@@ -100,8 +105,8 @@ describe("lib/storage local-first contract", () => {
     const { createStorageService } = await import("@/lib/storage");
 
     const service = createStorageService();
-    const fileA = new File(["resume-a"], "resume.pdf", { type: "application/pdf" });
-    const fileB = new File(["resume-b"], "resume.pdf", { type: "application/pdf" });
+    const fileA = new File([uploadFixtures.pdf], "resume.pdf", { type: "application/pdf" });
+    const fileB = new File([uploadFixtures.pdf], "resume.pdf", { type: "application/pdf" });
 
     const options = {
       filename: "resume.pdf",
@@ -112,6 +117,8 @@ describe("lib/storage local-first contract", () => {
     const secondKey = await service.upload(fileB, options);
 
     expect(firstKey).not.toBe(secondKey);
+    await service.delete(firstKey);
+    await service.delete(secondKey);
   });
 
   it("should reject upload when file exceeds 5MB", async () => {
@@ -253,32 +260,32 @@ describe("lib/storage local-first contract", () => {
     expect(result.data?.materials).toHaveLength(2);
   });
 
-  it("should delete local file when attachment is unlinked from record", async () => {
-    const { unlinkAttachmentAction } = await import(
-      "@/app/portal/teacher/actions/material-actions"
-    );
-    const { createStorageService } = await import("@/lib/storage");
+  it("deletes a namespaced local object using the repository cleanup key shape", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "ulu-storage-cleanup-"));
 
-    const service = createStorageService();
-    const deleteSpy = vi.spyOn(service, "delete").mockResolvedValueOnce();
+    try {
+      const { LocalStorageService } = await import("@/lib/storage/LocalStorageService");
+      const service = new LocalStorageService(tempRoot);
+      const storageKey = await service.upload(Buffer.from(uploadFixtures.pdf), {
+        filename: "material-1.pdf",
+        namespace: "private/teachers/teacher-1/materials",
+        contentType: "application/pdf",
+      });
+      const absolutePath = path.resolve(tempRoot, ...storageKey.split("/"));
 
-    const response = await unlinkAttachmentAction({
-      attachmentId: "att-1",
-      storageKey:
-        "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-material-1.pdf",
-    });
-
-    expect(response.success).toBe(true);
-    expect(deleteSpy).toHaveBeenCalledWith(
-      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-material-1.pdf",
-    );
+      await expect(access(absolutePath)).resolves.toBeUndefined();
+      await service.delete(storageKey);
+      await expect(access(absolutePath)).rejects.toThrow();
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("should sanitize filenames to prevent path traversal", async () => {
     const { createStorageService } = await import("@/lib/storage");
 
     const service = createStorageService();
-    const traversalA = new File(["x"], "../../etc/passwd", { type: "text/plain" });
+    const traversalA = new File(["x"], "../../etc/secret.txt", { type: "text/plain" });
     const traversalB = new File(["y"], "..\\secret.txt", { type: "text/plain" });
 
     const namespace = "private/teachers/teacher-1/materials";
@@ -297,25 +304,9 @@ describe("lib/storage local-first contract", () => {
     expect(keyB).not.toMatch(/\.\./);
     expect(keyA).toMatch(/^private\/teachers\/teacher-1\/materials\//i);
     expect(keyB).toMatch(/^private\/teachers\/teacher-1\/materials\//i);
+    await service.delete(keyA);
+    await service.delete(keyB);
   });
-
-  it("should cascade cleanup file references when deleting course material", async () => {
-    const { deleteCourseMaterialWithFilesAction } = await import(
-      "@/app/portal/teacher/actions/material-actions"
-    );
-
-    const response = await deleteCourseMaterialWithFilesAction({
-      materialId: "material-1",
-    });
-
-    expect(response.success).toBe(true);
-    expect(response.cleanup).toEqual(
-      expect.objectContaining({
-        queued: expect.any(Boolean),
-        deleted: expect.any(Number),
-      }),
-    );
-  }, 15_000);
 
   it("should cascade cleanup file references when deleting homework submission", async () => {
     const { deleteSubmissionWithFilesAction } = await import(
@@ -357,7 +348,9 @@ describe("lib/storage local-first contract", () => {
     try {
       const { LocalStorageService } = await import("@/lib/storage/LocalStorageService");
       const service = new LocalStorageService(tempRoot);
-      const file = new File(["content"], "../lesson plan.pdf", { type: "application/pdf" });
+      const file = new File([uploadFixtures.pdf], "../lesson plan.pdf", {
+        type: "application/pdf",
+      });
       const storageKey = await service.upload(file, {
         filename: file.name,
         namespace: "private/teachers/teacher-1/materials",
@@ -368,7 +361,7 @@ describe("lib/storage local-first contract", () => {
 
       expect(relativePath).not.toMatch(/^\.\.(?:[\\/]|$)/);
       await expect(access(absolutePath)).resolves.toBeUndefined();
-      await expect(service.createDownloadURL(storageKey)).resolves.toBe(`/uploads/${storageKey}`);
+      await expect(service.createDownloadURL(storageKey)).rejects.toThrow(/delivery|unavailable/i);
       await expect(service.createDownloadURL("../outside.txt")).rejects.toThrow(/storage key/i);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
@@ -393,6 +386,26 @@ describe("lib/storage local-first contract", () => {
     }
   });
 
+  it("deletes a trusted legacy upload through a separately contained legacy root", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "ulu-storage-legacy-"));
+    const uploadRoot = path.join(tempRoot, "new-uploads");
+    const legacyRoot = path.join(tempRoot, "public-uploads");
+    const legacyPath = path.join(legacyRoot, "teacher-1", "old-photo.webp");
+    await mkdir(path.dirname(legacyPath), { recursive: true });
+    await writeFile(legacyPath, uploadFixtures.webp);
+
+    try {
+      const { LocalStorageService } = await import("@/lib/storage/LocalStorageService");
+      const service = new LocalStorageService(uploadRoot, legacyRoot);
+
+      await service.delete("uploads/teacher-1/old-photo.webp");
+
+      await expect(access(legacyPath)).rejects.toThrow();
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("rejects unsupported storage drivers instead of caching an unvalidated instance", async () => {
     const previousDriver = process.env.STORAGE_DRIVER;
     process.env.STORAGE_DRIVER = "teacher-local";
@@ -404,6 +417,45 @@ describe("lib/storage local-first contract", () => {
     } finally {
       if (previousDriver === undefined) Reflect.deleteProperty(process.env, "STORAGE_DRIVER");
       else process.env.STORAGE_DRIVER = previousDriver;
+      vi.resetModules();
+    }
+  });
+
+  it("writes default local objects outside public and never creates a static private path", async () => {
+    const { LocalStorageService } = await import("@/lib/storage/LocalStorageService");
+    const service = new LocalStorageService();
+    const storageKey = await service.upload(Buffer.from(uploadFixtures.pdf), {
+      filename: "private-note.pdf",
+      namespace: "private/teachers/teacher-1/materials",
+      contentType: "application/pdf",
+    });
+    const privatePath = path.resolve(process.cwd(), ".data", "uploads", ...storageKey.split("/"));
+    const publicPath = path.resolve(process.cwd(), "public", "uploads", ...storageKey.split("/"));
+
+    try {
+      await expect(access(privatePath)).resolves.toBeUndefined();
+      await expect(access(publicPath)).rejects.toThrow();
+      await expect(service.createDownloadURL(storageKey)).rejects.toThrow(/delivery|unavailable/i);
+    } finally {
+      await service.delete(storageKey);
+    }
+  });
+
+  it("fails closed when the local driver is selected in production", async () => {
+    const previousDriver = process.env.STORAGE_DRIVER;
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.STORAGE_DRIVER = "local";
+    process.env.NODE_ENV = "production";
+    vi.resetModules();
+
+    try {
+      const { createStorageService } = await import("@/lib/storage");
+      expect(() => createStorageService()).toThrow(/local storage.*production|production.*local/i);
+    } finally {
+      if (previousDriver === undefined) Reflect.deleteProperty(process.env, "STORAGE_DRIVER");
+      else process.env.STORAGE_DRIVER = previousDriver;
+      if (previousNodeEnv === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
+      else process.env.NODE_ENV = previousNodeEnv;
       vi.resetModules();
     }
   });

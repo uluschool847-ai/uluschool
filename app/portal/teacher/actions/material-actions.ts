@@ -11,12 +11,16 @@ import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 import {
   createCourseMaterialForTeacher,
   deleteCourseMaterialForTeacher,
-  getCourseMaterialForTeacher,
   unlinkCourseMaterialAttachmentForTeacher,
   updateCourseMaterialForTeacher,
   validateCourseMaterialFileUrl,
 } from "@/lib/repositories/course-material-repository";
-import { createStorageService, isTeacherMaterialStorageKey } from "@/lib/storage";
+import {
+  createStorageService,
+  isTeacherMaterialStorageKey,
+  storageUrlMatchesKey,
+  validateLegacyStorageKey,
+} from "@/lib/storage";
 
 const fileUrlSchema = z
   .string()
@@ -24,7 +28,7 @@ const fileUrlSchema = z
   .min(1, "File URL is required")
   .superRefine((value, ctx) => {
     try {
-      validateCourseMaterialFileUrl(value);
+      validateCourseMaterialFileUrl(value, { allowTrustedLegacy: true });
     } catch (error) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -174,39 +178,54 @@ function assertTeacherOwnsAttachments(
   );
 }
 
-function storedAttachments(material: unknown) {
-  if (!material || typeof material !== "object" || !("attachments" in material)) return [];
-  const attachments = (material as { attachments?: unknown }).attachments;
-  if (!Array.isArray(attachments)) return [];
-  const validAttachments = attachments.filter(
-    (attachment): attachment is { id: string; storageKey: string } =>
-      Boolean(attachment) &&
-      typeof attachment === "object" &&
-      typeof (attachment as { id?: unknown }).id === "string" &&
-      typeof (attachment as { storageKey?: unknown }).storageKey === "string",
-  );
-  if (validAttachments.length !== attachments.length) {
-    throw new Error(STORAGE_OWNERSHIP_ERROR);
+function assertAttachmentUrlMatchesStorageKey(
+  fileUrl: string | undefined,
+  attachments: Array<{ storageKey: string }> | undefined,
+) {
+  if (!attachments?.length) return;
+  if (!fileUrl || !storageUrlMatchesKey(fileUrl, attachments[0].storageKey)) {
+    throw new Error("Uploaded file URL does not match its storage key.");
   }
-  return validAttachments;
 }
 
-async function loadOwnedMaterialWithValidatedAttachments(materialId: string, teacherId: string) {
-  const material = await getCourseMaterialForTeacher(materialId, teacherId);
-  if (!material) {
-    throw new Error("Material not found or not owned by teacher.");
+function trustedCleanupKey(value: unknown, teacherId: string) {
+  if (typeof value !== "string") return null;
+  if (isTeacherMaterialStorageKey(value, teacherId)) return value;
+  try {
+    return validateLegacyStorageKey(value);
+  } catch {
+    return null;
   }
-  assertTeacherOwnsAttachments(storedAttachments(material), teacherId);
-  return material;
 }
 
-async function cleanupStorageKeys(storageKeys: unknown, teacherId: string) {
-  if (!Array.isArray(storageKeys) || storageKeys.length === 0) return;
-  assertTeacherOwnsStorageKeys(storageKeys, teacherId);
-  const storage = createStorageService();
-  for (const storageKey of storageKeys) {
-    await storage.delete(storageKey as string);
+async function cleanupStorageKeysBestEffort(storageKeys: unknown, teacherId: string) {
+  if (!Array.isArray(storageKeys) || storageKeys.length === 0) {
+    return { attempted: 0, deleted: 0, failed: 0 };
   }
+
+  const keys = storageKeys.map((storageKey) => trustedCleanupKey(storageKey, teacherId));
+  let storage: ReturnType<typeof createStorageService>;
+  try {
+    storage = createStorageService();
+  } catch {
+    return { attempted: keys.length, deleted: 0, failed: keys.length };
+  }
+
+  let deleted = 0;
+  let failed = 0;
+  for (const storageKey of keys) {
+    if (!storageKey) {
+      failed += 1;
+      continue;
+    }
+    try {
+      await storage.delete(storageKey);
+      deleted += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { attempted: keys.length, deleted, failed };
 }
 
 export async function submitCourseMaterialAction(
@@ -222,6 +241,16 @@ export async function submitCourseMaterialAction(
 
     const attachments = normalizeAttachments(parsed.data);
     assertTeacherOwnsAttachments(attachments, session.uid);
+    assertAttachmentUrlMatchesStorageKey(parsed.data.fileUrl, attachments);
+    if (parsed.data.fileUrl.startsWith("/api/") && !attachments?.length) {
+      throw new Error("Internal upload URLs require matching attachment metadata.");
+    }
+    if (
+      parsed.data.fileUrl.startsWith("/uploads/") ||
+      parsed.data.fileUrl.startsWith("/public/uploads/")
+    ) {
+      throw new Error("Legacy upload URLs cannot be submitted as new material files.");
+    }
 
     const material = await createCourseMaterialForTeacher({
       title: parsed.data.title,
@@ -291,9 +320,7 @@ export async function updateCourseMaterialAction(
 
     const attachments = normalizeAttachments(parsed.data);
     assertTeacherOwnsAttachments(attachments, session.uid);
-    if (attachments?.length) {
-      await loadOwnedMaterialWithValidatedAttachments(id, session.uid);
-    }
+    assertAttachmentUrlMatchesStorageKey(parsed.data.fileUrl, attachments);
     const material = await updateCourseMaterialForTeacher(id, session.uid, {
       ...parsed.data,
       attachments,
@@ -309,7 +336,6 @@ export async function updateCourseMaterialAction(
     });
     if (attachments?.length) {
       const cleanup = (material as { cleanup?: { storageKeys?: string[] } }).cleanup;
-      await cleanupStorageKeys(cleanup?.storageKeys, session.uid);
       await writeMaterialAudit({
         teacherId: session.uid,
         action: "COURSE_MATERIAL_FILE_REPLACED",
@@ -324,12 +350,18 @@ export async function updateCourseMaterialAction(
       });
     }
     revalidateMaterialPaths(material);
+    const cleanup = attachments?.length
+      ? await cleanupStorageKeysBestEffort(
+          (material as { cleanup?: { storageKeys?: string[] } }).cleanup?.storageKeys,
+          session.uid,
+        )
+      : undefined;
 
     if (parsed.data._redirectToList) {
       redirect("/portal/teacher/materials");
     }
 
-    return { success: true, data: { id: material.id, title: material.title } };
+    return { success: true, data: { id: material.id, title: material.title }, cleanup };
   } catch (error: unknown) {
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "Failed to update material";
@@ -340,9 +372,7 @@ export async function updateCourseMaterialAction(
 export async function deleteCourseMaterialAction(id: string) {
   try {
     const session = await requireRole([UserRole.TEACHER]);
-    await loadOwnedMaterialWithValidatedAttachments(id, session.uid);
     const deleted = await deleteCourseMaterialForTeacher(id, session.uid);
-    await cleanupStorageKeys(deleted.cleanup?.storageKeys, session.uid);
 
     await writeMaterialAudit({
       teacherId: session.uid,
@@ -353,8 +383,15 @@ export async function deleteCourseMaterialAction(id: string) {
       meta: materialMeta(session.uid, deleted),
     });
     revalidateMaterialPaths(deleted);
+    const cleanupResult = await cleanupStorageKeysBestEffort(
+      deleted.cleanup?.storageKeys,
+      session.uid,
+    );
 
-    return { success: true as const, cleanup: deleted.cleanup };
+    return {
+      success: true as const,
+      cleanup: { ...deleted.cleanup, ...cleanupResult },
+    };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to delete material";
     return { success: false as const, error: message };
@@ -387,43 +424,19 @@ export async function createClassMaterialsAction(input: CreateClassMaterialsInpu
 
 export async function unlinkAttachmentAction(payload: {
   attachmentId: string;
-  materialId?: string;
-  storageKey?: string;
+  materialId: string;
 }) {
   try {
     const session = await requireRole([UserRole.TEACHER]);
 
-    let attachment: { attachmentId: string; materialId: string | null; storageKey: string };
-    if (payload.materialId) {
-      const material = await loadOwnedMaterialWithValidatedAttachments(
-        payload.materialId,
-        session.uid,
-      );
-      const storedAttachment = storedAttachments(material).find(
-        (candidate) => candidate.id === payload.attachmentId,
-      );
-      if (!storedAttachment) {
-        throw new Error("Material attachment not found or not owned by teacher.");
-      }
-      attachment = await unlinkCourseMaterialAttachmentForTeacher(
-        session.uid,
-        payload.materialId,
-        payload.attachmentId,
-      );
-      assertTeacherOwnsStorageKeys([attachment.storageKey], session.uid);
-    } else {
-      attachment = {
-        attachmentId: payload.attachmentId,
-        materialId: null,
-        storageKey: payload.storageKey ?? "",
-      };
-      assertTeacherOwnsStorageKeys([attachment.storageKey], session.uid);
+    if (!payload.materialId?.trim() || !payload.attachmentId?.trim()) {
+      throw new Error("Material attachment not found or not owned by teacher.");
     }
-
-    const storage = createStorageService();
-    if (attachment.storageKey) {
-      await storage.delete(attachment.storageKey);
-    }
+    const attachment = await unlinkCourseMaterialAttachmentForTeacher(
+      session.uid,
+      payload.materialId,
+      payload.attachmentId,
+    );
     await writeMaterialAudit({
       teacherId: session.uid,
       action: "COURSE_MATERIAL_ATTACHMENT_DELETED",
@@ -438,6 +451,7 @@ export async function unlinkAttachmentAction(payload: {
         storageKey: attachment.storageKey,
       },
     });
+    await cleanupStorageKeysBestEffort([attachment.storageKey], session.uid);
 
     return { success: true as const, message: "Attachment deleted" };
   } catch (error) {
@@ -447,44 +461,5 @@ export async function unlinkAttachmentAction(payload: {
 }
 
 export async function deleteCourseMaterialWithFilesAction(payload: { materialId: string }) {
-  const session = await requireRole([UserRole.TEACHER]);
-  const existing = await getCourseMaterialForTeacher(payload.materialId, session.uid);
-  if (!existing) {
-    return {
-      success: true as const,
-      cleanup: {
-        queued: false,
-        deleted: 0,
-      },
-    };
-  }
-  assertTeacherOwnsAttachments(storedAttachments(existing), session.uid);
-  const deleted = await deleteCourseMaterialForTeacher(payload.materialId, session.uid).catch(
-    () => null,
-  );
-
-  if (!deleted) {
-    return {
-      success: true as const,
-      cleanup: {
-        queued: false,
-        deleted: 0,
-      },
-    };
-  }
-
-  await writeMaterialAudit({
-    teacherId: session.uid,
-    action: "COURSE_MATERIAL_DELETED",
-    targetId: deleted.id,
-    before: deleted,
-    after: null,
-    meta: materialMeta(session.uid, deleted),
-  });
-  revalidateMaterialPaths(deleted);
-
-  return {
-    success: true as const,
-    cleanup: deleted.cleanup,
-  };
+  return deleteCourseMaterialAction(payload.materialId);
 }

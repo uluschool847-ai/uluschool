@@ -8,7 +8,11 @@ import {
   teacherMaterialNamespace,
 } from "@/lib/storage";
 import { sanitizeStorageFilename } from "@/lib/storage/storage-key";
-import { validateUploadMetadata } from "@/lib/storage/upload-input";
+import { UploadValidationError, validateUploadMetadata } from "@/lib/storage/upload-input";
+
+export const MAX_UPLOAD_FILE_COUNT = 10;
+export const MAX_UPLOAD_AGGREGATE_BYTES = 20 * 1024 * 1024;
+export const MAX_UPLOAD_REQUEST_BYTES = 21 * 1024 * 1024;
 
 function filenameFromStorageKey(storageKey: string) {
   return sanitizeStorageFilename(storageKey.split(/[\\/]+/).at(-1) ?? "file");
@@ -46,13 +50,49 @@ function isFileLike(value: unknown): value is FileLike & File {
   );
 }
 
-function getStatusForUploadError(message: string) {
-  if (/mime|type|allowed/i.test(message)) return 415;
-  if (/5mb|too large|size/i.test(message)) return 413;
-  if (/empty|zero/i.test(message)) return 400;
-  if (/filename|name/i.test(message)) return 400;
-  if (/enospc|no space left/i.test(message)) return 507;
-  return 500;
+function uploadErrorResponse(error: unknown) {
+  if (error instanceof UploadValidationError) {
+    return NextResponse.json(
+      { success: false, error: error.publicMessage },
+      { status: error.status },
+    );
+  }
+  return NextResponse.json({ success: false, error: "Upload failed" }, { status: 500 });
+}
+
+function safeBatchError(error: unknown) {
+  return error instanceof UploadValidationError ? error.publicMessage : "Upload failed";
+}
+
+async function readBoundedFormData(request: Request) {
+  const headers = request.headers instanceof Headers ? request.headers : new Headers();
+  const declaredLength = headers.get("content-length");
+  if (declaredLength !== null) {
+    if (!/^\d+$/.test(declaredLength)) {
+      throw new UploadValidationError("INVALID_REQUEST_LENGTH", 400, "Malformed multipart payload");
+    }
+    if (Number(declaredLength) > MAX_UPLOAD_REQUEST_BYTES) {
+      throw new UploadValidationError("REQUEST_TOO_LARGE", 413, "Upload request is too large");
+    }
+  }
+
+  if (!request.body || typeof request.body.getReader !== "function") {
+    throw new UploadValidationError("MISSING_REQUEST_BODY", 400, "Malformed multipart payload");
+  }
+
+  const requestToParse = request.clone();
+  const reader = request.body.getReader();
+  let totalBytes = 0;
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    totalBytes += chunk.value.byteLength;
+    if (totalBytes > MAX_UPLOAD_REQUEST_BYTES) {
+      await Promise.allSettled([reader.cancel(), requestToParse.body?.cancel()]);
+      throw new UploadValidationError("REQUEST_TOO_LARGE", 413, "Upload request is too large");
+    }
+  }
+  return requestToParse.formData();
 }
 
 function uploadSuccessPayload(input: {
@@ -86,8 +126,9 @@ export async function POST(request: Request) {
 
   let formData: FormData;
   try {
-    formData = await request.formData();
-  } catch {
+    formData = await readBoundedFormData(request);
+  } catch (error) {
+    if (error instanceof UploadValidationError) return uploadErrorResponse(error);
     return NextResponse.json(
       { success: false, error: "Malformed multipart payload" },
       { status: 400 },
@@ -111,16 +152,37 @@ export async function POST(request: Request) {
       ? publicTeacherPhotoNamespace(session.uid)
       : teacherMaterialNamespace(session.uid);
 
-  const files = formData.getAll("files").filter((entry): entry is File => isFileLike(entry));
-  const file = formData.get("file");
-  const single = isFileLike(file) ? [file] : [];
-  const effectiveFiles = files.length > 0 ? files : single;
+  const fileParts = [...formData.entries()].flatMap(([field, entry]) =>
+    isFileLike(entry) ? [{ field, file: entry }] : [],
+  );
 
+  if (fileParts.length > MAX_UPLOAD_FILE_COUNT) {
+    return NextResponse.json({ success: false, error: "Too many files" }, { status: 400 });
+  }
+
+  const aggregateBytes = fileParts.reduce((total, current) => total + current.file.size, 0);
+  if (!Number.isSafeInteger(aggregateBytes) || aggregateBytes > MAX_UPLOAD_AGGREGATE_BYTES) {
+    return NextResponse.json(
+      { success: false, error: "Combined files are too large" },
+      { status: 413 },
+    );
+  }
+
+  if (fileParts.some(({ field }) => field !== "file" && field !== "files")) {
+    return NextResponse.json({ success: false, error: "Unexpected file field" }, { status: 400 });
+  }
+
+  const effectiveFiles = fileParts.map(({ file }) => file);
   if (effectiveFiles.length === 0) {
     return NextResponse.json({ success: false, error: "File is required" }, { status: 400 });
   }
 
-  const service = createStorageService();
+  let service: ReturnType<typeof createStorageService>;
+  try {
+    service = createStorageService();
+  } catch (error) {
+    return uploadErrorResponse(error);
+  }
 
   if (effectiveFiles.length === 1) {
     const current = effectiveFiles[0];
@@ -131,11 +193,7 @@ export async function POST(request: Request) {
         contentType: current.type,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Upload failed";
-      return NextResponse.json(
-        { success: false, error: message },
-        { status: getStatusForUploadError(message) },
-      );
+      return uploadErrorResponse(error);
     }
 
     try {
@@ -156,10 +214,7 @@ export async function POST(request: Request) {
         { status: 201 },
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Upload failed";
-      const status = getStatusForUploadError(message);
-      const responseError = status === 500 ? "Upload failed" : message;
-      return NextResponse.json({ success: false, error: responseError }, { status });
+      return uploadErrorResponse(error);
     }
   }
 
@@ -176,7 +231,7 @@ export async function POST(request: Request) {
     } catch (error) {
       failed.push({
         name: current.name,
-        error: error instanceof Error ? error.message : "Upload failed",
+        error: safeBatchError(error),
       });
       continue;
     }
@@ -199,10 +254,9 @@ export async function POST(request: Request) {
         name: responseFilename(current, fileId),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Upload failed";
       failed.push({
         name: current.name,
-        error: getStatusForUploadError(message) === 500 ? "Upload failed" : message,
+        error: safeBatchError(error),
       });
     }
   }

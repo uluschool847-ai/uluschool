@@ -12,6 +12,7 @@ const validateCourseMaterialFileUrlMock = vi.hoisted(() =>
     const fileUrl = value?.trim() ?? "";
     if (!fileUrl) return null;
     if (fileUrl.startsWith("/uploads/")) return fileUrl;
+    if (/^\/api\/(?:public-)?files\/[A-Za-z0-9_-]+$/.test(fileUrl)) return fileUrl;
     const parsed = new URL(fileUrl);
     if (parsed.protocol !== "https:") {
       throw new Error("File URL must be a safe HTTPS URL or an internal upload path.");
@@ -79,6 +80,7 @@ import {
   updateCourseMaterialAction,
 } from "@/app/portal/teacher/actions/material-actions";
 import { requireRole } from "@/lib/auth/session";
+import { storageUrlForKey } from "@/lib/storage";
 
 const ACTION_SOURCE_PATH = "app/portal/teacher/actions/material-actions.ts";
 
@@ -354,6 +356,52 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       expect(revalidatePathMock).not.toHaveBeenCalled();
     });
 
+    it("accepts an upload application URL only when it identifies the submitted storage key", async () => {
+      const storageKey =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-owned.pdf";
+      const response = await submitCourseMaterialAction({
+        ...validMaterialPayload,
+        fileUrl: storageUrlForKey(storageKey),
+        attachment: {
+          filename: "owned.pdf",
+          storageKey,
+          mimeType: "application/pdf",
+          size: 2048,
+        },
+      });
+
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(createCourseMaterialForTeacherMock).toHaveBeenCalledWith(
+        expect.objectContaining({ fileUrl: storageUrlForKey(storageKey) }),
+      );
+    });
+
+    it("rejects a mismatched application URL before repository mutation or audit", async () => {
+      const storageKey =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-owned.pdf";
+      const otherKey =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000002-other.pdf";
+
+      const response = await submitCourseMaterialAction({
+        ...validMaterialPayload,
+        fileUrl: storageUrlForKey(otherKey),
+        attachment: {
+          filename: "owned.pdf",
+          storageKey,
+          mimeType: "application/pdf",
+          size: 2048,
+        },
+      });
+
+      expect(response).toEqual({
+        success: false,
+        error: "Uploaded file URL does not match its storage key.",
+      });
+      expect(createCourseMaterialForTeacherMock).not.toHaveBeenCalled();
+      expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      expect(revalidatePathMock).not.toHaveBeenCalled();
+    });
+
     it.each([
       ["missing title", { title: "" }, /title/i],
       ["missing scheduledClassId", { scheduledClassId: "" }, /scheduled class/i],
@@ -379,16 +427,27 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       expect(createAdminAuditLogMock).not.toHaveBeenCalled();
     });
 
-    it.each(["https://example.com/physics.pdf", "/uploads/teacher/physics.pdf"])(
-      "accepts safe fileUrl: %s",
-      async (fileUrl) => {
-        await submitCourseMaterialAction({ ...validMaterialPayload, fileUrl });
+    it.each(["https://example.com/physics.pdf"])("accepts safe fileUrl: %s", async (fileUrl) => {
+      await submitCourseMaterialAction({ ...validMaterialPayload, fileUrl });
 
-        expect(createCourseMaterialForTeacherMock).toHaveBeenCalledWith(
-          expect.objectContaining({ fileUrl }),
-        );
-      },
-    );
+      expect(createCourseMaterialForTeacherMock).toHaveBeenCalledWith(
+        expect.objectContaining({ fileUrl }),
+      );
+    });
+
+    it("rejects a legacy upload URL as new client input", async () => {
+      const response = await submitCourseMaterialAction({
+        ...validMaterialPayload,
+        fileUrl: "/uploads/teacher/physics.pdf",
+      });
+
+      expect(response).toEqual({
+        success: false,
+        error: "Legacy upload URLs cannot be submitted as new material files.",
+      });
+      expect(createCourseMaterialForTeacherMock).not.toHaveBeenCalled();
+      expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("Update action", () => {
@@ -477,7 +536,9 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
     });
 
     it("rejects foreign material delete without audit or cleanup", async () => {
-      getCourseMaterialForTeacherMock.mockResolvedValueOnce(null);
+      deleteCourseMaterialForTeacherMock.mockRejectedValueOnce(
+        new Error("Material not found or not owned by teacher."),
+      );
 
       const response = await deleteCourseMaterialAction("foreign-material");
 
@@ -493,16 +554,8 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
     });
 
     it("rejects a foreign stored attachment before material deletion, storage cleanup, or audit", async () => {
-      getCourseMaterialForTeacherMock.mockResolvedValueOnce(
-        material({
-          attachments: [
-            {
-              id: "attachment-foreign",
-              storageKey:
-                "private/teachers/teacher-2/materials/00000000-0000-4000-8000-000000000002-foreign.pdf",
-            },
-          ],
-        }),
+      deleteCourseMaterialForTeacherMock.mockRejectedValueOnce(
+        new Error("Uploaded file is not owned by this teacher."),
       );
 
       const response = await deleteCourseMaterialAction("mat-123");
@@ -511,9 +564,10 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
         success: false,
         error: "Uploaded file is not owned by this teacher.",
       });
-      expect(deleteCourseMaterialForTeacherMock).not.toHaveBeenCalled();
+      expect(deleteCourseMaterialForTeacherMock).toHaveBeenCalledWith("mat-123", "teacher-123");
       expect(storageDeleteMock).not.toHaveBeenCalled();
       expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      expect(revalidatePathMock).not.toHaveBeenCalled();
     });
 
     it("deleteCourseMaterialWithFilesAction delegates ownership and does not clean arbitrary files", async () => {
@@ -526,9 +580,8 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
 
     it("unlinkAttachmentAction audits owned attachment unlink/delete when action exists", async () => {
       const response = await unlinkAttachmentAction({
+        materialId: "mat-123",
         attachmentId: "attachment-1",
-        storageKey:
-          "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-material-1.pdf",
       });
 
       expect(response).toEqual(expect.objectContaining({ success: true }));
@@ -546,14 +599,15 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
 
   describe("Uploaded file lifecycle", () => {
     it("create action forwards uploaded attachment metadata and audits the file upload", async () => {
+      const storageKey =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-physics.pdf";
       createCourseMaterialForTeacherMock.mockResolvedValueOnce(
         material({
           attachments: [
             {
               id: "attachment-1",
               filename: "physics.pdf",
-              storageKey:
-                "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-physics.pdf",
+              storageKey,
               mimeType: "application/pdf",
               size: 2048,
             },
@@ -563,11 +617,10 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
 
       const response = await submitCourseMaterialAction({
         ...validMaterialPayload,
-        fileUrl: "https://example.com/physics.pdf",
+        fileUrl: storageUrlForKey(storageKey),
         attachment: {
           filename: "physics.pdf",
-          storageKey:
-            "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-physics.pdf",
+          storageKey,
           mimeType: "application/pdf",
           size: 2048,
         },
@@ -605,6 +658,26 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       );
     });
 
+    it("rejects a new internal application URL without attachment ownership metadata", async () => {
+      const storageKey =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-physics.pdf";
+
+      const response = await submitCourseMaterialAction({
+        ...validMaterialPayload,
+        fileUrl: storageUrlForKey(storageKey),
+      });
+
+      expect(response).toEqual(
+        expect.objectContaining({
+          success: false,
+          error: expect.stringMatching(/attachment|storage key|internal upload/i),
+        }),
+      );
+      expect(createCourseMaterialForTeacherMock).not.toHaveBeenCalled();
+      expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      expect(revalidatePathMock).not.toHaveBeenCalled();
+    });
+
     it("update action can keep the existing file unchanged", async () => {
       await updateCourseMaterialAction("mat-123", {
         title: "Metadata only",
@@ -625,6 +698,8 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
     });
 
     it("update action forwards replacement attachment metadata and audits replacement", async () => {
+      const replacementStorageKey =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000002-replacement.pdf";
       updateCourseMaterialForTeacherMock.mockResolvedValueOnce(
         material({
           fileUrl: "https://example.com/replacement.pdf",
@@ -639,8 +714,7 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
             {
               id: "attachment-new",
               filename: "replacement.pdf",
-              storageKey:
-                "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000002-replacement.pdf",
+              storageKey: replacementStorageKey,
               mimeType: "application/pdf",
               size: 4096,
             },
@@ -650,11 +724,10 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
 
       const response = await updateCourseMaterialAction("mat-123", {
         title: "Replacement",
-        fileUrl: "https://example.com/replacement.pdf",
+        fileUrl: storageUrlForKey(replacementStorageKey),
         attachment: {
           filename: "replacement.pdf",
-          storageKey:
-            "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000002-replacement.pdf",
+          storageKey: replacementStorageKey,
           mimeType: "application/pdf",
           size: 4096,
         },
@@ -689,6 +762,71 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
         }),
         expect.anything(),
       );
+    });
+
+    it("returns success after an audited replacement when best-effort cleanup fails", async () => {
+      const replacementStorageKey =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000002-replacement.pdf";
+      const oldStorageKey =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-old.pdf";
+      updateCourseMaterialForTeacherMock.mockResolvedValueOnce(
+        material({ cleanup: { queued: true, deleted: 0, storageKeys: [oldStorageKey] } }),
+      );
+      storageDeleteMock.mockRejectedValueOnce(new Error("backend cleanup failed"));
+
+      const response = await updateCourseMaterialAction("mat-123", {
+        title: "Replacement",
+        fileUrl: storageUrlForKey(replacementStorageKey),
+        attachment: {
+          filename: "replacement.pdf",
+          storageKey: replacementStorageKey,
+          mimeType: "application/pdf",
+          size: 4096,
+        },
+      });
+
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(storageDeleteMock).toHaveBeenCalledTimes(1);
+      expect(storageDeleteMock).toHaveBeenCalledWith(oldStorageKey);
+      expectMaterialAudit("COURSE_MATERIAL_UPDATED");
+      expectMaterialAudit("COURSE_MATERIAL_FILE_REPLACED");
+      expectMaterialRevalidation();
+    });
+
+    it("returns success after an audited delete when best-effort cleanup fails", async () => {
+      storageDeleteMock.mockRejectedValueOnce(new Error("backend cleanup failed"));
+
+      const response = await deleteCourseMaterialAction("mat-123");
+
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(storageDeleteMock).toHaveBeenCalledTimes(1);
+      expectMaterialAudit("COURSE_MATERIAL_DELETED");
+      expectMaterialRevalidation();
+    });
+
+    it("returns success after an audited unlink when best-effort cleanup fails", async () => {
+      storageDeleteMock.mockRejectedValueOnce(new Error("backend cleanup failed"));
+
+      const response = await unlinkAttachmentAction({
+        materialId: "mat-123",
+        attachmentId: "attachment-1",
+      });
+
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(storageDeleteMock).toHaveBeenCalledTimes(1);
+      expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "COURSE_MATERIAL_ATTACHMENT_DELETED" }),
+        expect.anything(),
+      );
+    });
+
+    it("uses one cleanup path when deleting through the compatibility action", async () => {
+      const response = await deleteCourseMaterialWithFilesAction({ materialId: "mat-123" });
+
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(deleteCourseMaterialForTeacherMock).toHaveBeenCalledTimes(1);
+      expect(storageDeleteMock).toHaveBeenCalledTimes(1);
+      expectMaterialAudit("COURSE_MATERIAL_DELETED");
     });
 
     it("unlink action accepts materialId and attachmentId only, loads storageKey from repository, and audits", async () => {
@@ -745,17 +883,9 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       expect(createAdminAuditLogMock).not.toHaveBeenCalled();
     });
 
-    it("rejects a repository-loaded cross-teacher key before unlink mutation or audit", async () => {
-      getCourseMaterialForTeacherMock.mockResolvedValueOnce(
-        material({
-          attachments: [
-            {
-              id: "attachment-1",
-              storageKey:
-                "private/teachers/teacher-2/materials/00000000-0000-4000-8000-000000000002-private.pdf",
-            },
-          ],
-        }),
+    it("rejects a repository-owned cross-teacher key before cleanup, audit, or revalidation", async () => {
+      unlinkCourseMaterialAttachmentForTeacherMock.mockRejectedValueOnce(
+        new Error("Uploaded file is not owned by this teacher."),
       );
 
       const response = await unlinkAttachmentAction({
@@ -767,9 +897,14 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
         success: false,
         error: "Uploaded file is not owned by this teacher.",
       });
-      expect(unlinkCourseMaterialAttachmentForTeacherMock).not.toHaveBeenCalled();
+      expect(unlinkCourseMaterialAttachmentForTeacherMock).toHaveBeenCalledWith(
+        "teacher-123",
+        "mat-123",
+        "attachment-1",
+      );
       expect(storageDeleteMock).not.toHaveBeenCalled();
       expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      expect(revalidatePathMock).not.toHaveBeenCalled();
     });
   });
 });
