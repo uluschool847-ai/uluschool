@@ -27,7 +27,7 @@ let foreignChildId = "";
 let invoiceId = "";
 
 async function createParentSessionToken() {
-  return createSessionToken({
+  return await createSessionToken({
     email: parentEmail,
     fullName: "QA Parent Billing",
     mfaVerified: true,
