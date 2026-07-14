@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { join, relative } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
@@ -14,6 +14,83 @@ const OUTLIERS = [
   "e2e/portals/parent-dashboard.spec.ts",
   "e2e/portals/parent-student-side-effects.spec.ts",
 ];
+const VIRTUAL_HELPER_PATH = join(ROOT, "e2e", "helpers", "session.ts");
+const VIRTUAL_HELPER_SOURCE = `
+  export declare function createSessionToken(input: unknown): Promise<string>;
+`;
+
+type AuditSourceInput = {
+  path: string;
+  source: string;
+};
+
+type AuditSource = {
+  checker: ts.TypeChecker;
+  path: string;
+  sourceFile: ts.SourceFile;
+};
+
+function normalizeFilePath(path: string) {
+  return path.replaceAll("\\", "/").toLowerCase();
+}
+
+function createAuditSources(inputs: AuditSourceInput[]): AuditSource[] {
+  const entries = inputs.map((input) => {
+    const absolutePath = isAbsolute(input.path) ? input.path : resolve(ROOT, input.path);
+    return {
+      absolutePath,
+      displayPath: relative(ROOT, absolutePath).replaceAll("\\", "/"),
+      sourceFile: ts.createSourceFile(absolutePath, input.source, ts.ScriptTarget.Latest, true),
+    };
+  });
+  const helperSourceFile = ts.createSourceFile(
+    VIRTUAL_HELPER_PATH,
+    VIRTUAL_HELPER_SOURCE,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const sourceFiles = new Map<string, ts.SourceFile>([
+    [normalizeFilePath(VIRTUAL_HELPER_PATH), helperSourceFile],
+    ...entries.map((entry) => [normalizeFilePath(entry.absolutePath), entry.sourceFile] as const),
+  ]);
+  const options: ts.CompilerOptions = {
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    noEmit: true,
+    noLib: true,
+    target: ts.ScriptTarget.ESNext,
+  };
+  const defaultHost = ts.createCompilerHost(options, true);
+  const host: ts.CompilerHost = {
+    ...defaultHost,
+    fileExists: (fileName) => sourceFiles.has(normalizeFilePath(fileName)),
+    getSourceFile: (fileName) => sourceFiles.get(normalizeFilePath(fileName)),
+    readFile: (fileName) => sourceFiles.get(normalizeFilePath(fileName))?.text,
+    writeFile: () => undefined,
+  };
+  host.resolveModuleNames = (moduleNames) =>
+    moduleNames.map((moduleName) =>
+      moduleName === SHARED_HELPER_IMPORT
+        ? {
+            extension: ts.Extension.Ts,
+            isExternalLibraryImport: false,
+            resolvedFileName: VIRTUAL_HELPER_PATH,
+          }
+        : undefined,
+    );
+  const program = ts.createProgram({
+    host,
+    options,
+    rootNames: [...entries.map((entry) => entry.absolutePath), VIRTUAL_HELPER_PATH],
+  });
+  const checker = program.getTypeChecker();
+
+  return entries.map((entry) => ({
+    checker,
+    path: entry.displayPath,
+    sourceFile: program.getSourceFile(entry.absolutePath) ?? entry.sourceFile,
+  }));
+}
 
 function walk(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -75,17 +152,22 @@ function cookieWrites(sourceFile: ts.SourceFile) {
   return writes;
 }
 
+function bindingContainsIdentifier(name: ts.BindingName, identifier: string): boolean {
+  if (ts.isIdentifier(name)) return name.text === identifier;
+  return name.elements.some(
+    (element) =>
+      !ts.isOmittedExpression(element) && bindingContainsIdentifier(element.name, identifier),
+  );
+}
+
 function hasLocalCreateSessionToken(sourceFile: ts.SourceFile) {
   let found = false;
   const visit = (node: ts.Node) => {
     if (
-      (ts.isFunctionDeclaration(node) && node.name?.text === "createSessionToken") ||
-      (ts.isVariableDeclaration(node) &&
-        ts.isIdentifier(node.name) &&
-        node.name.text === "createSessionToken") ||
-      (ts.isParameter(node) &&
-        ts.isIdentifier(node.name) &&
-        node.name.text === "createSessionToken")
+      ((ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)) &&
+        node.name?.text === "createSessionToken") ||
+      ((ts.isVariableDeclaration(node) || ts.isParameter(node)) &&
+        bindingContainsIdentifier(node.name, "createSessionToken"))
     ) {
       found = true;
     }
@@ -111,29 +193,66 @@ function hasLocalHmacSessionSigning(sourceFile: ts.SourceFile) {
   return found;
 }
 
-function importsSharedHelper(sourceFile: ts.SourceFile) {
-  return sourceFile.statements.some(
-    (statement) =>
-      ts.isImportDeclaration(statement) &&
-      ts.isStringLiteral(statement.moduleSpecifier) &&
-      statement.moduleSpecifier.text === SHARED_HELPER_IMPORT &&
-      statement.importClause?.namedBindings !== undefined &&
-      ts.isNamedImports(statement.importClause.namedBindings) &&
-      statement.importClause.namedBindings.elements.some(
-        (element) =>
-          (element.propertyName?.text ?? element.name.text) === "createSessionToken" &&
-          element.name.text === "createSessionToken",
-      ),
-  );
+function sharedHelperImportSymbol(auditSource: AuditSource) {
+  const { checker, sourceFile } = auditSource;
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !ts.isStringLiteral(statement.moduleSpecifier) ||
+      statement.moduleSpecifier.text !== SHARED_HELPER_IMPORT ||
+      !statement.importClause?.namedBindings ||
+      !ts.isNamedImports(statement.importClause.namedBindings)
+    ) {
+      continue;
+    }
+    const importSpecifier = statement.importClause.namedBindings.elements.find(
+      (element) =>
+        (element.propertyName?.text ?? element.name.text) === "createSessionToken" &&
+        element.name.text === "createSessionToken",
+    );
+    if (importSpecifier) return checker.getSymbolAtLocation(importSpecifier.name);
+  }
+  return undefined;
 }
 
-function awaitedCall(expression: ts.Expression | undefined, name: string) {
+function importsSharedHelper(auditSource: AuditSource) {
+  return Boolean(sharedHelperImportSymbol(auditSource));
+}
+
+function resolvedSymbol(checker: ts.TypeChecker, symbol: ts.Symbol) {
+  return symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+}
+
+function identifierResolvesTo(
+  checker: ts.TypeChecker,
+  identifier: ts.Identifier,
+  expected: ts.Symbol,
+) {
+  const actual = checker.getSymbolAtLocation(identifier);
+  return Boolean(actual && resolvedSymbol(checker, actual) === resolvedSymbol(checker, expected));
+}
+
+function awaitedCall(
+  expression: ts.Expression | undefined,
+  expected: ts.Symbol,
+  checker: ts.TypeChecker,
+) {
   if (!expression || !ts.isAwaitExpression(expression)) return undefined;
   const call = expression.expression;
   return ts.isCallExpression(call) &&
     ts.isIdentifier(call.expression) &&
-    call.expression.text === name
+    identifierResolvesTo(checker, call.expression, expected)
     ? call
+    : undefined;
+}
+
+function topLevelFunctionSymbol(sourceFile: ts.SourceFile, checker: ts.TypeChecker, name: string) {
+  const declaration = sourceFile.statements.find(
+    (statement): statement is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(statement) && statement.name?.text === name,
+  );
+  return declaration?.name
+    ? { declaration, symbol: checker.getSymbolAtLocation(declaration.name) }
     : undefined;
 }
 
@@ -171,33 +290,35 @@ function hasPreservedParentBillingIdentity(object: ts.ObjectLiteralExpression) {
   );
 }
 
-function hasValidParentBillingWrapper(sourceFile: ts.SourceFile) {
-  const wrapper = sourceFile.statements.find(
-    (statement): statement is ts.FunctionDeclaration =>
-      ts.isFunctionDeclaration(statement) && statement.name?.text === "createParentSessionToken",
-  );
+function validParentBillingWrapperSymbol(auditSource: AuditSource, helperSymbol: ts.Symbol) {
+  const { checker, sourceFile } = auditSource;
+  const wrapperBinding = topLevelFunctionSymbol(sourceFile, checker, "createParentSessionToken");
+  const wrapper = wrapperBinding?.declaration;
   if (
     !wrapper?.body ||
+    !wrapperBinding.symbol ||
     wrapper.parameters.length !== 0 ||
     !wrapper.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ||
     wrapper.body.statements.length !== 1
   ) {
-    return false;
+    return undefined;
   }
 
   const returnStatement = wrapper.body.statements[0];
-  if (!ts.isReturnStatement(returnStatement)) return false;
-  const helperCall = awaitedCall(returnStatement.expression, "createSessionToken");
-  return Boolean(
-    helperCall &&
-      helperCall.arguments.length === 1 &&
-      ts.isObjectLiteralExpression(helperCall.arguments[0]) &&
-      hasPreservedParentBillingIdentity(helperCall.arguments[0]),
-  );
+  if (!ts.isReturnStatement(returnStatement)) return undefined;
+  const helperCall = awaitedCall(returnStatement.expression, helperSymbol, checker);
+  return helperCall &&
+    helperCall.arguments.length === 1 &&
+    ts.isObjectLiteralExpression(helperCall.arguments[0]) &&
+    hasPreservedParentBillingIdentity(helperCall.arguments[0])
+    ? wrapperBinding.symbol
+    : undefined;
 }
 
-function callsSharedHelper(sourceFile: ts.SourceFile) {
-  if (!importsSharedHelper(sourceFile) || hasLocalCreateSessionToken(sourceFile)) return false;
+function callsSharedHelper(auditSource: AuditSource) {
+  const { checker, sourceFile } = auditSource;
+  const helperSymbol = sharedHelperImportSymbol(auditSource);
+  if (!helperSymbol || hasLocalCreateSessionToken(sourceFile)) return false;
   const writes = cookieWrites(sourceFile);
   if (writes.length === 0) return false;
   const isParentBilling = sourceFile.fileName
@@ -205,21 +326,24 @@ function callsSharedHelper(sourceFile: ts.SourceFile) {
     .endsWith("e2e/portals/parent-billing.spec.ts");
 
   if (isParentBilling) {
-    if (!hasValidParentBillingWrapper(sourceFile)) return false;
+    const wrapperSymbol = validParentBillingWrapperSymbol(auditSource, helperSymbol);
+    if (!wrapperSymbol) return false;
     return writes.every(({ valueExpression }) => {
-      const wrapperCall = awaitedCall(valueExpression, "createParentSessionToken");
+      const wrapperCall = awaitedCall(valueExpression, wrapperSymbol, checker);
       return wrapperCall?.arguments.length === 0;
     });
   }
 
   return writes.every(({ valueExpression }) => {
-    const directCall = awaitedCall(valueExpression, "createSessionToken");
+    const directCall = awaitedCall(valueExpression, helperSymbol, checker);
     return directCall?.arguments.length === 1;
   });
 }
 
 function parseFixture(source: string, path = "e2e/portals/example.spec.ts") {
-  return ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
+  const auditSource = createAuditSources([{ path, source }])[0];
+  if (!auditSource) throw new Error(`Failed to create audit source for ${path}`);
+  return auditSource;
 }
 
 const SHARED_IMPORT = `import { createSessionToken } from "@/e2e/helpers/session";`;
@@ -309,19 +433,58 @@ describe("session cookie source audit", () => {
 
     expect(callsSharedHelper(parseFixture(source))).toBe(false);
   });
+
+  it("rejects the imported helper shadowed by a destructured parameter", () => {
+    const source = `${SHARED_IMPORT}
+      async function setSession({ createSessionToken }: {
+        createSessionToken: (input: unknown) => Promise<string>;
+      }) {
+        context.addCookies([{
+          name: "ulu_session",
+          value: await createSessionToken(input),
+        }]);
+      }`;
+
+    expect(callsSharedHelper(parseFixture(source))).toBe(false);
+  });
+
+  it("rejects a nested binding shadowing the validated parent-billing wrapper", () => {
+    const source = `${SHARED_IMPORT}
+      let parentEmail = "";
+      let parentId = "";
+      async function createParentSessionToken() {
+        return await createSessionToken({
+          email: parentEmail,
+          fullName: "QA Parent Billing",
+          mfaVerified: true,
+          role: UserRole.PARENT,
+          uid: parentId,
+        });
+      }
+      async function setSession(source: {
+        createParentSessionToken: () => Promise<string>;
+      }) {
+        const { createParentSessionToken } = source;
+        context.addCookies([{
+          name: "ulu_session",
+          value: await createParentSessionToken(),
+        }]);
+      }`;
+
+    expect(callsSharedHelper(parseFixture(source, "e2e/portals/parent-billing.spec.ts"))).toBe(
+      false,
+    );
+  });
 });
 
 describe("Playwright ulu_session fixture inventory", () => {
   it("uses the shared purpose-bound helper for every signed session cookie write", () => {
-    const specs = walk(E2E_ROOT).map((path) => {
-      const sourceFile = ts.createSourceFile(
+    const specs = createAuditSources(
+      walk(E2E_ROOT).map((path) => ({
         path,
-        readFileSync(path, "utf8"),
-        ts.ScriptTarget.Latest,
-        true,
-      );
-      return { path: relative(ROOT, path).replaceAll("\\", "/"), sourceFile };
-    });
+        source: readFileSync(path, "utf8"),
+      })),
+    );
     const sessionSpecs = specs.filter(({ sourceFile }) => cookieWrites(sourceFile).length > 0);
 
     expect(sessionSpecs).toHaveLength(EXPECTED_SIGNER_SPECS);
@@ -341,7 +504,7 @@ describe("Playwright ulu_session fixture inventory", () => {
       hasLocalHmacSessionSigning(sourceFile),
     );
     const missingSharedHelper = sessionSpecs.filter(
-      ({ sourceFile }) => !importsSharedHelper(sourceFile) || !callsSharedHelper(sourceFile),
+      (auditSource) => !importsSharedHelper(auditSource) || !callsSharedHelper(auditSource),
     );
 
     expect(localSigners.map(({ path }) => path)).toEqual([]);
