@@ -212,3 +212,212 @@ describe("changeInitialPassword", () => {
     expect(transactionMock).toHaveBeenCalledOnce();
   });
 });
+
+describe("initial admin two-factor enrollment", () => {
+  const identity = {
+    userId: "admin-1",
+    email: "admin@example.com",
+    role: UserRole.ADMIN,
+  };
+
+  function adminUser(overrides: Record<string, unknown> = {}) {
+    return setupUser({
+      id: "admin-1",
+      email: "admin@example.com",
+      fullName: "Admin One",
+      role: UserRole.ADMIN,
+      mustChangePassword: false,
+      twoFactorEnabled: false,
+      twoFactorSecret: "CURRENT-SECRET",
+      twoFactorBackupCodes: [],
+      ...overrides,
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    findUserForInitialSetupMock.mockResolvedValue(adminUser());
+    transactionUserFindMock.mockResolvedValue(adminUser());
+    appUserUpdateMock.mockResolvedValue({ id: "admin-1" });
+    createAdminAuditLogMock.mockResolvedValue(undefined);
+    transactionMock.mockImplementation(
+      async (callback: (tx: typeof transactionClient) => unknown) => callback(transactionClient),
+    );
+  });
+
+  it.each([
+    ["a missing user", null],
+    ["an inactive user", adminUser({ isActive: false })],
+    ["a pending password change", adminUser({ mustChangePassword: true })],
+    ["a non-admin role", adminUser({ role: UserRole.TEACHER })],
+    ["a changed email", adminUser({ email: "changed@example.com" })],
+    ["already-enabled 2FA", adminUser({ twoFactorEnabled: true })],
+  ])("rejects %s while loading the persisted enrollment secret", async (_label, user) => {
+    findUserForInitialSetupMock.mockResolvedValueOnce(user);
+    const { getInitialAdminTwoFactorEnrollment } = await loadRepository();
+
+    await expect(getInitialAdminTwoFactorEnrollment(identity)).rejects.toMatchObject({
+      code:
+        user && "twoFactorEnabled" in user && user.twoFactorEnabled
+          ? "ALREADY_ENABLED"
+          : "INVALID_SETUP",
+    });
+
+    expect(transactionMock).not.toHaveBeenCalled();
+    expect(appUserUpdateMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it("persists a fresh secret only after re-reading eligible admin state", async () => {
+    const { beginInitialAdminTwoFactorEnrollment } = await loadRepository();
+
+    const result = await beginInitialAdminTwoFactorEnrollment({
+      ...identity,
+      secret: "NEW-SECRET",
+    });
+
+    expect(transactionMock).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "Serializable",
+    });
+    expect(transactionUserFindMock).toHaveBeenCalledWith({
+      where: { id: "admin-1" },
+      select: expect.objectContaining({
+        id: true,
+        email: true,
+        role: true,
+        isActive: true,
+        mustChangePassword: true,
+        twoFactorEnabled: true,
+        twoFactorSecret: true,
+      }),
+    });
+    expect(appUserUpdateMock).toHaveBeenCalledWith({
+      where: { id: "admin-1" },
+      data: {
+        twoFactorSecret: "NEW-SECRET",
+        twoFactorEnabled: false,
+        twoFactorBackupCodes: [],
+      },
+    });
+    expect(result).toEqual({
+      id: "admin-1",
+      email: "admin@example.com",
+      fullName: "Admin One",
+      role: UserRole.ADMIN,
+      twoFactorEnabled: false,
+      twoFactorSecret: "NEW-SECRET",
+    });
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an eligibility race before rotating the secret", async () => {
+    transactionUserFindMock.mockResolvedValueOnce(adminUser({ mustChangePassword: true }));
+    const { beginInitialAdminTwoFactorEnrollment } = await loadRepository();
+
+    await expect(
+      beginInitialAdminTwoFactorEnrollment({ ...identity, secret: "NEW-SECRET" }),
+    ).rejects.toMatchObject({ code: "INVALID_SETUP" });
+
+    expect(appUserUpdateMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it("atomically enables 2FA and writes only the sanitized success audit", async () => {
+    const backupCodeHashes = Array.from({ length: 8 }, (_, index) => `hash-${index + 1}`);
+    const { confirmInitialAdminTwoFactorEnrollment } = await loadRepository();
+
+    const result = await confirmInitialAdminTwoFactorEnrollment({
+      ...identity,
+      expectedSecret: "CURRENT-SECRET",
+      backupCodeHashes,
+    });
+
+    expect(transactionMock).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "Serializable",
+    });
+    expect(appUserUpdateMock).toHaveBeenCalledWith({
+      where: { id: "admin-1" },
+      data: {
+        twoFactorEnabled: true,
+        twoFactorSecret: "CURRENT-SECRET",
+        twoFactorBackupCodes: backupCodeHashes,
+      },
+    });
+    expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+      {
+        adminUserId: "admin-1",
+        action: "ADMIN_2FA_ENABLED",
+        targetType: "AppUser",
+        targetId: "admin-1",
+        before: { twoFactorEnabled: false },
+        after: { twoFactorEnabled: true },
+        meta: { actorRole: "ADMIN", setupFlow: "INITIAL_SETUP" },
+      },
+      transactionClient,
+    );
+    expect(result).toEqual({
+      id: "admin-1",
+      email: "admin@example.com",
+      fullName: "Admin One",
+      role: UserRole.ADMIN,
+      twoFactorEnabled: true,
+    });
+
+    const audit = JSON.stringify(createAdminAuditLogMock.mock.calls);
+    expect(audit).not.toMatch(/CURRENT-SECRET|hash-1|backup|otp|cookie|sign/i);
+  });
+
+  it.each([
+    ["a rotated secret", adminUser({ twoFactorSecret: "ROTATED-SECRET" }), "SECRET_CHANGED"],
+    ["already-enabled 2FA", adminUser({ twoFactorEnabled: true }), "ALREADY_ENABLED"],
+    ["a changed role", adminUser({ role: UserRole.TEACHER }), "INVALID_SETUP"],
+  ])("rejects %s re-read inside the confirmation transaction", async (_label, user, code) => {
+    transactionUserFindMock.mockResolvedValueOnce(user);
+    const { confirmInitialAdminTwoFactorEnrollment } = await loadRepository();
+
+    await expect(
+      confirmInitialAdminTwoFactorEnrollment({
+        ...identity,
+        expectedSecret: "CURRENT-SECRET",
+        backupCodeHashes: Array.from({ length: 8 }, (_, index) => `hash-${index}`),
+      }),
+    ).rejects.toMatchObject({ code });
+
+    expect(appUserUpdateMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["seven hashes", Array.from({ length: 7 }, (_, index) => `hash-${index}`)],
+    ["duplicate hashes", Array(8).fill("same-hash")],
+  ])("rejects %s before opening a transaction", async (_label, backupCodeHashes) => {
+    const { confirmInitialAdminTwoFactorEnrollment } = await loadRepository();
+
+    await expect(
+      confirmInitialAdminTwoFactorEnrollment({
+        ...identity,
+        expectedSecret: "CURRENT-SECRET",
+        backupCodeHashes,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_BACKUP_CODES" });
+
+    expect(transactionMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it("lets an audit failure abort confirmation without reporting success", async () => {
+    createAdminAuditLogMock.mockRejectedValueOnce(new Error("audit unavailable"));
+    const { confirmInitialAdminTwoFactorEnrollment } = await loadRepository();
+
+    await expect(
+      confirmInitialAdminTwoFactorEnrollment({
+        ...identity,
+        expectedSecret: "CURRENT-SECRET",
+        backupCodeHashes: Array.from({ length: 8 }, (_, index) => `hash-${index}`),
+      }),
+    ).rejects.toThrow("audit unavailable");
+
+    expect(appUserUpdateMock).toHaveBeenCalledOnce();
+    expect(createAdminAuditLogMock).toHaveBeenCalledWith(expect.anything(), transactionClient);
+  });
+});

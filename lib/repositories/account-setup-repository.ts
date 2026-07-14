@@ -1,4 +1,4 @@
-import { Prisma, type UserRole } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { prisma } from "@/lib/prisma";
@@ -24,6 +24,76 @@ export type SafeInitialSetupUser = {
   role: UserRole;
   twoFactorEnabled: boolean;
 };
+
+export type InitialAdminTwoFactorEnrollmentErrorCode =
+  | "INVALID_SETUP"
+  | "ALREADY_ENABLED"
+  | "SECRET_CHANGED"
+  | "INVALID_BACKUP_CODES";
+
+export class InitialAdminTwoFactorEnrollmentError extends Error {
+  constructor(public readonly code: InitialAdminTwoFactorEnrollmentErrorCode) {
+    super("Initial admin two-factor enrollment failed");
+    this.name = "InitialAdminTwoFactorEnrollmentError";
+  }
+}
+
+type InitialAdminSetupIdentity = {
+  userId: string;
+  email: string;
+  role: UserRole;
+};
+
+type InitialAdminTwoFactorUser = SafeInitialSetupUser & {
+  twoFactorSecret: string | null;
+};
+
+const initialAdminTwoFactorSelect = {
+  id: true,
+  email: true,
+  fullName: true,
+  role: true,
+  mustChangePassword: true,
+  isActive: true,
+  twoFactorEnabled: true,
+  twoFactorSecret: true,
+} as const;
+
+function requireEligibleInitialAdmin<
+  T extends InitialAdminTwoFactorUser & {
+    isActive: boolean;
+    mustChangePassword: boolean;
+  },
+>(user: T | null, identity: InitialAdminSetupIdentity): T {
+  if (
+    !user?.isActive ||
+    user.mustChangePassword ||
+    identity.role !== UserRole.ADMIN ||
+    user.id !== identity.userId ||
+    user.email !== identity.email ||
+    user.role !== UserRole.ADMIN ||
+    user.role !== identity.role
+  ) {
+    throw new InitialAdminTwoFactorEnrollmentError("INVALID_SETUP");
+  }
+
+  if (user.twoFactorEnabled) {
+    throw new InitialAdminTwoFactorEnrollmentError("ALREADY_ENABLED");
+  }
+
+  return user;
+}
+
+function toInitialAdminTwoFactorUser(user: InitialAdminTwoFactorUser): InitialAdminTwoFactorUser {
+  return {
+    id: user.id,
+    email: user.email,
+    fullName: user.fullName,
+    role: user.role,
+    twoFactorEnabled: user.twoFactorEnabled,
+    twoFactorSecret: user.twoFactorSecret,
+  };
+}
 
 function isEligibleForPasswordChange<
   T extends {
@@ -112,6 +182,109 @@ export async function changeInitialPassword(
         fullName: currentUser.fullName,
         role: currentUser.role,
         twoFactorEnabled: currentUser.twoFactorEnabled,
+      };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
+}
+
+export async function getInitialAdminTwoFactorEnrollment(
+  identity: InitialAdminSetupIdentity,
+): Promise<InitialAdminTwoFactorUser> {
+  const user = requireEligibleInitialAdmin(
+    await findUserForInitialSetup(identity.userId),
+    identity,
+  );
+
+  return toInitialAdminTwoFactorUser(user);
+}
+
+export async function beginInitialAdminTwoFactorEnrollment(
+  input: InitialAdminSetupIdentity & { secret: string },
+): Promise<InitialAdminTwoFactorUser> {
+  return prisma.$transaction(
+    async (transaction) => {
+      const currentUser = requireEligibleInitialAdmin(
+        await transaction.appUser.findUnique({
+          where: { id: input.userId },
+          select: initialAdminTwoFactorSelect,
+        }),
+        input,
+      );
+
+      await transaction.appUser.update({
+        where: { id: currentUser.id },
+        data: {
+          twoFactorSecret: input.secret,
+          twoFactorEnabled: false,
+          twoFactorBackupCodes: [],
+        },
+      });
+
+      return toInitialAdminTwoFactorUser({
+        ...currentUser,
+        twoFactorSecret: input.secret,
+      });
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
+}
+
+export async function confirmInitialAdminTwoFactorEnrollment(
+  input: InitialAdminSetupIdentity & {
+    expectedSecret: string;
+    backupCodeHashes: string[];
+  },
+): Promise<SafeInitialSetupUser> {
+  if (
+    input.backupCodeHashes.length !== 8 ||
+    new Set(input.backupCodeHashes).size !== input.backupCodeHashes.length
+  ) {
+    throw new InitialAdminTwoFactorEnrollmentError("INVALID_BACKUP_CODES");
+  }
+
+  return prisma.$transaction(
+    async (transaction) => {
+      const currentUser = requireEligibleInitialAdmin(
+        await transaction.appUser.findUnique({
+          where: { id: input.userId },
+          select: initialAdminTwoFactorSelect,
+        }),
+        input,
+      );
+
+      if (!currentUser.twoFactorSecret || currentUser.twoFactorSecret !== input.expectedSecret) {
+        throw new InitialAdminTwoFactorEnrollmentError("SECRET_CHANGED");
+      }
+
+      await transaction.appUser.update({
+        where: { id: currentUser.id },
+        data: {
+          twoFactorEnabled: true,
+          twoFactorSecret: currentUser.twoFactorSecret,
+          twoFactorBackupCodes: input.backupCodeHashes,
+        },
+      });
+
+      await createAdminAuditLog(
+        {
+          adminUserId: currentUser.id,
+          action: "ADMIN_2FA_ENABLED",
+          targetType: "AppUser",
+          targetId: currentUser.id,
+          before: { twoFactorEnabled: false },
+          after: { twoFactorEnabled: true },
+          meta: { actorRole: UserRole.ADMIN, setupFlow: "INITIAL_SETUP" },
+        },
+        transaction,
+      );
+
+      return {
+        id: currentUser.id,
+        email: currentUser.email,
+        fullName: currentUser.fullName,
+        role: currentUser.role,
+        twoFactorEnabled: true,
       };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },

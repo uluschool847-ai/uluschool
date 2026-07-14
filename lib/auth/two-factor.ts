@@ -25,8 +25,18 @@ function randomBackupCode() {
   return randomBytes(5).toString("hex").toUpperCase();
 }
 
-export async function generateBackupCodes() {
-  const plain = Array.from({ length: 8 }, () => randomBackupCode());
+export async function generateBackupCodes(generateCode: () => string = randomBackupCode) {
+  const uniqueCodes = new Set<string>();
+
+  for (let attempt = 0; uniqueCodes.size < 8 && attempt < 64; attempt += 1) {
+    uniqueCodes.add(generateCode());
+  }
+
+  if (uniqueCodes.size !== 8) {
+    throw new Error("Unable to generate unique backup codes.");
+  }
+
+  const plain = Array.from(uniqueCodes);
   const hashed = await Promise.all(plain.map((code) => hashPassword(code)));
   return { plain, hashed };
 }
