@@ -1,6 +1,7 @@
 import { Prisma, UserRole } from "@prisma/client";
+import { z } from "zod";
 
-import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { hashPassword, isPasswordHash, verifyPassword } from "@/lib/auth/password";
 import { prisma } from "@/lib/prisma";
 import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 import { findUserForInitialSetup } from "@/lib/repositories/user-repository";
@@ -44,6 +45,39 @@ type InitialAdminSetupIdentity = {
   role: UserRole;
 };
 
+const initialAdminIdentitySchema = z
+  .object({
+    userId: z
+      .string()
+      .min(1)
+      .max(191)
+      .refine((value) => value === value.trim()),
+    email: z
+      .string()
+      .email()
+      .max(320)
+      .refine((value) => value === value.trim()),
+    role: z.literal(UserRole.ADMIN),
+  })
+  .strict();
+const totpSecretSchema = z.string().regex(/^[A-Z2-7]{16,128}$/);
+const backupCodeHashesSchema = z
+  .array(z.string().refine((value) => isPasswordHash(value)))
+  .length(8)
+  .refine((hashes) => new Set(hashes).size === hashes.length);
+const beginEnrollmentSchema = initialAdminIdentitySchema
+  .extend({ secret: totpSecretSchema })
+  .strict();
+const confirmEnrollmentSchema = initialAdminIdentitySchema
+  .extend({
+    expectedSecret: totpSecretSchema,
+    backupCodeHashes: backupCodeHashesSchema,
+  })
+  .strict();
+const recoverHandoffSchema = initialAdminIdentitySchema
+  .extend({ backupCodeHashes: backupCodeHashesSchema })
+  .strict();
+
 type InitialAdminTwoFactorUser = SafeInitialSetupUser & {
   twoFactorSecret: string | null;
 };
@@ -82,6 +116,36 @@ function requireEligibleInitialAdmin<
   }
 
   return user;
+}
+
+function requireEligibleInitialAdminHandoff<
+  T extends InitialAdminTwoFactorUser & {
+    isActive: boolean;
+    mustChangePassword: boolean;
+  },
+>(user: T | null, identity: InitialAdminSetupIdentity): T {
+  if (
+    !user?.isActive ||
+    user.mustChangePassword ||
+    !user.twoFactorEnabled ||
+    identity.role !== UserRole.ADMIN ||
+    user.id !== identity.userId ||
+    user.email !== identity.email ||
+    user.role !== UserRole.ADMIN ||
+    user.role !== identity.role
+  ) {
+    throw new InitialAdminTwoFactorEnrollmentError("INVALID_SETUP");
+  }
+
+  return user;
+}
+
+function parseInitialAdminIdentity(input: unknown): InitialAdminSetupIdentity {
+  const parsed = initialAdminIdentitySchema.safeParse(input);
+  if (!parsed.success) {
+    throw new InitialAdminTwoFactorEnrollmentError("INVALID_SETUP");
+  }
+  return parsed.data;
 }
 
 function toInitialAdminTwoFactorUser(user: InitialAdminTwoFactorUser): InitialAdminTwoFactorUser {
@@ -191,9 +255,22 @@ export async function changeInitialPassword(
 export async function getInitialAdminTwoFactorEnrollment(
   identity: InitialAdminSetupIdentity,
 ): Promise<InitialAdminTwoFactorUser> {
+  const parsedIdentity = parseInitialAdminIdentity(identity);
   const user = requireEligibleInitialAdmin(
-    await findUserForInitialSetup(identity.userId),
-    identity,
+    await findUserForInitialSetup(parsedIdentity.userId),
+    parsedIdentity,
+  );
+
+  return toInitialAdminTwoFactorUser(user);
+}
+
+export async function getInitialAdminTwoFactorHandoff(
+  identity: InitialAdminSetupIdentity,
+): Promise<InitialAdminTwoFactorUser> {
+  const parsedIdentity = parseInitialAdminIdentity(identity);
+  const user = requireEligibleInitialAdminHandoff(
+    await findUserForInitialSetup(parsedIdentity.userId),
+    parsedIdentity,
   );
 
   return toInitialAdminTwoFactorUser(user);
@@ -202,20 +279,25 @@ export async function getInitialAdminTwoFactorEnrollment(
 export async function beginInitialAdminTwoFactorEnrollment(
   input: InitialAdminSetupIdentity & { secret: string },
 ): Promise<InitialAdminTwoFactorUser> {
+  const parsed = beginEnrollmentSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new InitialAdminTwoFactorEnrollmentError("INVALID_SETUP");
+  }
+
   return prisma.$transaction(
     async (transaction) => {
       const currentUser = requireEligibleInitialAdmin(
         await transaction.appUser.findUnique({
-          where: { id: input.userId },
+          where: { id: parsed.data.userId },
           select: initialAdminTwoFactorSelect,
         }),
-        input,
+        parsed.data,
       );
 
       await transaction.appUser.update({
         where: { id: currentUser.id },
         data: {
-          twoFactorSecret: input.secret,
+          twoFactorSecret: parsed.data.secret,
           twoFactorEnabled: false,
           twoFactorBackupCodes: [],
         },
@@ -223,7 +305,7 @@ export async function beginInitialAdminTwoFactorEnrollment(
 
       return toInitialAdminTwoFactorUser({
         ...currentUser,
-        twoFactorSecret: input.secret,
+        twoFactorSecret: parsed.data.secret,
       });
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -236,24 +318,36 @@ export async function confirmInitialAdminTwoFactorEnrollment(
     backupCodeHashes: string[];
   },
 ): Promise<SafeInitialSetupUser> {
-  if (
-    input.backupCodeHashes.length !== 8 ||
-    new Set(input.backupCodeHashes).size !== input.backupCodeHashes.length
-  ) {
-    throw new InitialAdminTwoFactorEnrollmentError("INVALID_BACKUP_CODES");
+  const parsed = confirmEnrollmentSchema.safeParse(input);
+  if (!parsed.success) {
+    const identityAndSecretValid = initialAdminIdentitySchema
+      .extend({ expectedSecret: totpSecretSchema })
+      .strict()
+      .safeParse({
+        userId: input?.userId,
+        email: input?.email,
+        role: input?.role,
+        expectedSecret: input?.expectedSecret,
+      }).success;
+    throw new InitialAdminTwoFactorEnrollmentError(
+      identityAndSecretValid ? "INVALID_BACKUP_CODES" : "INVALID_SETUP",
+    );
   }
 
   return prisma.$transaction(
     async (transaction) => {
       const currentUser = requireEligibleInitialAdmin(
         await transaction.appUser.findUnique({
-          where: { id: input.userId },
+          where: { id: parsed.data.userId },
           select: initialAdminTwoFactorSelect,
         }),
-        input,
+        parsed.data,
       );
 
-      if (!currentUser.twoFactorSecret || currentUser.twoFactorSecret !== input.expectedSecret) {
+      if (
+        !currentUser.twoFactorSecret ||
+        currentUser.twoFactorSecret !== parsed.data.expectedSecret
+      ) {
         throw new InitialAdminTwoFactorEnrollmentError("SECRET_CHANGED");
       }
 
@@ -262,7 +356,7 @@ export async function confirmInitialAdminTwoFactorEnrollment(
         data: {
           twoFactorEnabled: true,
           twoFactorSecret: currentUser.twoFactorSecret,
-          twoFactorBackupCodes: input.backupCodeHashes,
+          twoFactorBackupCodes: parsed.data.backupCodeHashes,
         },
       });
 
@@ -275,6 +369,61 @@ export async function confirmInitialAdminTwoFactorEnrollment(
           before: { twoFactorEnabled: false },
           after: { twoFactorEnabled: true },
           meta: { actorRole: UserRole.ADMIN, setupFlow: "INITIAL_SETUP" },
+        },
+        transaction,
+      );
+
+      return {
+        id: currentUser.id,
+        email: currentUser.email,
+        fullName: currentUser.fullName,
+        role: currentUser.role,
+        twoFactorEnabled: true,
+      };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
+}
+
+export async function recoverInitialAdminTwoFactorHandoff(
+  input: InitialAdminSetupIdentity & { backupCodeHashes: string[] },
+): Promise<SafeInitialSetupUser> {
+  const parsed = recoverHandoffSchema.safeParse(input);
+  if (!parsed.success) {
+    const identityValid = initialAdminIdentitySchema.safeParse({
+      userId: input?.userId,
+      email: input?.email,
+      role: input?.role,
+    }).success;
+    throw new InitialAdminTwoFactorEnrollmentError(
+      identityValid ? "INVALID_BACKUP_CODES" : "INVALID_SETUP",
+    );
+  }
+
+  return prisma.$transaction(
+    async (transaction) => {
+      const currentUser = requireEligibleInitialAdminHandoff(
+        await transaction.appUser.findUnique({
+          where: { id: parsed.data.userId },
+          select: initialAdminTwoFactorSelect,
+        }),
+        parsed.data,
+      );
+
+      await transaction.appUser.update({
+        where: { id: currentUser.id },
+        data: { twoFactorBackupCodes: parsed.data.backupCodeHashes },
+      });
+
+      await createAdminAuditLog(
+        {
+          adminUserId: currentUser.id,
+          action: "ADMIN_2FA_BACKUP_CREDENTIALS_ROTATED",
+          targetType: "AppUser",
+          targetId: currentUser.id,
+          before: { twoFactorEnabled: true },
+          after: { twoFactorEnabled: true },
+          meta: { actorRole: UserRole.ADMIN, setupFlow: "INITIAL_SETUP_RECOVERY" },
         },
         transaction,
       );

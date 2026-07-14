@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const findUserForInitialSetupMock = vi.hoisted(() => vi.fn());
 const verifyPasswordMock = vi.hoisted(() => vi.fn());
 const hashPasswordMock = vi.hoisted(() => vi.fn());
+const isPasswordHashMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const transactionUserFindMock = vi.hoisted(() => vi.fn());
 const appUserUpdateMock = vi.hoisted(() => vi.fn());
@@ -22,6 +23,7 @@ vi.mock("@/lib/repositories/user-repository", () => ({
 vi.mock("@/lib/auth/password", () => ({
   verifyPassword: verifyPasswordMock,
   hashPassword: hashPasswordMock,
+  isPasswordHash: isPasswordHashMock,
 }));
 
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
@@ -214,6 +216,9 @@ describe("changeInitialPassword", () => {
 });
 
 describe("initial admin two-factor enrollment", () => {
+  const currentSecret = "JBSWY3DPEHPK3PXP";
+  const newSecret = "KRSXG5DSNFXGOIDB";
+  const rotatedSecret = "MFRGGZDFMZTWQ2LK";
   const identity = {
     userId: "admin-1",
     email: "admin@example.com",
@@ -228,7 +233,7 @@ describe("initial admin two-factor enrollment", () => {
       role: UserRole.ADMIN,
       mustChangePassword: false,
       twoFactorEnabled: false,
-      twoFactorSecret: "CURRENT-SECRET",
+      twoFactorSecret: currentSecret,
       twoFactorBackupCodes: [],
       ...overrides,
     });
@@ -240,6 +245,9 @@ describe("initial admin two-factor enrollment", () => {
     transactionUserFindMock.mockResolvedValue(adminUser());
     appUserUpdateMock.mockResolvedValue({ id: "admin-1" });
     createAdminAuditLogMock.mockResolvedValue(undefined);
+    isPasswordHashMock.mockImplementation(
+      (value: unknown) => typeof value === "string" && /^[a-f0-9]{32}:[a-f0-9]{128}$/.test(value),
+    );
     transactionMock.mockImplementation(
       async (callback: (tx: typeof transactionClient) => unknown) => callback(transactionClient),
     );
@@ -273,7 +281,7 @@ describe("initial admin two-factor enrollment", () => {
 
     const result = await beginInitialAdminTwoFactorEnrollment({
       ...identity,
-      secret: "NEW-SECRET",
+      secret: newSecret,
     });
 
     expect(transactionMock).toHaveBeenCalledWith(expect.any(Function), {
@@ -294,7 +302,7 @@ describe("initial admin two-factor enrollment", () => {
     expect(appUserUpdateMock).toHaveBeenCalledWith({
       where: { id: "admin-1" },
       data: {
-        twoFactorSecret: "NEW-SECRET",
+        twoFactorSecret: newSecret,
         twoFactorEnabled: false,
         twoFactorBackupCodes: [],
       },
@@ -305,7 +313,7 @@ describe("initial admin two-factor enrollment", () => {
       fullName: "Admin One",
       role: UserRole.ADMIN,
       twoFactorEnabled: false,
-      twoFactorSecret: "NEW-SECRET",
+      twoFactorSecret: newSecret,
     });
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
   });
@@ -315,7 +323,7 @@ describe("initial admin two-factor enrollment", () => {
     const { beginInitialAdminTwoFactorEnrollment } = await loadRepository();
 
     await expect(
-      beginInitialAdminTwoFactorEnrollment({ ...identity, secret: "NEW-SECRET" }),
+      beginInitialAdminTwoFactorEnrollment({ ...identity, secret: newSecret }),
     ).rejects.toMatchObject({ code: "INVALID_SETUP" });
 
     expect(appUserUpdateMock).not.toHaveBeenCalled();
@@ -323,12 +331,12 @@ describe("initial admin two-factor enrollment", () => {
   });
 
   it("atomically enables 2FA and writes only the sanitized success audit", async () => {
-    const backupCodeHashes = Array.from({ length: 8 }, (_, index) => `hash-${index + 1}`);
+    const backupCodeHashes = validBackupCodeHashes("a");
     const { confirmInitialAdminTwoFactorEnrollment } = await loadRepository();
 
     const result = await confirmInitialAdminTwoFactorEnrollment({
       ...identity,
-      expectedSecret: "CURRENT-SECRET",
+      expectedSecret: currentSecret,
       backupCodeHashes,
     });
 
@@ -339,7 +347,7 @@ describe("initial admin two-factor enrollment", () => {
       where: { id: "admin-1" },
       data: {
         twoFactorEnabled: true,
-        twoFactorSecret: "CURRENT-SECRET",
+        twoFactorSecret: currentSecret,
         twoFactorBackupCodes: backupCodeHashes,
       },
     });
@@ -364,11 +372,11 @@ describe("initial admin two-factor enrollment", () => {
     });
 
     const audit = JSON.stringify(createAdminAuditLogMock.mock.calls);
-    expect(audit).not.toMatch(/CURRENT-SECRET|hash-1|backup|otp|cookie|sign/i);
+    expect(audit).not.toMatch(/JBSWY3DPEHPK3PXP|backup|otp|cookie|sign/i);
   });
 
   it.each([
-    ["a rotated secret", adminUser({ twoFactorSecret: "ROTATED-SECRET" }), "SECRET_CHANGED"],
+    ["a rotated secret", adminUser({ twoFactorSecret: rotatedSecret }), "SECRET_CHANGED"],
     ["already-enabled 2FA", adminUser({ twoFactorEnabled: true }), "ALREADY_ENABLED"],
     ["a changed role", adminUser({ role: UserRole.TEACHER }), "INVALID_SETUP"],
   ])("rejects %s re-read inside the confirmation transaction", async (_label, user, code) => {
@@ -378,8 +386,8 @@ describe("initial admin two-factor enrollment", () => {
     await expect(
       confirmInitialAdminTwoFactorEnrollment({
         ...identity,
-        expectedSecret: "CURRENT-SECRET",
-        backupCodeHashes: Array.from({ length: 8 }, (_, index) => `hash-${index}`),
+        expectedSecret: currentSecret,
+        backupCodeHashes: validBackupCodeHashes("b"),
       }),
     ).rejects.toMatchObject({ code });
 
@@ -388,15 +396,15 @@ describe("initial admin two-factor enrollment", () => {
   });
 
   it.each([
-    ["seven hashes", Array.from({ length: 7 }, (_, index) => `hash-${index}`)],
-    ["duplicate hashes", Array(8).fill("same-hash")],
+    ["seven hashes", validBackupCodeHashes("c").slice(0, 7)],
+    ["duplicate hashes", Array(8).fill(validPasswordHash("d", 0))],
   ])("rejects %s before opening a transaction", async (_label, backupCodeHashes) => {
     const { confirmInitialAdminTwoFactorEnrollment } = await loadRepository();
 
     await expect(
       confirmInitialAdminTwoFactorEnrollment({
         ...identity,
-        expectedSecret: "CURRENT-SECRET",
+        expectedSecret: currentSecret,
         backupCodeHashes,
       }),
     ).rejects.toMatchObject({ code: "INVALID_BACKUP_CODES" });
@@ -412,12 +420,156 @@ describe("initial admin two-factor enrollment", () => {
     await expect(
       confirmInitialAdminTwoFactorEnrollment({
         ...identity,
-        expectedSecret: "CURRENT-SECRET",
-        backupCodeHashes: Array.from({ length: 8 }, (_, index) => `hash-${index}`),
+        expectedSecret: currentSecret,
+        backupCodeHashes: validBackupCodeHashes("e"),
       }),
     ).rejects.toThrow("audit unavailable");
 
     expect(appUserUpdateMock).toHaveBeenCalledOnce();
     expect(createAdminAuditLogMock).toHaveBeenCalledWith(expect.anything(), transactionClient);
   });
+
+  it.each([
+    ["missing identity", { ...identity, userId: "" }],
+    ["oversized identity", { ...identity, userId: "x".repeat(192) }],
+    ["malformed email", { ...identity, email: "not-an-email" }],
+    ["oversized email", { ...identity, email: `${"x".repeat(310)}@example.com` }],
+    ["non-admin role", { ...identity, role: UserRole.TEACHER }],
+  ])("rejects %s before lookup or transaction", async (_label, malformedIdentity) => {
+    const { getInitialAdminTwoFactorEnrollment } = await loadRepository();
+
+    await expect(getInitialAdminTwoFactorEnrollment(malformedIdentity)).rejects.toMatchObject({
+      code: "INVALID_SETUP",
+    });
+
+    expect(findUserForInitialSetupMock).not.toHaveBeenCalled();
+    expect(transactionMock).not.toHaveBeenCalled();
+    expect(appUserUpdateMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "plain-secret", "A".repeat(129), "JBSWY3DP!HPK3PXP"])(
+    "rejects malformed begin secret %j before a transaction",
+    async (secret) => {
+      const { beginInitialAdminTwoFactorEnrollment } = await loadRepository();
+
+      await expect(
+        beginInitialAdminTwoFactorEnrollment({ ...identity, secret }),
+      ).rejects.toMatchObject({ code: "INVALID_SETUP" });
+
+      expect(transactionMock).not.toHaveBeenCalled();
+      expect(appUserUpdateMock).not.toHaveBeenCalled();
+      expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["a non-array", "not-an-array"],
+    ["a non-string entry", [...validBackupCodeHashes("f").slice(0, 7), 42]],
+    ["an empty entry", [...validBackupCodeHashes("f").slice(0, 7), ""]],
+    ["a plaintext entry", [...validBackupCodeHashes("f").slice(0, 7), "BACKUP1234"]],
+    ["a malformed hash", [...validBackupCodeHashes("f").slice(0, 7), "a:b"]],
+    [
+      "an oversized entry",
+      [...validBackupCodeHashes("f").slice(0, 7), `${"a".repeat(32)}:${"b".repeat(129)}`],
+    ],
+  ])("rejects %s before confirmation transaction", async (_label, backupCodeHashes) => {
+    const { confirmInitialAdminTwoFactorEnrollment } = await loadRepository();
+
+    await expect(
+      confirmInitialAdminTwoFactorEnrollment({
+        ...identity,
+        expectedSecret: currentSecret,
+        backupCodeHashes: backupCodeHashes as string[],
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_BACKUP_CODES" });
+
+    expect(transactionMock).not.toHaveBeenCalled();
+    expect(appUserUpdateMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malformed expected secret before confirmation transaction", async () => {
+    const { confirmInitialAdminTwoFactorEnrollment } = await loadRepository();
+
+    await expect(
+      confirmInitialAdminTwoFactorEnrollment({
+        ...identity,
+        expectedSecret: "plain-secret",
+        backupCodeHashes: validBackupCodeHashes("1"),
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_SETUP" });
+
+    expect(transactionMock).not.toHaveBeenCalled();
+    expect(appUserUpdateMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it("rotates valid hashes for a signed-setup handoff recovery with a sanitized audit", async () => {
+    transactionUserFindMock.mockResolvedValueOnce(adminUser({ twoFactorEnabled: true }));
+    const backupCodeHashes = validBackupCodeHashes("2");
+    const { recoverInitialAdminTwoFactorHandoff } = await loadRepository();
+
+    const result = await recoverInitialAdminTwoFactorHandoff({
+      ...identity,
+      backupCodeHashes,
+    });
+
+    expect(appUserUpdateMock).toHaveBeenCalledWith({
+      where: { id: "admin-1" },
+      data: { twoFactorBackupCodes: backupCodeHashes },
+    });
+    expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+      {
+        adminUserId: "admin-1",
+        action: "ADMIN_2FA_BACKUP_CREDENTIALS_ROTATED",
+        targetType: "AppUser",
+        targetId: "admin-1",
+        before: { twoFactorEnabled: true },
+        after: { twoFactorEnabled: true },
+        meta: { actorRole: "ADMIN", setupFlow: "INITIAL_SETUP_RECOVERY" },
+      },
+      transactionClient,
+    );
+    expect(result).toMatchObject({ id: "admin-1", twoFactorEnabled: true });
+    expect(JSON.stringify(createAdminAuditLogMock.mock.calls)).not.toMatch(
+      /JBSWY3DPEHPK3PXP|[a-f0-9]{32}:[a-f0-9]{128}|backupCodeHashes/i,
+    );
+  });
+
+  it("rejects malformed handoff lookup identity before persistence access", async () => {
+    const { getInitialAdminTwoFactorHandoff } = await loadRepository();
+
+    await expect(
+      getInitialAdminTwoFactorHandoff({ ...identity, userId: " ".repeat(2) }),
+    ).rejects.toMatchObject({ code: "INVALID_SETUP" });
+
+    expect(findUserForInitialSetupMock).not.toHaveBeenCalled();
+    expect(transactionMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects plaintext recovery backup codes before a transaction", async () => {
+    const { recoverInitialAdminTwoFactorHandoff } = await loadRepository();
+
+    await expect(
+      recoverInitialAdminTwoFactorHandoff({
+        ...identity,
+        backupCodeHashes: Array.from({ length: 8 }, (_, index) => `PLAINTEXT-${index}`),
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_BACKUP_CODES" });
+
+    expect(transactionMock).not.toHaveBeenCalled();
+    expect(appUserUpdateMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
 });
+
+function validPasswordHash(marker: string, index: number) {
+  const nibble = ((index % 9) + 1).toString();
+  return `${marker.repeat(31)}${nibble}:${nibble.repeat(128)}`;
+}
+
+function validBackupCodeHashes(marker: string) {
+  return Array.from({ length: 8 }, (_, index) => validPasswordHash(marker, index));
+}

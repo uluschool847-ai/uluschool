@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { InitialTwoFactorForm } from "@/components/auth/InitialTwoFactorForm";
 import { PageHero } from "@/components/sections/page-hero";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getInitialSetupSession } from "@/lib/auth/session";
+import { getInitialSetupSession, getPortalRedirectPath, getSession } from "@/lib/auth/session";
 import { findUserForInitialSetup } from "@/lib/repositories/user-repository";
 
 export const metadata: Metadata = {
@@ -19,29 +19,35 @@ export const metadata: Metadata = {
 
 export default async function InitialTwoFactorSetupPage() {
   const setup = await getInitialSetupSession();
+  let requiresHandoff = false;
+  let completedHref: string | undefined;
+
   if (!setup) {
-    redirect("/portal/login");
-  }
+    const session = await getSession();
+    if (!session || session.role !== UserRole.ADMIN || !session.mfaVerified) {
+      redirect("/portal/login");
+    }
 
-  if (setup.role !== UserRole.ADMIN) {
-    redirect("/portal/unauthorized");
-  }
+    completedHref = getPortalRedirectPath(UserRole.ADMIN);
+  } else {
+    if (setup.role !== UserRole.ADMIN) {
+      redirect("/portal/unauthorized");
+    }
 
-  const user = await findUserForInitialSetup(setup.uid);
-  if (!user || !user.isActive || user.id !== setup.uid || user.email !== setup.email) {
-    redirect("/portal/login");
-  }
+    const user = await findUserForInitialSetup(setup.uid);
+    if (!user || !user.isActive || user.id !== setup.uid || user.email !== setup.email) {
+      redirect("/portal/login");
+    }
 
-  if (user.role !== UserRole.ADMIN || user.role !== setup.role) {
-    redirect("/portal/unauthorized");
-  }
+    if (user.role !== UserRole.ADMIN || user.role !== setup.role) {
+      redirect("/portal/unauthorized");
+    }
 
-  if (user.mustChangePassword) {
-    redirect("/portal/setup/password");
-  }
+    if (user.mustChangePassword) {
+      redirect("/portal/setup/password");
+    }
 
-  if (user.twoFactorEnabled) {
-    redirect("/portal/login");
+    requiresHandoff = user.twoFactorEnabled;
   }
 
   return (
@@ -57,7 +63,10 @@ export default async function InitialTwoFactorSetupPage() {
               <CardTitle>Two-Factor Authentication</CardTitle>
             </CardHeader>
             <CardContent>
-              <InitialTwoFactorForm />
+              <InitialTwoFactorForm
+                requiresHandoff={requiresHandoff}
+                completedHref={completedHref}
+              />
             </CardContent>
           </Card>
         </div>

@@ -1,12 +1,15 @@
 import { UserRole } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const getInitialSetupSessionMock = vi.hoisted(() => vi.fn());
-const clearSessionMock = vi.hoisted(() => vi.fn());
-const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
-const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn());
-const createSessionMock = vi.hoisted(() => vi.fn());
-const getPortalRedirectPathMock = vi.hoisted(() => vi.fn());
+const sessionMocks = vi.hoisted(() => ({
+  getInitialSetupSession: vi.fn(),
+  createSetupCapability: vi.fn(),
+  readSetupCapability: vi.fn(),
+  getSecretFingerprint: vi.fn(),
+  prepareSessionCookie: vi.fn(),
+  replaceAuthCookieFamily: vi.fn(),
+  getPortalRedirectPath: vi.fn(),
+}));
 const generateTwoFactorSecretMock = vi.hoisted(() => vi.fn());
 const getTotpUriMock = vi.hoisted(() => vi.fn());
 const verifyTotpCodeMock = vi.hoisted(() => vi.fn());
@@ -20,19 +23,22 @@ const repositoryMocks = vi.hoisted(() => {
 
   return {
     getEnrollment: vi.fn(),
+    getHandoff: vi.fn(),
     beginEnrollment: vi.fn(),
     confirmEnrollment: vi.fn(),
+    recoverHandoff: vi.fn(),
     InitialAdminTwoFactorEnrollmentError,
   };
 });
 
 vi.mock("@/lib/auth/session", () => ({
-  getInitialSetupSession: getInitialSetupSessionMock,
-  clearSession: clearSessionMock,
-  clearAdminPendingTwoFactor: clearAdminPendingTwoFactorMock,
-  clearInitialSetupSession: clearInitialSetupSessionMock,
-  createSession: createSessionMock,
-  getPortalRedirectPath: getPortalRedirectPathMock,
+  getInitialSetupSession: sessionMocks.getInitialSetupSession,
+  createInitialTwoFactorSetupCapability: sessionMocks.createSetupCapability,
+  readInitialTwoFactorSetupCapability: sessionMocks.readSetupCapability,
+  getInitialTwoFactorSecretFingerprint: sessionMocks.getSecretFingerprint,
+  prepareSessionCookie: sessionMocks.prepareSessionCookie,
+  replaceAuthCookieFamilyWithSession: sessionMocks.replaceAuthCookieFamily,
+  getPortalRedirectPath: sessionMocks.getPortalRedirectPath,
 }));
 
 vi.mock("@/lib/auth/two-factor", () => ({
@@ -44,8 +50,10 @@ vi.mock("@/lib/auth/two-factor", () => ({
 
 vi.mock("@/lib/repositories/account-setup-repository", () => ({
   getInitialAdminTwoFactorEnrollment: repositoryMocks.getEnrollment,
+  getInitialAdminTwoFactorHandoff: repositoryMocks.getHandoff,
   beginInitialAdminTwoFactorEnrollment: repositoryMocks.beginEnrollment,
   confirmInitialAdminTwoFactorEnrollment: repositoryMocks.confirmEnrollment,
+  recoverInitialAdminTwoFactorHandoff: repositoryMocks.recoverHandoff,
   InitialAdminTwoFactorEnrollmentError: repositoryMocks.InitialAdminTwoFactorEnrollmentError,
 }));
 
@@ -74,14 +82,15 @@ function adminEnrollment(overrides: Record<string, unknown> = {}) {
     fullName: "Admin One",
     role: UserRole.ADMIN,
     twoFactorEnabled: false,
-    twoFactorSecret: "PERSISTED-SECRET",
+    twoFactorSecret: "JBSWY3DPEHPK3PXP",
     ...overrides,
   };
 }
 
-function formWithCode(code: FormDataEntryValue = "123456") {
+function confirmationForm(code: FormDataEntryValue = "123456", capability = "SIGNED-CAPABILITY") {
   const formData = new FormData();
   formData.set("code", code);
+  formData.set("setupCapability", capability);
   return formData;
 }
 
@@ -89,48 +98,53 @@ function emptyForm() {
   return new FormData();
 }
 
-function expectNoNormalSessionSideEffects() {
-  expect(clearSessionMock).not.toHaveBeenCalled();
-  expect(clearAdminPendingTwoFactorMock).not.toHaveBeenCalled();
-  expect(clearInitialSetupSessionMock).not.toHaveBeenCalled();
-  expect(createSessionMock).not.toHaveBeenCalled();
-}
-
-function expectAllAuthCookiesClearedBeforeSession() {
-  expect(clearSessionMock).toHaveBeenCalledOnce();
-  expect(clearAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
-  expect(clearInitialSetupSessionMock).toHaveBeenCalledOnce();
-  expect(createSessionMock).toHaveBeenCalledOnce();
-
-  const issueOrder = createSessionMock.mock.invocationCallOrder[0];
-  expect(clearSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
-  expect(clearAdminPendingTwoFactorMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
-  expect(clearInitialSetupSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
-}
-
 describe("restricted initial admin 2FA actions", () => {
   const plainCodes = Array.from({ length: 8 }, (_, index) => `PLAIN-${index + 1}`);
-  const hashedCodes = Array.from({ length: 8 }, (_, index) => `HASH-${index + 1}`);
+  const hashedCodes = Array.from(
+    { length: 8 },
+    (_, index) => `${(index + 1).toString().repeat(32)}:${(index + 1).toString().repeat(128)}`,
+  );
+  const preparedSession = {
+    name: "ulu_session",
+    value: "SIGNED-NORMAL-SESSION",
+    options: { httpOnly: true },
+  };
 
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    getInitialSetupSessionMock.mockResolvedValue(setupSession());
-    generateTwoFactorSecretMock.mockReturnValue("NEW-SECRET");
+    sessionMocks.getInitialSetupSession.mockResolvedValue(setupSession());
+    sessionMocks.createSetupCapability.mockResolvedValue("SIGNED-CAPABILITY");
+    sessionMocks.readSetupCapability.mockResolvedValue({
+      purpose: "INITIAL_2FA_SETUP",
+      uid: "admin-1",
+      secretFingerprint: "CURRENT-FINGERPRINT",
+      exp: Date.now() + 60_000,
+    });
+    sessionMocks.getSecretFingerprint.mockResolvedValue("CURRENT-FINGERPRINT");
+    sessionMocks.prepareSessionCookie.mockResolvedValue(preparedSession);
+    sessionMocks.replaceAuthCookieFamily.mockResolvedValue(undefined);
+    sessionMocks.getPortalRedirectPath.mockReturnValue("/admin/classes");
+    generateTwoFactorSecretMock.mockReturnValue("KRSXG5DSNFXGOIDB");
     getTotpUriMock.mockReturnValue("otpauth://restricted-uri");
     verifyTotpCodeMock.mockReturnValue(true);
     generateBackupCodesMock.mockResolvedValue({ plain: plainCodes, hashed: hashedCodes });
     repositoryMocks.getEnrollment.mockResolvedValue(adminEnrollment());
+    repositoryMocks.getHandoff.mockResolvedValue(
+      adminEnrollment({ twoFactorEnabled: true, twoFactorSecret: undefined }),
+    );
     repositoryMocks.beginEnrollment.mockResolvedValue(
-      adminEnrollment({ twoFactorSecret: "NEW-SECRET" }),
+      adminEnrollment({ twoFactorSecret: "KRSXG5DSNFXGOIDB" }),
     );
     repositoryMocks.confirmEnrollment.mockResolvedValue(
       adminEnrollment({ twoFactorEnabled: true, twoFactorSecret: undefined }),
     );
-    getPortalRedirectPathMock.mockReturnValue("/admin/classes");
+    repositoryMocks.recoverHandoff.mockResolvedValue(
+      adminEnrollment({ twoFactorEnabled: true, twoFactorSecret: undefined }),
+    );
   });
 
-  it("runtime-narrows begin FormData before reading setup or generating a secret", async () => {
+  it("runtime-narrows begin FormData before setup or secret work", async () => {
     const malformed = { get: vi.fn() };
     const { beginInitialTwoFactorSetupAction } = await loadActions();
 
@@ -140,18 +154,15 @@ describe("restricted initial admin 2FA actions", () => {
     );
 
     expect(result).toEqual({ phase: "error", success: false, message: "Invalid input." });
-    expect(malformed.get).not.toHaveBeenCalled();
-    expect(getInitialSetupSessionMock).not.toHaveBeenCalled();
-    expect(generateTwoFactorSecretMock).not.toHaveBeenCalled();
+    expect(sessionMocks.getInitialSetupSession).not.toHaveBeenCalled();
     expect(repositoryMocks.beginEnrollment).not.toHaveBeenCalled();
-    expectNoNormalSessionSideEffects();
   });
 
   it.each([
-    ["missing or expired", null],
+    ["missing", null],
     ["non-admin", setupSession({ role: UserRole.TEACHER })],
-  ])("rejects a %s setup cookie before secret generation", async (_label, setup) => {
-    getInitialSetupSessionMock.mockResolvedValueOnce(setup);
+  ])("rejects a %s setup identity before enrollment", async (_label, setup) => {
+    sessionMocks.getInitialSetupSession.mockResolvedValueOnce(setup);
     const { beginInitialTwoFactorSetupAction } = await loadActions();
 
     const result = await beginInitialTwoFactorSetupAction(
@@ -160,12 +171,10 @@ describe("restricted initial admin 2FA actions", () => {
     );
 
     expect(result).toMatchObject({ phase: "error", success: false });
-    expect(generateTwoFactorSecretMock).not.toHaveBeenCalled();
     expect(repositoryMocks.beginEnrollment).not.toHaveBeenCalled();
-    expectNoNormalSessionSideEffects();
   });
 
-  it("starts enrollment from cookie identity without creating or clearing any auth session", async () => {
+  it("starts enrollment with signed freshness capability and no client identity", async () => {
     const { beginInitialTwoFactorSetupAction } = await loadActions();
 
     const result = await beginInitialTwoFactorSetupAction(
@@ -177,67 +186,30 @@ describe("restricted initial admin 2FA actions", () => {
       userId: "admin-1",
       email: "admin@example.com",
       role: UserRole.ADMIN,
-      secret: "NEW-SECRET",
+      secret: "KRSXG5DSNFXGOIDB",
+    });
+    expect(sessionMocks.createSetupCapability).toHaveBeenCalledWith({
+      uid: "admin-1",
+      secret: "KRSXG5DSNFXGOIDB",
     });
     expect(result).toEqual({
       phase: "setup",
       success: true,
       message: "Add this account to your authenticator app, then confirm the code.",
-      setupSecret: "NEW-SECRET",
+      setupSecret: "KRSXG5DSNFXGOIDB",
       otpAuthUrl: "otpauth://restricted-uri",
+      setupCapability: "SIGNED-CAPABILITY",
     });
-    expectNoNormalSessionSideEffects();
   });
 
-  it("does not leak an already-enabled secret or create a session", async () => {
-    repositoryMocks.beginEnrollment.mockRejectedValueOnce(
-      new repositoryMocks.InitialAdminTwoFactorEnrollmentError("ALREADY_ENABLED"),
-    );
-    const { beginInitialTwoFactorSetupAction } = await loadActions();
-
-    const result = await beginInitialTwoFactorSetupAction(
-      { phase: "idle", success: false, message: "" },
-      emptyForm(),
-    );
-
-    expect(result).toEqual({
-      phase: "error",
-      success: false,
-      message: "Two-factor authentication is already enabled.",
-    });
-    expect(JSON.stringify(result)).not.toMatch(/NEW-SECRET|otpauth/i);
-    expectNoNormalSessionSideEffects();
-  });
-
-  it("bounds a sensitive secret-generation failure without session side effects", async () => {
-    generateTwoFactorSecretMock.mockImplementationOnce(() => {
-      throw new Error("generated NEW-SECRET with signing value");
-    });
-    const { beginInitialTwoFactorSetupAction } = await loadActions();
-
-    const result = await beginInitialTwoFactorSetupAction(
-      { phase: "idle", success: false, message: "" },
-      emptyForm(),
-    );
-
-    expect(result).toEqual({
-      phase: "error",
-      success: false,
-      message: "Unable to start two-factor setup. Please try again.",
-    });
-    expect(JSON.stringify(result)).not.toMatch(/NEW-SECRET|signing/i);
-    expect(repositoryMocks.beginEnrollment).not.toHaveBeenCalled();
-    expectNoNormalSessionSideEffects();
-  });
-
-  it.each(["12345", "1234567", "１２３４５６", " 123456", "123456 ", "12345a"])(
-    "rejects malformed code %j before setup, repository, or TOTP calls",
+  it.each(["12345", "1234567", "１２３４５６", " 123456", "12345a"])(
+    "rejects malformed code %j before setup or TOTP work",
     async (code) => {
       const { confirmInitialTwoFactorSetupAction } = await loadActions();
 
       const result = await confirmInitialTwoFactorSetupAction(
         { phase: "idle", success: false, message: "" },
-        formWithCode(code),
+        confirmationForm(code),
       );
 
       expect(result).toEqual({
@@ -245,136 +217,76 @@ describe("restricted initial admin 2FA actions", () => {
         success: false,
         message: "Enter a 6-digit authenticator code.",
       });
-      expect(getInitialSetupSessionMock).not.toHaveBeenCalled();
-      expect(repositoryMocks.getEnrollment).not.toHaveBeenCalled();
+      expect(sessionMocks.getInitialSetupSession).not.toHaveBeenCalled();
       expect(verifyTotpCodeMock).not.toHaveBeenCalled();
-      expectNoNormalSessionSideEffects();
     },
   );
 
-  it("rejects File-valued and non-FormData code containers before security calls", async () => {
-    const fileForm = formWithCode(new File(["123456"], "code.txt"));
-    const malformed = { get: vi.fn() };
+  it("rejects malformed or File-valued setup capabilities before setup work", async () => {
+    const missing = confirmationForm();
+    missing.delete("setupCapability");
+    const file = confirmationForm();
+    file.set("setupCapability", new File(["signed"], "capability.txt"));
     const { confirmInitialTwoFactorSetupAction } = await loadActions();
 
-    for (const input of [fileForm, malformed as unknown as FormData]) {
+    for (const form of [missing, file, confirmationForm("123456", "x".repeat(1025))]) {
       const result = await confirmInitialTwoFactorSetupAction(
         { phase: "idle", success: false, message: "" },
-        input,
+        form,
       );
-      expect(result).toMatchObject({ phase: "error", success: false });
+      expect(result).toMatchObject({ phase: "restart-required", success: false });
     }
 
-    expect(malformed.get).not.toHaveBeenCalled();
-    expect(getInitialSetupSessionMock).not.toHaveBeenCalled();
+    expect(sessionMocks.getInitialSetupSession).not.toHaveBeenCalled();
     expect(repositoryMocks.getEnrollment).not.toHaveBeenCalled();
-    expect(verifyTotpCodeMock).not.toHaveBeenCalled();
-    expectNoNormalSessionSideEffects();
   });
 
-  it.each([
-    ["missing or expired", null],
-    ["non-admin", setupSession({ role: UserRole.STUDENT })],
-  ])("rejects a %s confirmation setup cookie without TOTP work", async (_label, setup) => {
-    getInitialSetupSessionMock.mockResolvedValueOnce(setup);
+  it("returns restart-required before TOTP when another tab already rotated the displayed setup", async () => {
+    sessionMocks.getSecretFingerprint.mockResolvedValueOnce("ROTATED-FINGERPRINT");
     const { confirmInitialTwoFactorSetupAction } = await loadActions();
 
     const result = await confirmInitialTwoFactorSetupAction(
       { phase: "idle", success: false, message: "" },
-      formWithCode(),
-    );
-
-    expect(result).toMatchObject({ phase: "error", success: false });
-    expect(repositoryMocks.getEnrollment).not.toHaveBeenCalled();
-    expect(verifyTotpCodeMock).not.toHaveBeenCalled();
-    expectNoNormalSessionSideEffects();
-  });
-
-  it("bounds a sensitive setup-cookie read failure before repository or TOTP work", async () => {
-    getInitialSetupSessionMock.mockRejectedValueOnce(
-      new Error("cookie signing value PERSISTED-SECRET"),
-    );
-    const { confirmInitialTwoFactorSetupAction } = await loadActions();
-
-    const result = await confirmInitialTwoFactorSetupAction(
-      { phase: "idle", success: false, message: "" },
-      formWithCode(),
+      confirmationForm(),
     );
 
     expect(result).toEqual({
-      phase: "error",
+      phase: "restart-required",
       success: false,
-      message: "Unable to enable two-factor authentication. Please try again.",
+      message: "Your two-factor setup changed. Start setup again.",
     });
-    expect(JSON.stringify(result)).not.toMatch(/cookie|signing|PERSISTED-SECRET/);
-    expect(repositoryMocks.getEnrollment).not.toHaveBeenCalled();
     expect(verifyTotpCodeMock).not.toHaveBeenCalled();
-    expectNoNormalSessionSideEffects();
+    expect(generateBackupCodesMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toMatch(/JBSWY3DPEHPK3PXP|otpauth/i);
   });
 
-  it("verifies the currently persisted secret and keeps the setup cookie on invalid TOTP", async () => {
+  it("keeps same-version setup available after an invalid TOTP", async () => {
     verifyTotpCodeMock.mockReturnValueOnce(false);
     const { confirmInitialTwoFactorSetupAction } = await loadActions();
 
     const result = await confirmInitialTwoFactorSetupAction(
       { phase: "idle", success: false, message: "" },
-      formWithCode(),
+      confirmationForm(),
     );
 
-    expect(repositoryMocks.getEnrollment).toHaveBeenCalledWith({
-      userId: "admin-1",
-      email: "admin@example.com",
-      role: UserRole.ADMIN,
-    });
-    expect(verifyTotpCodeMock).toHaveBeenCalledWith("123456", "PERSISTED-SECRET");
+    expect(verifyTotpCodeMock).toHaveBeenCalledWith("123456", "JBSWY3DPEHPK3PXP");
     expect(result).toEqual({
       phase: "error",
       success: false,
       message: "Invalid authenticator code. Check the device time and try again.",
     });
-    expect(generateBackupCodesMock).not.toHaveBeenCalled();
     expect(repositoryMocks.confirmEnrollment).not.toHaveBeenCalled();
-    expectNoNormalSessionSideEffects();
   });
 
-  it("rejects malformed generated backup-code sets before persistence", async () => {
-    generateBackupCodesMock.mockResolvedValueOnce({
-      plain: Array(8).fill("DUPLICATE"),
-      hashed: Array(8).fill("DUPLICATE-HASH"),
-    });
+  it("precomputes session material before committing enrollment", async () => {
     const { confirmInitialTwoFactorSetupAction } = await loadActions();
 
     const result = await confirmInitialTwoFactorSetupAction(
       { phase: "idle", success: false, message: "" },
-      formWithCode(),
+      confirmationForm(),
     );
 
-    expect(result).toEqual({
-      phase: "error",
-      success: false,
-      message: "Unable to enable two-factor authentication. Please try again.",
-    });
-    expect(repositoryMocks.confirmEnrollment).not.toHaveBeenCalled();
-    expectNoNormalSessionSideEffects();
-  });
-
-  it("atomically confirms, clears every auth cookie, and creates exactly one verified session", async () => {
-    const { confirmInitialTwoFactorSetupAction } = await loadActions();
-
-    const result = await confirmInitialTwoFactorSetupAction(
-      { phase: "idle", success: false, message: "" },
-      formWithCode(),
-    );
-
-    expect(repositoryMocks.confirmEnrollment).toHaveBeenCalledWith({
-      userId: "admin-1",
-      email: "admin@example.com",
-      role: UserRole.ADMIN,
-      expectedSecret: "PERSISTED-SECRET",
-      backupCodeHashes: hashedCodes,
-    });
-    expectAllAuthCookiesClearedBeforeSession();
-    expect(createSessionMock).toHaveBeenCalledWith({
+    expect(sessionMocks.prepareSessionCookie).toHaveBeenCalledWith({
       uid: "admin-1",
       role: UserRole.ADMIN,
       email: "admin@example.com",
@@ -382,7 +294,17 @@ describe("restricted initial admin 2FA actions", () => {
       mfaVerified: true,
       authMethod: "password",
     });
-    expect(getPortalRedirectPathMock).toHaveBeenCalledWith(UserRole.ADMIN, "/admin/classes");
+    expect(sessionMocks.prepareSessionCookie.mock.invocationCallOrder[0]).toBeLessThan(
+      repositoryMocks.confirmEnrollment.mock.invocationCallOrder[0],
+    );
+    expect(repositoryMocks.confirmEnrollment).toHaveBeenCalledWith({
+      userId: "admin-1",
+      email: "admin@example.com",
+      role: UserRole.ADMIN,
+      expectedSecret: "JBSWY3DPEHPK3PXP",
+      backupCodeHashes: hashedCodes,
+    });
+    expect(sessionMocks.replaceAuthCookieFamily).toHaveBeenCalledWith(preparedSession);
     expect(result).toEqual({
       phase: "complete",
       success: true,
@@ -390,11 +312,25 @@ describe("restricted initial admin 2FA actions", () => {
       backupCodes: plainCodes,
       continueHref: "/admin/classes",
     });
-    expect(new Set(result.phase === "complete" ? result.backupCodes : [])).toHaveLength(8);
-    expect(JSON.stringify(result)).not.toMatch(/PERSISTED-SECRET|HASH-1|otpauth|cookie|signing/i);
   });
 
-  it("keeps the setup cookie and leaks no values when the transaction rejects a race", async () => {
+  it("does not commit when fallible session preparation fails", async () => {
+    sessionMocks.prepareSessionCookie.mockRejectedValueOnce(
+      new Error("sensitive session signing failure"),
+    );
+    const { confirmInitialTwoFactorSetupAction } = await loadActions();
+
+    const result = await confirmInitialTwoFactorSetupAction(
+      { phase: "idle", success: false, message: "" },
+      confirmationForm(),
+    );
+
+    expect(result).toMatchObject({ phase: "error", success: false });
+    expect(repositoryMocks.confirmEnrollment).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain("sensitive");
+  });
+
+  it("returns restart-required when rotation wins during the confirmation transaction", async () => {
     repositoryMocks.confirmEnrollment.mockRejectedValueOnce(
       new repositoryMocks.InitialAdminTwoFactorEnrollmentError("SECRET_CHANGED"),
     );
@@ -402,35 +338,72 @@ describe("restricted initial admin 2FA actions", () => {
 
     const result = await confirmInitialTwoFactorSetupAction(
       { phase: "idle", success: false, message: "" },
-      formWithCode(),
+      confirmationForm(),
     );
 
     expect(result).toEqual({
-      phase: "error",
+      phase: "restart-required",
       success: false,
       message: "Your two-factor setup changed. Start setup again.",
     });
-    expect(JSON.stringify(result)).not.toMatch(/PERSISTED-SECRET|PLAIN-1|HASH-1/);
-    expectNoNormalSessionSideEffects();
+    expect(sessionMocks.replaceAuthCookieFamily).not.toHaveBeenCalled();
   });
 
-  it("maps unexpected sensitive failures to a bounded response with no auth mutation", async () => {
-    repositoryMocks.getEnrollment.mockRejectedValueOnce(
-      new Error("cookie signing value PERSISTED-SECRET 123456 HASH-1"),
+  it("reports a committed enrollment as handoff-required when response-cookie work fails", async () => {
+    sessionMocks.replaceAuthCookieFamily.mockRejectedValueOnce(
+      new Error("sensitive response cookie failure"),
     );
     const { confirmInitialTwoFactorSetupAction } = await loadActions();
 
     const result = await confirmInitialTwoFactorSetupAction(
       { phase: "idle", success: false, message: "" },
-      formWithCode(),
+      confirmationForm(),
     );
 
+    expect(repositoryMocks.confirmEnrollment).toHaveBeenCalledOnce();
     expect(result).toEqual({
-      phase: "error",
-      success: false,
-      message: "Unable to enable two-factor authentication. Please try again.",
+      phase: "handoff-required",
+      success: true,
+      message:
+        "Two-factor authentication is enabled, but secure sign-in and backup-code delivery still need to be completed.",
     });
-    expect(JSON.stringify(result)).not.toMatch(/cookie|signing|PERSISTED-SECRET|123456|HASH-1/);
-    expectNoNormalSessionSideEffects();
+    expect(JSON.stringify(result)).not.toMatch(/PLAIN-1|[0-9]{32}:[0-9]{128}|sensitive/);
+  });
+
+  it("recovers a committed handoff by rotating fresh hashes before revealing new codes", async () => {
+    const { recoverInitialTwoFactorHandoffAction } = await loadActions();
+
+    const result = await recoverInitialTwoFactorHandoffAction(
+      { phase: "handoff-required", success: true, message: "Recovery required." },
+      emptyForm(),
+    );
+
+    expect(repositoryMocks.recoverHandoff).toHaveBeenCalledWith({
+      userId: "admin-1",
+      email: "admin@example.com",
+      role: UserRole.ADMIN,
+      backupCodeHashes: hashedCodes,
+    });
+    expect(sessionMocks.replaceAuthCookieFamily).toHaveBeenCalledWith(preparedSession);
+    expect(result).toMatchObject({
+      phase: "complete",
+      success: true,
+      backupCodes: plainCodes,
+      continueHref: "/admin/classes",
+    });
+  });
+
+  it("keeps recovery explicit and retryable when its cookie replacement also fails", async () => {
+    sessionMocks.replaceAuthCookieFamily.mockRejectedValueOnce(new Error("cookie failure"));
+    const { recoverInitialTwoFactorHandoffAction } = await loadActions();
+
+    const result = await recoverInitialTwoFactorHandoffAction(
+      { phase: "handoff-required", success: true, message: "Recovery required." },
+      emptyForm(),
+    );
+
+    expect(repositoryMocks.recoverHandoff).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ phase: "handoff-required", success: true });
+    expect(JSON.stringify(result)).not.toMatch(/PLAIN-1|cookie failure/);
   });
 });

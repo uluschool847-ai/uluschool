@@ -11,8 +11,44 @@ const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
 const ADMIN_PENDING_2FA_DURATION_MS = 1000 * 60 * 10;
 const INITIAL_SETUP_DURATION_MS = 1000 * 60 * 15;
 const MAX_INITIAL_SETUP_NEXT_PATH_LENGTH = 2048;
+const MAX_INITIAL_TWO_FACTOR_CAPABILITY_LENGTH = 1024;
 
 type AuthMethod = "password" | "sso";
+
+type SessionInput = {
+  uid: string;
+  role: UserRole;
+  email: string;
+  fullName?: string | null;
+  mfaVerified?: boolean;
+  authMethod?: AuthMethod;
+};
+
+export type PreparedSessionCookie = {
+  name: typeof SESSION_COOKIE;
+  value: string;
+  options: {
+    httpOnly: true;
+    sameSite: "lax";
+    secure: boolean;
+    path: "/";
+    maxAge: number;
+  };
+};
+
+type InitialTwoFactorSetupCapability = {
+  purpose: "INITIAL_2FA_SETUP";
+  uid: string;
+  secretFingerprint: string;
+  exp: number;
+};
+
+export class AuthCookieReplacementError extends Error {
+  constructor() {
+    super("Auth cookie replacement failed");
+    this.name = "AuthCookieReplacementError";
+  }
+}
 
 export type SessionPayload = {
   purpose: "SESSION";
@@ -269,6 +305,62 @@ function isPendingTwoFactorPayload(payload: unknown): payload is PendingTwoFacto
   );
 }
 
+function isInitialTwoFactorSetupCapability(
+  payload: unknown,
+): payload is InitialTwoFactorSetupCapability {
+  return Boolean(
+    isRecord(payload) &&
+      hasOnlyKeys(payload, ["purpose", "uid", "secretFingerprint", "exp"]) &&
+      payload.purpose === "INITIAL_2FA_SETUP" &&
+      isNonEmptyString(payload.uid) &&
+      payload.uid === payload.uid.trim() &&
+      payload.uid.length <= 191 &&
+      typeof payload.secretFingerprint === "string" &&
+      /^[a-f0-9]{64}$/.test(payload.secretFingerprint) &&
+      isValidExpiry(payload.exp),
+  );
+}
+
+export async function getInitialTwoFactorSecretFingerprint(secret: string) {
+  if (!/^[A-Z2-7]{16,128}$/.test(secret)) {
+    throw new Error("Invalid two-factor setup secret");
+  }
+
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export async function createInitialTwoFactorSetupCapability(input: {
+  uid: string;
+  secret: string;
+}) {
+  if (!input.uid || input.uid !== input.uid.trim() || input.uid.length > 191) {
+    throw new Error("Invalid initial setup identity");
+  }
+
+  return encodeSignedPayload({
+    purpose: "INITIAL_2FA_SETUP",
+    uid: input.uid,
+    secretFingerprint: await getInitialTwoFactorSecretFingerprint(input.secret),
+    exp: Date.now() + INITIAL_SETUP_DURATION_MS,
+  } satisfies InitialTwoFactorSetupCapability);
+}
+
+export async function readInitialTwoFactorSetupCapability(
+  token: string,
+): Promise<InitialTwoFactorSetupCapability | null> {
+  if (!token || token.length > MAX_INITIAL_TWO_FACTOR_CAPABILITY_LENGTH) {
+    return null;
+  }
+
+  const payload = await decodeSignedPayload(token);
+  if (!isInitialTwoFactorSetupCapability(payload) || !isNotExpired(payload.exp)) {
+    return null;
+  }
+
+  return payload;
+}
+
 export function getPortalDashboardPath(role: UserRole) {
   return PORTAL_DASHBOARD_PATHS[role];
 }
@@ -291,14 +383,7 @@ export function getPortalRedirectPath(role: UserRole, nextPath?: string | null) 
   return getPortalDashboardPath(role);
 }
 
-export async function createSession(input: {
-  uid: string;
-  role: UserRole;
-  email: string;
-  fullName?: string | null;
-  mfaVerified?: boolean;
-  authMethod?: AuthMethod;
-}) {
+export async function prepareSessionCookie(input: SessionInput): Promise<PreparedSessionCookie> {
   const payload: SessionPayload = {
     purpose: "SESSION",
     uid: input.uid,
@@ -310,15 +395,41 @@ export async function createSession(input: {
     authMethod: input.authMethod ?? "password",
   };
 
-  const token = await encodeSignedPayload(payload);
+  return {
+    name: SESSION_COOKIE,
+    value: await encodeSignedPayload(payload),
+    options: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: (process.env.NODE_ENV ?? "development") === "production",
+      path: "/",
+      maxAge: SESSION_DURATION_MS / 1000,
+    },
+  };
+}
+
+export async function createSession(input: SessionInput) {
+  const prepared = await prepareSessionCookie(input);
   const cookieStore = await cookies();
-  cookieStore.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: (process.env.NODE_ENV ?? "development") === "production",
-    path: "/",
-    maxAge: SESSION_DURATION_MS / 1000,
-  });
+  cookieStore.set(prepared.name, prepared.value, prepared.options);
+}
+
+export async function replaceAuthCookieFamilyWithSession(prepared: PreparedSessionCookie) {
+  let cookieStore: Awaited<ReturnType<typeof cookies>> | null = null;
+
+  try {
+    cookieStore = await cookies();
+    cookieStore.set(prepared.name, prepared.value, prepared.options);
+    cookieStore.delete(ADMIN_PENDING_2FA_COOKIE);
+    cookieStore.delete(INITIAL_SETUP_COOKIE);
+  } catch {
+    try {
+      cookieStore?.delete(SESSION_COOKIE);
+    } catch {
+      // Recovery remains authorized by the short-lived signed setup cookie when it survives.
+    }
+    throw new AuthCookieReplacementError();
+  }
 }
 
 export async function clearSession() {
