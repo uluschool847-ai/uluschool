@@ -1,11 +1,12 @@
 import { LocalStorageService } from "@/lib/storage/LocalStorageService";
+import { R2StorageService } from "@/lib/storage/R2StorageService";
 import type { StorageService } from "@/lib/storage/StorageService";
 
 const serviceCache = new Map<string, StorageService>();
 
 function resolveStorageDriver() {
   const driver = (process.env.STORAGE_DRIVER ?? "local").trim().toLowerCase();
-  if (driver !== "local") {
+  if (driver !== "local" && driver !== "r2") {
     throw new Error("Unsupported storage driver");
   }
   return driver;
@@ -19,7 +20,15 @@ export function createStorageService(): StorageService {
   const cached = serviceCache.get(driver);
   if (cached) return cached;
 
-  const service = new LocalStorageService();
+  const service =
+    driver === "r2"
+      ? new R2StorageService({
+          endpoint: process.env.R2_ENDPOINT ?? "",
+          bucket: process.env.R2_BUCKET_NAME ?? "",
+          accessKeyId: process.env.R2_ACCESS_KEY_ID ?? "",
+          secretAccessKey: process.env.R2_SECRET_ACCESS_KEY ?? "",
+        })
+      : new LocalStorageService();
   serviceCache.set(driver, service);
   return service;
 }
