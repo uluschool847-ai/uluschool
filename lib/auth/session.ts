@@ -434,7 +434,7 @@ export async function verifySessionToken(
 ): Promise<SessionPayload | null> {
   if (!token) return null;
   const payload = await decodeSignedPayload(token);
-  if (!isSessionPayload(payload) || !isNotExpired(payload.exp)) {
+  if (!isSessionPayload(payload)) {
     return null;
   }
   return payload;

@@ -26,9 +26,12 @@ export async function loginAction(
   prevState: LoginFormState,
   formData: FormData,
 ): Promise<LoginFormState> {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
-  const nextPath = formData.get("next") as string | null;
+  const emailValue = formData.get("email");
+  const passwordValue = formData.get("password");
+  const nextValue = formData.get("next");
+  const email = typeof emailValue === "string" ? emailValue : "";
+  const password = typeof passwordValue === "string" ? passwordValue : "";
+  const nextPath = typeof nextValue === "string" ? nextValue : undefined;
   const identifier = email.trim().toLowerCase();
 
   const parsed = loginSchema.safeParse({ email, password });

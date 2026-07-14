@@ -160,6 +160,67 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
     expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["email", new File(["not-an-email"], "email.txt"), false],
+    ["password", new File(["not-a-password"], "password.txt"), false],
+    ["email", null, true],
+    ["password", null, true],
+  ])(
+    "returns invalid input before authentication when %s is not a string",
+    async (field, value, omit) => {
+      const { loginAction } = await import("@/app/portal/login/actions");
+      const formData = new FormData();
+      formData.set("email", "student@uluglobalacademy.com");
+      formData.set("password", "ValidPass123!");
+      if (omit) {
+        formData.delete(field);
+      } else {
+        formData.set(field, value);
+      }
+
+      await expect(loginAction({ success: false, message: "" }, formData)).resolves.toEqual(
+        expect.objectContaining({ success: false, message: "Invalid input" }),
+      );
+
+      expect(findUserByEmailMock).not.toHaveBeenCalled();
+      expect(verifyPasswordMock).not.toHaveBeenCalled();
+      expect(clearSessionMock).not.toHaveBeenCalled();
+      expect(clearAdminPendingTwoFactorMock).not.toHaveBeenCalled();
+      expect(clearInitialSetupSessionMock).not.toHaveBeenCalled();
+      expect(createSessionMock).not.toHaveBeenCalled();
+      expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
+      expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("omits a File-valued next parameter from the temporary-password setup session", async () => {
+    findUserByEmailMock.mockResolvedValueOnce({
+      id: "user-1",
+      email: "test@uluglobalacademy.com",
+      fullName: "Student User",
+      role: "STUDENT",
+      isActive: true,
+      passwordHash: "hashed",
+      mustChangePassword: true,
+      twoFactorEnabled: false,
+    });
+    const { loginAction } = await import("@/app/portal/login/actions");
+    const formData = new FormData();
+    formData.set("email", "student@uluglobalacademy.com");
+    formData.set("password", "ValidPass123!");
+    formData.set("next", new File(["not-a-route"], "next.txt"));
+
+    await expect(loginAction({ success: false, message: "" }, formData)).rejects.toThrow(
+      "REDIRECT:/portal/setup/password",
+    );
+
+    expect(createInitialSetupSessionMock).toHaveBeenCalledWith({
+      uid: "user-1",
+      email: "test@uluglobalacademy.com",
+      role: "STUDENT",
+    });
+  });
+
   it("parses the next parameter and redirects to the exact intended path upon successful 2FA", async () => {
     let verify2faAction:
       | ((state: { success: boolean; message: string }, formData: FormData) => Promise<unknown>)

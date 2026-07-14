@@ -534,6 +534,11 @@ describe("session validation and expiry handling", () => {
     vi.setSystemTime(new Date("2026-05-05T10:00:00.000Z"));
     const token = await createSignedSessionToken({ uid: "user-1", role: UserRole.STUDENT });
     vi.advanceTimersByTime(7 * 24 * 60 * 60 * 1000);
+
+    await expect(sessionModule.verifySessionToken(token)).resolves.toEqual(
+      expect.objectContaining({ purpose: "SESSION", exp: Date.now() }),
+    );
+
     const validateSession = getValidateSession();
     const result = await validateSession?.(token);
     expect(result).toEqual({
