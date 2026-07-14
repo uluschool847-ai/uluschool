@@ -8,7 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import type { InitialPasswordFormState } from "@/lib/validations/initial-password";
+import {
+  INITIAL_PASSWORD_MAX_LENGTH,
+  type InitialPasswordFormState,
+} from "@/lib/validations/initial-password";
 
 const initialState: InitialPasswordFormState = {
   success: false,
@@ -49,6 +52,7 @@ export function InitialPasswordForm() {
           name="currentPassword"
           type="password"
           autoComplete="current-password"
+          maxLength={INITIAL_PASSWORD_MAX_LENGTH}
           aria-required="true"
           aria-invalid={Boolean(state.errors?.currentPassword?.length)}
           aria-describedby={
@@ -70,6 +74,7 @@ export function InitialPasswordForm() {
           type="password"
           autoComplete="new-password"
           minLength={12}
+          maxLength={INITIAL_PASSWORD_MAX_LENGTH}
           aria-required="true"
           aria-invalid={Boolean(state.errors?.newPassword?.length)}
           aria-describedby={state.errors?.newPassword?.length ? "new-password-error" : undefined}
@@ -89,6 +94,7 @@ export function InitialPasswordForm() {
           type="password"
           autoComplete="new-password"
           minLength={12}
+          maxLength={INITIAL_PASSWORD_MAX_LENGTH}
           aria-required="true"
           aria-invalid={Boolean(state.errors?.confirmPassword?.length)}
           aria-describedby={

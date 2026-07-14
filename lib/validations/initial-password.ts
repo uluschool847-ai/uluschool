@@ -1,9 +1,12 @@
 import { z } from "zod";
 
+export const INITIAL_PASSWORD_MAX_LENGTH = 256;
+
 export const initialPasswordMessages = {
   invalidInput: "Invalid input.",
   currentRequired: "Enter your current password.",
   minimumLength: "Use at least 12 characters.",
+  maximumLength: "Use 256 characters or fewer.",
   mismatch: "Passwords do not match.",
   setupExpired: "Your setup session has expired. Please sign in again.",
   setupInvalid: "Your setup session is no longer valid. Please sign in again.",
@@ -14,9 +17,18 @@ export const initialPasswordMessages = {
 
 export const initialPasswordSchema = z
   .object({
-    currentPassword: z.string().min(8, initialPasswordMessages.currentRequired),
-    newPassword: z.string().min(12, initialPasswordMessages.minimumLength),
-    confirmPassword: z.string().min(12, initialPasswordMessages.minimumLength),
+    currentPassword: z
+      .string()
+      .min(8, initialPasswordMessages.currentRequired)
+      .max(INITIAL_PASSWORD_MAX_LENGTH, initialPasswordMessages.maximumLength),
+    newPassword: z
+      .string()
+      .min(12, initialPasswordMessages.minimumLength)
+      .max(INITIAL_PASSWORD_MAX_LENGTH, initialPasswordMessages.maximumLength),
+    confirmPassword: z
+      .string()
+      .min(12, initialPasswordMessages.minimumLength)
+      .max(INITIAL_PASSWORD_MAX_LENGTH, initialPasswordMessages.maximumLength),
   })
   .refine((value) => value.newPassword === value.confirmPassword, {
     path: ["confirmPassword"],
@@ -42,6 +54,7 @@ const INITIAL_PASSWORD_FIELDS = new Set<InitialPasswordField>([
 const ALLOWED_FIELD_MESSAGES = new Set<string>([
   initialPasswordMessages.currentRequired,
   initialPasswordMessages.minimumLength,
+  initialPasswordMessages.maximumLength,
   initialPasswordMessages.mismatch,
 ]);
 

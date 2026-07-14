@@ -148,6 +148,48 @@ describe("changeInitialPasswordAction", () => {
     },
   );
 
+  it.each(["currentPassword", "newPassword", "confirmPassword"])(
+    "rejects a 257-character %s before setup, repository, cookie, or session work",
+    async (field) => {
+      const formData = validForm();
+      const overlongPassword = "a".repeat(257);
+      formData.set(field, overlongPassword);
+      const { changeInitialPasswordAction } = await loadAction();
+
+      const result = await changeInitialPasswordAction({ success: false, message: "" }, formData);
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          success: false,
+          message: "Invalid input.",
+          errors: expect.objectContaining({
+            [field]: expect.arrayContaining(["Use 256 characters or fewer."]),
+          }),
+        }),
+      );
+      expect(getInitialSetupSessionMock).not.toHaveBeenCalled();
+      expect(accountSetupMocks.changeInitialPassword).not.toHaveBeenCalled();
+      expect(JSON.stringify(result)).not.toContain(overlongPassword);
+      expectNoCookieOrSessionSideEffects();
+    },
+  );
+
+  it("rejects a non-FormData input before reading fields or touching dependencies", async () => {
+    const nonFormData = { get: vi.fn() };
+    const { changeInitialPasswordAction } = await loadAction();
+
+    const result = await changeInitialPasswordAction(
+      { success: false, message: "" },
+      nonFormData as unknown as FormData,
+    );
+
+    expect(result).toEqual({ success: false, message: "Invalid input." });
+    expect(nonFormData.get).not.toHaveBeenCalled();
+    expect(getInitialSetupSessionMock).not.toHaveBeenCalled();
+    expect(accountSetupMocks.changeInitialPassword).not.toHaveBeenCalled();
+    expectNoCookieOrSessionSideEffects();
+  });
+
   it("returns allowlisted field errors for a short new password", async () => {
     const formData = validForm();
     formData.set("newPassword", "TooShort1!");

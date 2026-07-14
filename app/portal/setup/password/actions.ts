@@ -38,6 +38,10 @@ export async function changeInitialPasswordAction(
   _previousState: InitialPasswordFormState,
   formData: FormData,
 ): Promise<InitialPasswordFormState> {
+  if (!(formData instanceof FormData)) {
+    return { success: false, message: initialPasswordMessages.invalidInput };
+  }
+
   const parsed = initialPasswordSchema.safeParse({
     currentPassword: getStringEntry(formData, "currentPassword"),
     newPassword: getStringEntry(formData, "newPassword"),

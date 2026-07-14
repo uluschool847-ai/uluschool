@@ -50,6 +50,22 @@ describe("InitialPasswordForm", () => {
     expect(document.querySelector('input[name="userId"]')).toBeNull();
   });
 
+  it("sets a 256-character maximum on all fields to block 257-character passwords", () => {
+    const overlongPassword = "a".repeat(257);
+    render(<InitialPasswordForm />);
+
+    const passwordInputs = [
+      screen.getByLabelText(/current password/i),
+      screen.getByLabelText(/^new password/i),
+      screen.getByLabelText(/confirm new password/i),
+    ] as HTMLInputElement[];
+
+    for (const input of passwordInputs) {
+      expect(input.maxLength).toBe(256);
+      expect(overlongPassword.length).toBeGreaterThan(input.maxLength);
+    }
+  });
+
   it("associates allowlisted field errors and announces the form error", () => {
     useActionStateMock.mockReturnValue([
       {
