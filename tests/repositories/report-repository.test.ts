@@ -31,7 +31,8 @@ vi.mock("@/lib/repositories/student-progress-repository", () => ({
 vi.mock("@/lib/services/report-pdf", () => ({
   renderReportSnapshotPdf: renderReportSnapshotPdfMock,
 }));
-vi.mock("@/lib/storage", () => ({
+vi.mock("@/lib/storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/storage")>()),
   createStorageService: () => ({
     getURL: getURLMock,
     upload: uploadMock,
@@ -531,7 +532,11 @@ describe("report-repository contract", () => {
       }),
     );
     expect(renderReportSnapshotPdfMock).toHaveBeenCalledWith(snapshot().snapshotData);
-    expect(uploadMock).toHaveBeenCalledWith(expect.any(Buffer), "amina-yusuf-spring-2026.pdf");
+    expect(uploadMock).toHaveBeenCalledWith(expect.any(Buffer), {
+      filename: "amina-yusuf-spring-2026.pdf",
+      namespace: "private/teachers/teacher-1/reports",
+      contentType: "application/pdf",
+    });
     expect(prismaMock.reportSnapshot.update).toHaveBeenCalledWith({
       where: { id: "snapshot-1" },
       data: {

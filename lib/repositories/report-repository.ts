@@ -5,7 +5,7 @@ import { listAttendanceHistoryForStudent } from "@/lib/repositories/attendance-r
 import { getTeacherStudentGradebook } from "@/lib/repositories/gradebook-repository";
 import { listProgressNotesForTeacherStudent } from "@/lib/repositories/student-progress-repository";
 import { renderReportSnapshotPdf } from "@/lib/services/report-pdf";
-import { createStorageService } from "@/lib/storage";
+import { createStorageService, teacherReportNamespace } from "@/lib/storage";
 
 type ReportDatabase = typeof prisma | Prisma.TransactionClient;
 
@@ -412,8 +412,12 @@ export async function exportReportSnapshotPdf(teacherId: string, snapshotId: str
     throw new Error("Report snapshot not found.");
   }
   const rendered = await renderReportSnapshotPdf(snapshot.snapshotData as Record<string, unknown>);
-  const storage = createStorageService({ runtimeRole: "TEACHER" });
-  const storageKey = await storage.upload(Buffer.from(rendered.bytes), rendered.filename);
+  const storage = createStorageService();
+  const storageKey = await storage.upload(Buffer.from(rendered.bytes), {
+    filename: rendered.filename,
+    namespace: teacherReportNamespace(teacherId),
+    contentType: rendered.contentType,
+  });
   const pdfGeneratedAt = new Date();
   const updatedSnapshot = await prisma.reportSnapshot.update({
     where: { id: snapshot.id },

@@ -11,11 +11,12 @@ import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 import {
   createCourseMaterialForTeacher,
   deleteCourseMaterialForTeacher,
+  getCourseMaterialForTeacher,
   unlinkCourseMaterialAttachmentForTeacher,
   updateCourseMaterialForTeacher,
   validateCourseMaterialFileUrl,
 } from "@/lib/repositories/course-material-repository";
-import { createStorageService } from "@/lib/storage";
+import { createStorageService, isTeacherMaterialStorageKey } from "@/lib/storage";
 
 const fileUrlSchema = z
   .string()
@@ -152,13 +153,59 @@ function normalizeAttachments(input: {
   return input.attachments ?? (input.attachment ? [input.attachment] : undefined);
 }
 
-async function cleanupStorageKeys(storageKeys: unknown) {
-  if (!Array.isArray(storageKeys) || storageKeys.length === 0) return;
-  const storage = createStorageService({ runtimeRole: "DEVELOPER" });
+const STORAGE_OWNERSHIP_ERROR = "Uploaded file is not owned by this teacher.";
+
+function assertTeacherOwnsStorageKeys(storageKeys: unknown, teacherId: string) {
+  if (!Array.isArray(storageKeys)) return;
   for (const storageKey of storageKeys) {
-    if (typeof storageKey === "string" && storageKey.trim()) {
-      await storage.delete(storageKey);
+    if (typeof storageKey !== "string" || !isTeacherMaterialStorageKey(storageKey, teacherId)) {
+      throw new Error(STORAGE_OWNERSHIP_ERROR);
     }
+  }
+}
+
+function assertTeacherOwnsAttachments(
+  attachments: Array<{ storageKey: string }> | undefined,
+  teacherId: string,
+) {
+  assertTeacherOwnsStorageKeys(
+    attachments?.map((attachment) => attachment.storageKey),
+    teacherId,
+  );
+}
+
+function storedAttachments(material: unknown) {
+  if (!material || typeof material !== "object" || !("attachments" in material)) return [];
+  const attachments = (material as { attachments?: unknown }).attachments;
+  if (!Array.isArray(attachments)) return [];
+  const validAttachments = attachments.filter(
+    (attachment): attachment is { id: string; storageKey: string } =>
+      Boolean(attachment) &&
+      typeof attachment === "object" &&
+      typeof (attachment as { id?: unknown }).id === "string" &&
+      typeof (attachment as { storageKey?: unknown }).storageKey === "string",
+  );
+  if (validAttachments.length !== attachments.length) {
+    throw new Error(STORAGE_OWNERSHIP_ERROR);
+  }
+  return validAttachments;
+}
+
+async function loadOwnedMaterialWithValidatedAttachments(materialId: string, teacherId: string) {
+  const material = await getCourseMaterialForTeacher(materialId, teacherId);
+  if (!material) {
+    throw new Error("Material not found or not owned by teacher.");
+  }
+  assertTeacherOwnsAttachments(storedAttachments(material), teacherId);
+  return material;
+}
+
+async function cleanupStorageKeys(storageKeys: unknown, teacherId: string) {
+  if (!Array.isArray(storageKeys) || storageKeys.length === 0) return;
+  assertTeacherOwnsStorageKeys(storageKeys, teacherId);
+  const storage = createStorageService();
+  for (const storageKey of storageKeys) {
+    await storage.delete(storageKey as string);
   }
 }
 
@@ -173,13 +220,16 @@ export async function submitCourseMaterialAction(
       return { success: false, error: parsed.error.flatten().fieldErrors };
     }
 
+    const attachments = normalizeAttachments(parsed.data);
+    assertTeacherOwnsAttachments(attachments, session.uid);
+
     const material = await createCourseMaterialForTeacher({
       title: parsed.data.title,
       description: parsed.data.description,
       fileUrl: parsed.data.fileUrl,
       scheduledClassId: parsed.data.scheduledClassId,
       teacherId: session.uid,
-      attachments: normalizeAttachments(parsed.data),
+      attachments,
     });
 
     await writeMaterialAudit({
@@ -190,7 +240,6 @@ export async function submitCourseMaterialAction(
       after: material,
       meta: materialMeta(session.uid, material),
     });
-    const attachments = normalizeAttachments(parsed.data);
     if (attachments?.length) {
       await writeMaterialAudit({
         teacherId: session.uid,
@@ -241,6 +290,10 @@ export async function updateCourseMaterialAction(
     }
 
     const attachments = normalizeAttachments(parsed.data);
+    assertTeacherOwnsAttachments(attachments, session.uid);
+    if (attachments?.length) {
+      await loadOwnedMaterialWithValidatedAttachments(id, session.uid);
+    }
     const material = await updateCourseMaterialForTeacher(id, session.uid, {
       ...parsed.data,
       attachments,
@@ -256,7 +309,7 @@ export async function updateCourseMaterialAction(
     });
     if (attachments?.length) {
       const cleanup = (material as { cleanup?: { storageKeys?: string[] } }).cleanup;
-      await cleanupStorageKeys(cleanup?.storageKeys);
+      await cleanupStorageKeys(cleanup?.storageKeys, session.uid);
       await writeMaterialAudit({
         teacherId: session.uid,
         action: "COURSE_MATERIAL_FILE_REPLACED",
@@ -287,8 +340,9 @@ export async function updateCourseMaterialAction(
 export async function deleteCourseMaterialAction(id: string) {
   try {
     const session = await requireRole([UserRole.TEACHER]);
+    await loadOwnedMaterialWithValidatedAttachments(id, session.uid);
     const deleted = await deleteCourseMaterialForTeacher(id, session.uid);
-    await cleanupStorageKeys(deleted.cleanup?.storageKeys);
+    await cleanupStorageKeys(deleted.cleanup?.storageKeys, session.uid);
 
     await writeMaterialAudit({
       teacherId: session.uid,
@@ -339,19 +393,34 @@ export async function unlinkAttachmentAction(payload: {
   try {
     const session = await requireRole([UserRole.TEACHER]);
 
-    const attachment = payload.materialId
-      ? await unlinkCourseMaterialAttachmentForTeacher(
-          session.uid,
-          payload.materialId,
-          payload.attachmentId,
-        )
-      : {
-          attachmentId: payload.attachmentId,
-          materialId: null,
-          storageKey: payload.storageKey ?? "",
-        };
+    let attachment: { attachmentId: string; materialId: string | null; storageKey: string };
+    if (payload.materialId) {
+      const material = await loadOwnedMaterialWithValidatedAttachments(
+        payload.materialId,
+        session.uid,
+      );
+      const storedAttachment = storedAttachments(material).find(
+        (candidate) => candidate.id === payload.attachmentId,
+      );
+      if (!storedAttachment) {
+        throw new Error("Material attachment not found or not owned by teacher.");
+      }
+      attachment = await unlinkCourseMaterialAttachmentForTeacher(
+        session.uid,
+        payload.materialId,
+        payload.attachmentId,
+      );
+      assertTeacherOwnsStorageKeys([attachment.storageKey], session.uid);
+    } else {
+      attachment = {
+        attachmentId: payload.attachmentId,
+        materialId: null,
+        storageKey: payload.storageKey ?? "",
+      };
+      assertTeacherOwnsStorageKeys([attachment.storageKey], session.uid);
+    }
 
-    const storage = createStorageService({ runtimeRole: "DEVELOPER" });
+    const storage = createStorageService();
     if (attachment.storageKey) {
       await storage.delete(attachment.storageKey);
     }
@@ -379,6 +448,17 @@ export async function unlinkAttachmentAction(payload: {
 
 export async function deleteCourseMaterialWithFilesAction(payload: { materialId: string }) {
   const session = await requireRole([UserRole.TEACHER]);
+  const existing = await getCourseMaterialForTeacher(payload.materialId, session.uid);
+  if (!existing) {
+    return {
+      success: true as const,
+      cleanup: {
+        queued: false,
+        deleted: 0,
+      },
+    };
+  }
+  assertTeacherOwnsAttachments(storedAttachments(existing), session.uid);
   const deleted = await deleteCourseMaterialForTeacher(payload.materialId, session.uid).catch(
     () => null,
   );

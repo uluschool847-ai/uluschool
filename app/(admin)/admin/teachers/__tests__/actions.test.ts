@@ -49,7 +49,8 @@ vi.mock("next/navigation", () => ({
   redirect: redirectMock,
 }));
 
-vi.mock("@/lib/storage", () => ({
+vi.mock("@/lib/storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/storage")>()),
   createStorageService: createStorageServiceMock,
 }));
 
@@ -257,7 +258,11 @@ describe("Admin teacher profile actions", () => {
 
     const result = await createTeacherAction(formData);
 
-    expect(storageUploadMock).toHaveBeenCalledWith(expect.any(File), "jane-doe.webp");
+    expect(storageUploadMock).toHaveBeenCalledWith(expect.any(File), {
+      filename: "jane-doe.webp",
+      namespace: "public/teachers/admin-1",
+      contentType: "image/webp",
+    });
     expect(createTeacherMock).toHaveBeenCalledWith(
       {
         fullName: "Jane Doe",
@@ -451,7 +456,11 @@ describe("Admin teacher profile actions", () => {
 
     const result = await updateTeacherAction(formData);
 
-    expect(storageUploadMock).toHaveBeenCalledWith(expect.any(File), "jane-updated.webp");
+    expect(storageUploadMock).toHaveBeenCalledWith(expect.any(File), {
+      filename: "jane-updated.webp",
+      namespace: "public/teachers/admin-1",
+      contentType: "image/webp",
+    });
     expect(storageDeleteMock).toHaveBeenCalledWith("/uploads/teacher-1/old-photo.webp");
     expect(updateTeacherMock).toHaveBeenCalledWith(
       "teacher-1",

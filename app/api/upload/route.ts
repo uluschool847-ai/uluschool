@@ -2,43 +2,20 @@ import { UserRole } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 import { getSession } from "@/lib/auth/session";
-import { createStorageService } from "@/lib/storage";
-
-const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
-const ALLOWED_MIME_TYPES = new Set([
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/zip",
-  "application/x-zip-compressed",
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-  "image/webp",
-  "image/gif",
-  "text/plain",
-]);
-
-function isAllowedMime(type: string) {
-  if (type.startsWith("image/")) return true;
-  return ALLOWED_MIME_TYPES.has(type);
-}
-
-function sanitizeFilename(raw: string) {
-  const parts = raw.split(/[\\/]+/);
-  const base = parts.at(-1) ?? "file";
-  const clean = base.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/-+/g, "-");
-  return clean || "file";
-}
+import {
+  createStorageService,
+  publicTeacherPhotoNamespace,
+  teacherMaterialNamespace,
+} from "@/lib/storage";
+import { sanitizeStorageFilename } from "@/lib/storage/storage-key";
+import { validateUploadMetadata } from "@/lib/storage/upload-input";
 
 function filenameFromStorageKey(storageKey: string) {
-  return sanitizeFilename(storageKey.split(/[\\/]+/).at(-1) ?? "file");
+  return sanitizeStorageFilename(storageKey.split(/[\\/]+/).at(-1) ?? "file");
 }
 
 function responseFilename(file: FileLike, storageKey: string) {
-  const filename = sanitizeFilename(file.name);
+  const filename = sanitizeStorageFilename(file.name || "upload");
   return filename === "blob" ? filenameFromStorageKey(storageKey) : filename;
 }
 
@@ -73,6 +50,7 @@ function getStatusForUploadError(message: string) {
   if (/mime|type|allowed/i.test(message)) return 415;
   if (/5mb|too large|size/i.test(message)) return 413;
   if (/empty|zero/i.test(message)) return 400;
+  if (/filename|name/i.test(message)) return 400;
   if (/enospc|no space left/i.test(message)) return 507;
   return 500;
 }
@@ -128,6 +106,11 @@ export async function POST(request: Request) {
     );
   }
 
+  const namespace =
+    purpose === "teacher-photo"
+      ? publicTeacherPhotoNamespace(session.uid)
+      : teacherMaterialNamespace(session.uid);
+
   const files = formData.getAll("files").filter((entry): entry is File => isFileLike(entry));
   const file = formData.get("file");
   const single = isFileLike(file) ? [file] : [];
@@ -141,22 +124,26 @@ export async function POST(request: Request) {
 
   if (effectiveFiles.length === 1) {
     const current = effectiveFiles[0];
-    const fileSize = current.size;
-    if (fileSize <= 0) {
-      return NextResponse.json({ success: false, error: "File is empty" }, { status: 400 });
-    }
-    if (fileSize > MAX_FILE_SIZE_BYTES) {
+    try {
+      validateUploadMetadata({
+        filename: current.name || "upload",
+        size: current.size,
+        contentType: current.type,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Upload failed";
       return NextResponse.json(
-        { success: false, error: "File too large (max 5MB)" },
-        { status: 413 },
+        { success: false, error: message },
+        { status: getStatusForUploadError(message) },
       );
-    }
-    if (!isAllowedMime(current.type)) {
-      return NextResponse.json({ success: false, error: "MIME type not allowed" }, { status: 415 });
     }
 
     try {
-      const fileId = await service.upload(current);
+      const fileId = await service.upload(current, {
+        filename: current.name || "upload",
+        namespace,
+        contentType: current.type,
+      });
       const url = service.getURL(fileId);
       return NextResponse.json(
         uploadSuccessPayload({
@@ -164,7 +151,7 @@ export async function POST(request: Request) {
           publicUrl: url,
           filename: responseFilename(current, fileId),
           mimeType: current.type,
-          size: fileSize,
+          size: current.size,
         }),
         { status: 201 },
       );
@@ -180,23 +167,26 @@ export async function POST(request: Request) {
   const failed: Array<{ name: string; error: string }> = [];
 
   for (const current of effectiveFiles) {
-    const fileSize = current.size;
-
-    if (fileSize <= 0) {
-      failed.push({ name: current.name, error: "File is empty" });
-      continue;
-    }
-    if (fileSize > MAX_FILE_SIZE_BYTES) {
-      failed.push({ name: current.name, error: "File too large (max 5MB)" });
-      continue;
-    }
-    if (!isAllowedMime(current.type)) {
-      failed.push({ name: current.name, error: "MIME type not allowed" });
+    try {
+      validateUploadMetadata({
+        filename: current.name || "upload",
+        size: current.size,
+        contentType: current.type,
+      });
+    } catch (error) {
+      failed.push({
+        name: current.name,
+        error: error instanceof Error ? error.message : "Upload failed",
+      });
       continue;
     }
 
     try {
-      const fileId = await service.upload(current);
+      const fileId = await service.upload(current, {
+        filename: current.name || "upload",
+        namespace,
+        contentType: current.type,
+      });
       const url = service.getURL(fileId);
       uploaded.push({
         fileId,
@@ -205,12 +195,15 @@ export async function POST(request: Request) {
         publicUrl: url,
         filename: responseFilename(current, fileId),
         mimeType: current.type,
-        size: fileSize,
+        size: current.size,
         name: responseFilename(current, fileId),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
-      failed.push({ name: current.name, error: message });
+      failed.push({
+        name: current.name,
+        error: getStatusForUploadError(message) === 500 ? "Upload failed" : message,
+      });
     }
   }
 

@@ -1,24 +1,41 @@
 import { LocalStorageService } from "@/lib/storage/LocalStorageService";
-import type { CreateStorageServiceOptions, StorageService } from "@/lib/storage/StorageService";
+import type { StorageService } from "@/lib/storage/StorageService";
 
 const serviceCache = new Map<string, StorageService>();
 
-export function createStorageService(options: CreateStorageServiceOptions = {}): StorageService {
-  const runtimeRole = (options.runtimeRole ?? "DEVELOPER").toUpperCase();
-  const cacheKey = runtimeRole;
-
-  const cached = serviceCache.get(cacheKey);
-  if (cached) {
-    return cached;
+function resolveStorageDriver() {
+  const driver = (process.env.STORAGE_DRIVER ?? "local").trim().toLowerCase();
+  if (driver !== "local") {
+    throw new Error("Unsupported storage driver");
   }
+  return driver;
+}
+
+export function createStorageService(): StorageService {
+  const driver = resolveStorageDriver();
+  const cached = serviceCache.get(driver);
+  if (cached) return cached;
 
   const service = new LocalStorageService();
-  serviceCache.set(cacheKey, service);
+  serviceCache.set(driver, service);
   return service;
 }
 
 export type {
-  CreateStorageServiceOptions,
   StorageService,
   UploadInput,
+  UploadOptions,
 } from "@/lib/storage/StorageService";
+export {
+  buildStorageKey,
+  isTeacherMaterialStorageKey,
+  publicTeacherPhotoNamespace,
+  teacherMaterialNamespace,
+  teacherReportNamespace,
+  validateStorageKey,
+} from "@/lib/storage/storage-key";
+export {
+  decodeStorageToken,
+  encodeStorageKey,
+  storageUrlForKey,
+} from "@/lib/storage/storage-url";

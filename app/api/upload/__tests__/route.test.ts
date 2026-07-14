@@ -5,7 +5,8 @@ const getURLMock = vi.hoisted(() => vi.fn());
 const deleteMock = vi.hoisted(() => vi.fn());
 const getSessionMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/storage", () => ({
+vi.mock("@/lib/storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/storage")>()),
   createStorageService: () => ({
     upload: uploadMock,
     getURL: getURLMock,
@@ -38,16 +39,13 @@ function buildUploadRequest(
 ) {
   const form = new FormData();
   form.append("purpose", input.purpose ?? "course-material");
-  form.append(
-    "file",
-    input.file ?? new File(["content"], "lesson.pdf", { type: "application/pdf" }),
-  );
+  const file = input.file ?? new File(["content"], "lesson.pdf", { type: "application/pdf" });
+  form.append("file", file, file.name);
 
-  return new Request("http://localhost/api/upload", {
-    method: "POST",
-    headers: input.roleHeader ? { "x-role": input.roleHeader } : undefined,
-    body: form,
-  });
+  return {
+    formData: async () => form,
+    headers: new Headers(input.roleHeader ? { "x-role": input.roleHeader } : undefined),
+  } as unknown as Request;
 }
 
 describe("app/api/upload/route local-first upload integration", () => {
@@ -64,8 +62,8 @@ describe("app/api/upload/route local-first upload integration", () => {
   });
 
   it("returns 201 with upload metadata for an authorized teacher", async () => {
-    uploadMock.mockResolvedValueOnce("uploads/teacher/1234.pdf");
-    getURLMock.mockReturnValueOnce("/public/uploads/teacher/1234.pdf");
+    uploadMock.mockResolvedValueOnce("private/teachers/teacher-1/materials/1234-homework.pdf");
+    getURLMock.mockReturnValueOnce("/api/files/private-token");
 
     const response = await POST(
       buildUploadRequest({
@@ -74,13 +72,18 @@ describe("app/api/upload/route local-first upload integration", () => {
     );
 
     expect(response.status).toBe(201);
+    expect(uploadMock).toHaveBeenCalledWith(expect.any(File), {
+      filename: "homework.pdf",
+      namespace: "private/teachers/teacher-1/materials",
+      contentType: "application/pdf",
+    });
     expect(await response.json()).toEqual(
       expect.objectContaining({
         success: true,
-        fileId: "uploads/teacher/1234.pdf",
-        url: "/public/uploads/teacher/1234.pdf",
-        storageKey: "uploads/teacher/1234.pdf",
-        publicUrl: "/public/uploads/teacher/1234.pdf",
+        fileId: "private/teachers/teacher-1/materials/1234-homework.pdf",
+        url: "/api/files/private-token",
+        storageKey: "private/teachers/teacher-1/materials/1234-homework.pdf",
+        publicUrl: "/api/files/private-token",
         filename: expect.any(String),
         mimeType: "application/pdf",
         size: expect.any(Number),
@@ -146,6 +149,14 @@ describe("app/api/upload/route local-first upload integration", () => {
       const response = await POST(buildUploadRequest({ purpose }));
 
       expect(response.status).toBe(201);
+      expect(uploadMock).toHaveBeenCalledWith(expect.any(File), {
+        filename: "lesson.pdf",
+        namespace:
+          purpose === "teacher-photo"
+            ? "public/teachers/admin-1"
+            : "private/teachers/admin-1/materials",
+        contentType: "application/pdf",
+      });
       expect(await response.json()).toEqual(
         expect.objectContaining({
           success: true,
@@ -234,6 +245,52 @@ describe("app/api/upload/route local-first upload integration", () => {
     expect(await response.json()).toEqual({
       success: false,
       error: expect.stringMatching(/(mime|type|allowed)/i),
+    });
+  });
+
+  it("rejects image subtypes outside the strict MIME allowlist", async () => {
+    const response = await POST(
+      buildUploadRequest({
+        file: new File(["<svg />"], "diagram.svg", { type: "image/svg+xml" }),
+      }),
+    );
+
+    expect(response.status).toBe(415);
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unbounded filename before invoking storage", async () => {
+    const response = await POST(
+      buildUploadRequest({
+        file: new File(["content"], `${"a".repeat(256)}.pdf`, {
+          type: "application/pdf",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores client namespace input and derives it from the signed session", async () => {
+    uploadMock.mockResolvedValueOnce("private/teachers/teacher-1/materials/1234-lesson.pdf");
+    getURLMock.mockReturnValueOnce("/api/files/private-token");
+    const form = new FormData();
+    form.append("purpose", "course-material");
+    form.append("namespace", "private/teachers/teacher-2/materials");
+    form.append(
+      "file",
+      new File(["content"], "lesson.pdf", { type: "application/pdf" }),
+      "lesson.pdf",
+    );
+
+    const response = await POST({ formData: async () => form } as unknown as Request);
+
+    expect(response.status).toBe(201);
+    expect(uploadMock).toHaveBeenCalledWith(expect.any(File), {
+      filename: "lesson.pdf",
+      namespace: "private/teachers/teacher-1/materials",
+      contentType: "application/pdf",
     });
   });
 
@@ -350,6 +407,24 @@ describe("app/api/upload/route local-first upload integration", () => {
         failed: expect.any(Array),
       }),
     );
+  });
+
+  it("bounds unexpected storage errors in batch responses", async () => {
+    uploadMock
+      .mockRejectedValueOnce(new Error("backend-secret: bucket unavailable"))
+      .mockResolvedValueOnce("private/teachers/teacher-1/materials/c.zip");
+    getURLMock.mockReturnValueOnce("/api/files/c-token");
+    const form = new FormData();
+    form.append("purpose", "course-material");
+    form.append("files", new File(["a"], "a.pdf", { type: "application/pdf" }), "a.pdf");
+    form.append("files", new File(["c"], "c.zip", { type: "application/zip" }), "c.zip");
+
+    const response = await POST({ formData: async () => form } as unknown as Request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(207);
+    expect(payload.failed).toEqual([{ name: "a.pdf", error: "Upload failed" }]);
+    expect(JSON.stringify(payload)).not.toContain("backend-secret");
   });
 
   it("should keep storage integrity under concurrent upload requests for the same file", async () => {

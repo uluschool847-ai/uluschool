@@ -14,7 +14,7 @@ import {
   setTeacherActive,
   updateTeacher,
 } from "@/lib/repositories/cms-repository";
-import { createStorageService } from "@/lib/storage";
+import { createStorageService, publicTeacherPhotoNamespace } from "@/lib/storage";
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpg", "image/jpeg", "image/png", "image/webp"]);
@@ -108,6 +108,7 @@ function validatePhoto(photo: File | null) {
 
 async function resolvePhotoUrl(
   formData: FormData,
+  adminId: string,
 ): Promise<{ photoUrl?: string | null; errors?: string[] }> {
   const photo = extractPhoto(formData);
   const photoErrors = validatePhoto(photo);
@@ -116,8 +117,12 @@ async function resolvePhotoUrl(
   }
 
   if (photo) {
-    const storage = createStorageService({ runtimeRole: "ADMIN" });
-    const storageKey = await storage.upload(photo, photo.name);
+    const storage = createStorageService();
+    const storageKey = await storage.upload(photo, {
+      filename: photo.name,
+      namespace: publicTeacherPhotoNamespace(adminId),
+      contentType: photo.type,
+    });
     return { photoUrl: storage.getURL(storageKey) };
   }
 
@@ -209,7 +214,7 @@ export async function createTeacherAction(
     return { success: false, errors };
   }
 
-  const photoResult = await resolvePhotoUrl(formData);
+  const photoResult = await resolvePhotoUrl(formData, session.uid);
   if (photoResult.errors) {
     if (flashMode && errorRedirect) {
       redirect(buildRedirectUrl(errorRedirect, "teacherError", photoResult.errors.join(" ")));
@@ -335,7 +340,7 @@ export async function updateTeacherAction(
     return { success: false, errors };
   }
 
-  const photoResult = await resolvePhotoUrl(formData);
+  const photoResult = await resolvePhotoUrl(formData, session.uid);
   if (photoResult.errors) {
     if (flashMode && errorRedirect) {
       redirect(buildRedirectUrl(errorRedirect, "teacherError", photoResult.errors.join(" ")));
@@ -403,7 +408,7 @@ export async function updateTeacherAction(
       currentPhotoUrl !== photoResult.photoUrl &&
       currentPhotoUrl.startsWith("/uploads/")
     ) {
-      const storage = createStorageService({ runtimeRole: "ADMIN" });
+      const storage = createStorageService();
       try {
         await storage.delete(currentPhotoUrl);
       } catch {

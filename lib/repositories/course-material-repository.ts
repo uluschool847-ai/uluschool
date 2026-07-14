@@ -391,7 +391,7 @@ export async function deleteCourseMaterialForTeacher(
 
   await database.courseMaterial.delete({ where: { id: existing.id } });
 
-  const storage = createStorageService({ runtimeRole: "DEVELOPER" });
+  const storage = createStorageService();
   let deleted = 0;
   for (const storageKey of storageKeys) {
     await storage.delete(storageKey);
