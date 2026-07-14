@@ -20,6 +20,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
+    "bootstrap:production": "tsx prisma/bootstrap-production.ts",
     "db:reset": "prisma migrate reset --force",
     "db:clean": "prisma generate && prisma db push --force-reset && npm run db:seed",
     "db:verify": "tsx prisma/verify-db.ts",
