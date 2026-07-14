@@ -95,7 +95,18 @@ function lessonRecord(overrides: Record<string, unknown> = {}) {
         title: "Algebra worksheet",
         description: "Practice file",
         fileUrl: "https://cdn.example.com/stale-algebra.pdf",
-        attachments: [{ storageKey: materialStorageKey }],
+        attachments: [
+          {
+            id: "attachment-z",
+            storageKey: materialStorageKey,
+            createdAt: new Date("2026-07-01T07:00:00.000Z"),
+          },
+          {
+            id: "attachment-a",
+            storageKey: "private/teachers/teacher-1/materials/old-algebra.pdf",
+            createdAt: new Date("2026-07-01T07:00:00.000Z"),
+          },
+        ],
         createdAt: new Date("2026-07-01T08:00:00.000Z"),
       },
     ],
@@ -224,7 +235,7 @@ describe("teacher lesson workspace repository", () => {
       prismaMock.scheduledClass.findFirst.mock.calls[0]?.[0]?.include?.courseMaterials?.select
         ?.attachments,
     ).toEqual({
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       select: { storageKey: true },
       take: 1,
     });

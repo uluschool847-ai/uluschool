@@ -158,23 +158,6 @@ export async function exportReportSnapshotPdfAction(
   const session = await requireRole([UserRole.TEACHER]);
   try {
     const exported = await exportReportSnapshotPdf(session.uid, snapshotId);
-    await createAdminAuditLog(
-      {
-        adminUserId: session.uid,
-        actorId: session.uid,
-        action: "REPORT_PDF_EXPORTED",
-        targetType: "reportSnapshot",
-        targetId: snapshotId,
-        meta: {
-          teacherId: session.uid,
-          reportSnapshotId: snapshotId,
-          storageKey: exported.storageKey,
-          pdfStorageKey: exported.snapshot.pdfStorageKey,
-          pdfGeneratedAt: exported.snapshot.pdfGeneratedAt,
-        },
-      } as Parameters<typeof createAdminAuditLog>[0] & { actorId: string },
-      prisma,
-    );
     revalidateReportSnapshotPaths(snapshotId, exported.snapshot.studentId);
     return { success: true, data: exported };
   } catch (error) {

@@ -888,6 +888,61 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       );
     });
 
+    it("allows metadata and lesson edits to round-trip an unchanged canonical attachment URL", async () => {
+      const storageKey =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-physics.pdf";
+      const fileUrl = storageUrlForKey(storageKey);
+
+      const response = await updateCourseMaterialAction("mat-123", {
+        title: "Metadata and lesson update",
+        description: "The persisted attachment is unchanged",
+        fileUrl,
+        scheduledClassId: "lesson-456",
+      });
+
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(updateCourseMaterialForTeacherMock).toHaveBeenCalledWith(
+        "mat-123",
+        "teacher-123",
+        {
+          title: "Metadata and lesson update",
+          description: "The persisted attachment is unchanged",
+          fileUrl,
+          scheduledClassId: "lesson-456",
+          attachments: undefined,
+        },
+        transactionClientMock,
+      );
+      expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "COURSE_MATERIAL_UPDATED" }),
+        transactionClientMock,
+      );
+      expect(createAdminAuditLogMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: "COURSE_MATERIAL_FILE_REPLACED" }),
+        expect.anything(),
+      );
+    });
+
+    it("returns the repository rejection for a mismatched unchanged canonical token", async () => {
+      updateCourseMaterialForTeacherMock.mockRejectedValueOnce(
+        new Error("Internal upload URLs require matching attachment metadata."),
+      );
+      const mismatchedKey =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000009-other.pdf";
+
+      const response = await updateCourseMaterialAction("mat-123", {
+        title: "Rejected token",
+        fileUrl: storageUrlForKey(mismatchedKey),
+      });
+
+      expect(response).toEqual({
+        success: false,
+        error: "Internal upload URLs require matching attachment metadata.",
+      });
+      expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      expect(revalidatePathMock).not.toHaveBeenCalled();
+    });
+
     it("update action forwards replacement attachment metadata and audits replacement", async () => {
       const replacementStorageKey =
         "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000002-replacement.pdf";

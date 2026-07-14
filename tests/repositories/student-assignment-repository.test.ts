@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
+const primaryMaterialKey = "private/teachers/teacher-1/materials/lesson-notes.pdf";
+const primarySubmissionKey = "private/students/student-1/submissions/solution.pdf";
+
 const prismaMock = vi.hoisted(() => ({
   assignment: {
     findFirst: vi.fn(),
@@ -56,8 +61,21 @@ function assignmentRow(overrides: Record<string, unknown> = {}) {
         {
           id: "material-1",
           title: "Lesson notes",
-          fileUrl: "/uploads/materials/lesson-notes.pdf",
-          attachments: [],
+          fileUrl: "https://cdn.example.com/stale-lesson-notes.pdf",
+          attachments: [
+            {
+              id: "attachment-material-z",
+              filename: "lesson-notes.pdf",
+              storageKey: primaryMaterialKey,
+              createdAt: new Date("2026-06-17T10:00:00.000Z"),
+            },
+            {
+              id: "attachment-material-a",
+              filename: "old-lesson-notes.pdf",
+              storageKey: "private/teachers/teacher-1/materials/old-lesson-notes.pdf",
+              createdAt: new Date("2026-06-17T10:00:00.000Z"),
+            },
+          ],
         },
       ],
     },
@@ -394,9 +412,16 @@ describe("student assignment read repository", () => {
             feedback: "Clear method. Check final notation.",
             attachments: [
               {
-                id: "attachment-1",
+                id: "attachment-submission-z",
                 filename: "solution.pdf",
-                storageKey: "submissions/solution.pdf",
+                storageKey: primarySubmissionKey,
+                createdAt: new Date("2026-06-19T17:00:00.000Z"),
+              },
+              {
+                id: "attachment-submission-a",
+                filename: "old-solution.pdf",
+                storageKey: "private/students/student-1/submissions/old-solution.pdf",
+                createdAt: new Date("2026-06-19T17:00:00.000Z"),
               },
             ],
           }),
@@ -412,6 +437,15 @@ describe("student assignment read repository", () => {
     const { getAssignmentDetailForStudent } = await loadRepository();
     const detail = await getAssignmentDetailForStudent("student-1", "assignment-1");
 
+    const include = prismaMock.assignment.findFirst.mock.calls[0]?.[0]?.include;
+    expect(include?.scheduledClass?.include?.courseMaterials?.select?.attachments?.orderBy).toEqual(
+      [{ createdAt: "desc" }, { id: "desc" }],
+    );
+    expect(include?.submissions?.include?.attachments?.orderBy).toEqual([
+      { createdAt: "desc" },
+      { id: "desc" },
+    ]);
+
     expect(detail).toEqual(
       expect.objectContaining({
         id: "assignment-1",
@@ -426,14 +460,14 @@ describe("student assignment read repository", () => {
         materials: [
           expect.objectContaining({
             id: "material-1",
-            href: "/uploads/materials/lesson-notes.pdf",
+            href: storageUrlForKey(primaryMaterialKey),
           }),
         ],
         currentSubmission: expect.objectContaining({
           id: "submission-1",
           grade: 91,
           feedback: "Clear method. Check final notation.",
-          submittedWorkHref: "https://drive.example.com/work-v1",
+          submittedWorkHref: storageUrlForKey(primarySubmissionKey),
         }),
         submissionHistory: expect.arrayContaining([
           expect.objectContaining({ id: "submission-1", status: "Graded" }),

@@ -178,11 +178,20 @@ describe("student-schedule-repository access contract", () => {
             fileUrl: "https://cdn.example.com/stale.pdf",
             attachments: [
               {
-                id: "current-attachment",
+                id: "attachment-z",
                 filename: "schedule.pdf",
                 storageKey: currentKey,
                 mimeType: "application/pdf",
                 size: 20,
+                createdAt: new Date("2026-07-14T08:00:00.000Z"),
+              },
+              {
+                id: "attachment-a",
+                filename: "old-schedule.pdf",
+                storageKey: "private/teachers/teacher-1/materials/old-schedule.pdf",
+                mimeType: "application/pdf",
+                size: 19,
+                createdAt: new Date("2026-07-14T08:00:00.000Z"),
               },
             ],
           },
@@ -215,11 +224,17 @@ describe("student-schedule-repository access contract", () => {
     const { listStudentSchedule } = await loadStudentScheduleRepository();
     const [lesson] = await listStudentSchedule({ studentId: "student-1", from, to });
 
+    expect(
+      prismaMock.scheduledClass.findMany.mock.calls[0]?.[0]?.include?.courseMaterials?.select
+        ?.attachments?.orderBy,
+    ).toEqual([{ createdAt: "desc" }, { id: "desc" }]);
     expect(lesson.materials).toEqual([
       expect.objectContaining({
         id: "current-material",
         safeFileUrl: storageUrlForKey(currentKey),
-        attachments: [expect.objectContaining({ href: storageUrlForKey(currentKey) })],
+        attachments: expect.arrayContaining([
+          expect.objectContaining({ href: storageUrlForKey(currentKey) }),
+        ]),
       }),
       expect.objectContaining({
         id: "legacy-material",

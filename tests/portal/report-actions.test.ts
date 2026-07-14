@@ -158,19 +158,27 @@ describe("teacher report actions", () => {
     expect(revalidatePathMock).toHaveBeenCalledWith("/portal/parent");
   });
 
-  it("exports PDF from snapshot and audits export", async () => {
+  it("delegates the audited export lifecycle to the repository and revalidates after commit", async () => {
     const { exportReportSnapshotPdfAction } = await loadReportActions();
     await exportReportSnapshotPdfAction("snapshot-1");
 
     expect(exportReportSnapshotPdfMock).toHaveBeenCalledWith("teacher-1", "snapshot-1");
-    expect(createAdminAuditLogMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: "REPORT_PDF_EXPORTED",
-        targetId: "snapshot-1",
-        targetType: "reportSnapshot",
-      }),
-      expect.anything(),
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).toHaveBeenCalledWith("/portal/teacher/reports/snapshot-1");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/portal/student/reports/snapshot-1");
+  });
+
+  it("does not audit or revalidate when the transactional export fails", async () => {
+    exportReportSnapshotPdfMock.mockRejectedValueOnce(
+      new Error("report export transaction failed"),
     );
+    const { exportReportSnapshotPdfAction } = await loadReportActions();
+
+    const result = await exportReportSnapshotPdfAction("snapshot-1");
+
+    expect(result).toEqual({ success: false, error: "report export transaction failed" });
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
   it("does not audit failed validation or ownership errors", async () => {

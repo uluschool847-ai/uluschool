@@ -2,6 +2,7 @@ import { type ClassGroupStatus, LessonStatus, type Prisma } from "@prisma/client
 
 import { validateLiveLessonUrl } from "@/lib/lessons/live-lesson-url";
 import { prisma } from "@/lib/prisma";
+import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
 import { preferredStoredFileHref } from "@/lib/security/storage-links";
 
 type SortKey = "name" | "nextLesson" | "pendingSubmissions" | "rosterSize";
@@ -206,7 +207,7 @@ function groupSelect() {
             fileUrl: true,
             attachments: {
               select: { storageKey: true },
-              orderBy: [{ createdAt: "asc" as const }, { id: "asc" as const }],
+              orderBy: newestAttachmentOrderBy(),
               take: 1,
             },
           },

@@ -267,7 +267,18 @@ describe("teacher classes repository", () => {
           id: "material-1",
           title: "Angles worksheet",
           fileUrl: "https://cdn.example.com/stale-angles.pdf",
-          attachments: [{ storageKey }],
+          attachments: [
+            {
+              id: "attachment-z",
+              storageKey,
+              createdAt: new Date("2026-06-05T09:00:00.000Z"),
+            },
+            {
+              id: "attachment-a",
+              storageKey: "private/teachers/teacher-1/materials/old-angles.pdf",
+              createdAt: new Date("2026-06-05T09:00:00.000Z"),
+            },
+          ],
         },
         {
           id: "material-external",
@@ -317,7 +328,7 @@ describe("teacher classes repository", () => {
       prismaMock.classGroup.findFirst.mock.calls[0]?.[0]?.select?.lessons?.select?.courseMaterials
         ?.select?.attachments,
     ).toEqual({
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       select: { storageKey: true },
       take: 1,
     });

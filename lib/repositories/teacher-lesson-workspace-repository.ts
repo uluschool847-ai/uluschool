@@ -2,6 +2,7 @@ import { LessonStatus, type MeetingProvider, type Prisma } from "@prisma/client"
 
 import { canStartLesson } from "@/lib/lessons/lesson-status";
 import { prisma } from "@/lib/prisma";
+import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
 import { preferredStoredFileHref } from "@/lib/security/storage-links";
 
 const DEFAULT_TIMEZONE = "Africa/Nairobi";
@@ -257,7 +258,7 @@ function lessonInclude(teacherId: string) {
         createdAt: true,
         attachments: {
           select: { storageKey: true },
-          orderBy: [{ createdAt: "asc" as const }, { id: "asc" as const }],
+          orderBy: newestAttachmentOrderBy(),
           take: 1,
         },
       },

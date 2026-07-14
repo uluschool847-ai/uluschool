@@ -23,7 +23,20 @@ function submission(overrides: Record<string, unknown> = {}) {
     submittedAt: new Date("2026-07-14T10:00:00.000Z"),
     updatedAt: new Date("2026-07-14T10:00:00.000Z"),
     student: { id: "student-1", fullName: "Student One", email: "student@example.com" },
-    attachments: [{ id: "attachment-1", filename: "work.pdf", storageKey: currentKey }],
+    attachments: [
+      {
+        id: "attachment-z",
+        filename: "work.pdf",
+        storageKey: currentKey,
+        createdAt: new Date("2026-07-14T09:00:00.000Z"),
+      },
+      {
+        id: "attachment-a",
+        filename: "old-work.pdf",
+        storageKey: "private/students/student-1/submissions/old-work.pdf",
+        createdAt: new Date("2026-07-14T09:00:00.000Z"),
+      },
+    ],
     assignment: {
       id: "assignment-1",
       title: "Homework",
@@ -52,6 +65,9 @@ describe("submission storage presentation", () => {
     const { listSubmissionsForTeacher } = await import("@/lib/repositories/submission-repository");
     const [result] = await listSubmissionsForTeacher("teacher-1");
 
+    expect(
+      prismaMock.submission.findMany.mock.calls[0]?.[0]?.include?.attachments?.orderBy,
+    ).toEqual([{ createdAt: "desc" }, { id: "desc" }]);
     expect(result.contentUrl).toBe(storageUrlForKey(currentKey));
     expect(result.attachmentLink?.href).toBe(storageUrlForKey(currentKey));
   });

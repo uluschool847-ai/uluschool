@@ -5,6 +5,7 @@ import { generateTemporaryPassword } from "@/lib/auth/temporary-password";
 import { canStartLesson as getLessonStartState } from "@/lib/lessons/lesson-status";
 import { validateLiveLessonUrl } from "@/lib/lessons/live-lesson-url";
 import { prisma } from "@/lib/prisma";
+import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
 import { preferredStoredFileHref } from "@/lib/security/storage-links";
 
 type PortalDatabase = typeof prisma | Prisma.TransactionClient;
@@ -1537,7 +1538,7 @@ export async function getTeacherDashboardData(teacherId: string): Promise<Teache
         grade: true,
         attachments: {
           select: { storageKey: true },
-          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          orderBy: newestAttachmentOrderBy(),
           take: 1,
         },
         student: {

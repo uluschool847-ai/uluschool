@@ -143,7 +143,18 @@ describe("Teacher material edit page", () => {
     getCourseMaterialForTeacherMock.mockResolvedValueOnce(
       material({
         fileUrl: "https://cdn.example.com/stale-algebra.pdf",
-        attachments: [{ storageKey }],
+        attachments: [
+          {
+            id: "attachment-z",
+            storageKey,
+            createdAt: new Date("2026-07-14T08:00:00.000Z"),
+          },
+          {
+            id: "attachment-a",
+            storageKey: "private/teachers/teacher-1/materials/old-algebra.pdf",
+            createdAt: new Date("2026-07-14T08:00:00.000Z"),
+          },
+        ],
       }),
     );
 

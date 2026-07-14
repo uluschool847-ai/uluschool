@@ -5,6 +5,7 @@ import {
   parseLessonStatus,
 } from "@/lib/lessons/lesson-status";
 import { prisma } from "@/lib/prisma";
+import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
 import { preferredStoredFileHref, storageHrefForKey } from "@/lib/security/storage-links";
 
 const DEFAULT_TIMEZONE = "Africa/Nairobi";
@@ -224,6 +225,7 @@ function buildLessonInclude(studentId?: string, studentIds?: string[]) {
             mimeType: true,
             size: true,
           },
+          orderBy: newestAttachmentOrderBy(),
         },
       },
       orderBy: { createdAt: "desc" as const },

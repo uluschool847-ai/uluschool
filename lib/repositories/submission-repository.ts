@@ -1,6 +1,7 @@
 import type { Prisma, ReminderChannel, ReminderDeliveryStatus } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
 import {
   preferredStoredFileHref,
   safeStoredFileHref,
@@ -119,7 +120,7 @@ const submissionInclude = {
   student: { select: { id: true, fullName: true, email: true } },
   attachments: {
     select: { id: true, filename: true, storageKey: true },
-    orderBy: { createdAt: "desc" as const },
+    orderBy: newestAttachmentOrderBy(),
   },
   assignment: {
     include: {
@@ -281,7 +282,7 @@ function studentAssignmentInclude(studentId: string) {
             fileUrl: true,
             attachments: {
               select: { id: true, filename: true, storageKey: true },
-              orderBy: { createdAt: "desc" as const },
+              orderBy: newestAttachmentOrderBy(),
             },
           },
           orderBy: { createdAt: "desc" as const },
@@ -293,7 +294,7 @@ function studentAssignmentInclude(studentId: string) {
       include: {
         attachments: {
           select: { id: true, filename: true, storageKey: true },
-          orderBy: { createdAt: "desc" as const },
+          orderBy: newestAttachmentOrderBy(),
         },
       },
       orderBy: { submittedAt: "desc" as const },

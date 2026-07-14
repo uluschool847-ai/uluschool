@@ -1946,7 +1946,7 @@ describe("portal-repository teacher portal visibility", () => {
     const submissionRecord = (
       id: string,
       contentUrl: string,
-      attachments: Array<{ storageKey: string }> = [],
+      attachments: Array<{ storageKey: string; id?: string; createdAt?: Date }> = [],
     ) => ({
       id,
       contentUrl,
@@ -2005,7 +2005,16 @@ describe("portal-repository teacher portal visibility", () => {
     prismaMock.submission.findMany.mockResolvedValueOnce([
       {
         ...submissionRecord("submission-sofia", "https://cdn.example.com/stale-submission.pdf", [
-          { storageKey: submissionStorageKey },
+          {
+            id: "attachment-z",
+            storageKey: submissionStorageKey,
+            createdAt: new Date("2026-05-31T11:00:00.000Z"),
+          },
+          {
+            id: "attachment-a",
+            storageKey: "private/teachers/teacher-john/submissions/obsolete.pdf",
+            createdAt: new Date("2026-05-31T11:00:00.000Z"),
+          },
         ]),
         student: {
           id: "student-sofia",
@@ -2089,7 +2098,7 @@ describe("portal-repository teacher portal visibility", () => {
       }),
     );
     expect(prismaMock.submission.findMany.mock.calls[0]?.[0]?.select?.attachments).toEqual({
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       select: { storageKey: true },
       take: 1,
     });

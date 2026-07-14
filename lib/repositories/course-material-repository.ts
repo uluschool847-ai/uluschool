@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
 import { preferredStoredFileHref, storageHrefForKey } from "@/lib/security/storage-links";
 import { isTeacherMaterialStorageKey, validateLegacyStorageKey } from "@/lib/storage/storage-key";
 import {
@@ -68,7 +69,9 @@ export type UpdateCourseMaterialForTeacherInput = {
 };
 
 const materialInclude = {
-  attachments: true,
+  attachments: {
+    orderBy: newestAttachmentOrderBy(),
+  },
   scheduledClass: {
     select: {
       id: true,
@@ -233,6 +236,7 @@ async function findOrphanStorageKeys(storageKeys: string[], database: MaterialDa
 function validateUpdateFileUrl(
   fileUrl: string | null,
   existingFileUrl: string,
+  existingPrimaryStorageKey: string | null,
   hasReplacement: boolean,
 ) {
   const value = fileUrl?.trim() ?? "";
@@ -240,20 +244,35 @@ function validateUpdateFileUrl(
     if (hasReplacement) return null;
     throw new Error("File URL is required.");
   }
+  const primaryHref = storageHrefForKey(existingPrimaryStorageKey);
+  let matchesTrustedExistingUrl = false;
+  try {
+    matchesTrustedExistingUrl =
+      validateCourseMaterialFileUrl(existingFileUrl, { allowTrustedLegacy: true }) === value;
+  } catch {
+    matchesTrustedExistingUrl = false;
+  }
   if (value.startsWith("/uploads/") || value.startsWith("/public/uploads/")) {
     const legacyUrl = validateCourseMaterialFileUrl(value, { allowTrustedLegacy: true });
-    if (legacyUrl !== existingFileUrl.trim()) {
+    const matchesPrimaryAttachment = primaryHref === legacyUrl;
+    if (!hasReplacement && !matchesPrimaryAttachment && !matchesTrustedExistingUrl) {
       throw new Error("Legacy upload URLs cannot be submitted as new material files.");
     }
-    return legacyUrl;
+    return matchesPrimaryAttachment ? primaryHref : legacyUrl;
   }
   const validatedFileUrl = validateCourseMaterialFileUrl(value);
-  if (
-    validatedFileUrl?.startsWith("/api/") &&
-    !hasReplacement &&
-    validatedFileUrl !== existingFileUrl.trim()
-  ) {
-    throw new Error("Internal upload URLs require matching attachment metadata.");
+  if (validatedFileUrl?.startsWith("/api/") && !hasReplacement) {
+    const matchesPrimaryAttachment = Boolean(
+      existingPrimaryStorageKey &&
+        storageUrlMatchesKey(validatedFileUrl, existingPrimaryStorageKey),
+    );
+    if (!matchesPrimaryAttachment && !matchesTrustedExistingUrl) {
+      throw new Error("Internal upload URLs require matching attachment metadata.");
+    }
+    if (matchesPrimaryAttachment) {
+      return storageUrlForKey(existingPrimaryStorageKey as string);
+    }
+    return primaryHref ?? validatedFileUrl;
   }
   return validatedFileUrl;
 }
@@ -358,11 +377,18 @@ export async function updateCourseMaterialForTeacher(
   const data: Prisma.CourseMaterialUpdateInput = {};
   const isReplacingFile = hasAttachment(input);
   const validatedStoredKeys = validateStoredCleanupKeys(existing.attachments, teacherId);
+  const existingPrimaryStorageKey = validatedStoredKeys[0] ?? null;
+  const existingPrimaryHref = storageHrefForKey(existingPrimaryStorageKey);
   const oldStorageKeys = isReplacingFile ? validatedStoredKeys : [];
   const validatedFileUrl =
     input.fileUrl === undefined
-      ? null
-      : validateUpdateFileUrl(input.fileUrl, existing.fileUrl, isReplacingFile);
+      ? existingPrimaryHref
+      : validateUpdateFileUrl(
+          input.fileUrl,
+          existing.fileUrl,
+          existingPrimaryStorageKey,
+          isReplacingFile,
+        );
 
   if (isReplacingFile) {
     assertTeacherOwnsAttachmentInputs(input.attachments, teacherId, validatedFileUrl);
@@ -375,7 +401,7 @@ export async function updateCourseMaterialForTeacher(
   if (input.description !== undefined) {
     data.description = input.description?.trim() ?? null;
   }
-  if (input.fileUrl !== undefined) {
+  if (input.fileUrl !== undefined || existingPrimaryHref) {
     if (validatedFileUrl) data.fileUrl = validatedFileUrl;
   }
   if (isReplacingFile) {
@@ -507,10 +533,7 @@ export async function deleteCourseMaterialForTeacher(
       id,
       OR: teacherMaterialScope(teacherId),
     },
-    include: {
-      ...materialInclude,
-      attachments: true,
-    },
+    include: materialInclude,
   });
 
   if (!existing) {
@@ -630,7 +653,9 @@ export async function listStudentCourseMaterials(
   const materials = await database.courseMaterial.findMany({
     where,
     include: {
-      attachments: true,
+      attachments: {
+        orderBy: newestAttachmentOrderBy(),
+      },
       scheduledClass: {
         select: {
           id: true,

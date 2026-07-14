@@ -2,11 +2,17 @@ import { Buffer } from "node:buffer";
 import { type Prisma, UserRole } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 import { listAttendanceHistoryForStudent } from "@/lib/repositories/attendance-repository";
 import { getTeacherStudentGradebook } from "@/lib/repositories/gradebook-repository";
 import { listProgressNotesForTeacherStudent } from "@/lib/repositories/student-progress-repository";
 import { renderReportSnapshotPdf } from "@/lib/services/report-pdf";
-import { createStorageService, teacherReportNamespace } from "@/lib/storage";
+import {
+  createStorageService,
+  teacherReportNamespace,
+  validateLegacyStorageKey,
+  validateStorageKey,
+} from "@/lib/storage";
 
 type ReportDatabase = typeof prisma | Prisma.TransactionClient;
 
@@ -407,6 +413,61 @@ export async function listReportSnapshotsForParentChild(
   );
 }
 
+function trustedPreviousReportStorageKey(value: unknown, teacherId: string) {
+  if (typeof value !== "string" || !value) return null;
+
+  try {
+    const storageKey = validateStorageKey(value);
+    const namespace = teacherReportNamespace(teacherId);
+    return storageKey.startsWith(`${namespace}/`) ? storageKey : null;
+  } catch {
+    try {
+      return validateLegacyStorageKey(value);
+    } catch {
+      return null;
+    }
+  }
+}
+
+function persistedReportStorageKeyAliases(storageKey: string) {
+  if (!storageKey.startsWith("uploads/")) return [storageKey];
+  return [storageKey, `/${storageKey}`, `public/${storageKey}`, `/public/${storageKey}`];
+}
+
+async function deleteReportStorageKeyBestEffort(
+  storage: ReturnType<typeof createStorageService>,
+  storageKey: string,
+) {
+  try {
+    await storage.delete(storageKey);
+  } catch {
+    // Storage cleanup must not replace a transaction error or a committed export.
+  }
+}
+
+async function cleanupPreviousReportPdfBestEffort(input: {
+  persistedValue: unknown;
+  replacementStorageKey: string;
+  storage: ReturnType<typeof createStorageService>;
+  teacherId: string;
+}) {
+  if (input.persistedValue === input.replacementStorageKey) return;
+  const cleanupStorageKey = trustedPreviousReportStorageKey(input.persistedValue, input.teacherId);
+  if (!cleanupStorageKey || typeof input.persistedValue !== "string") return;
+
+  try {
+    const remainingReference = await prisma.reportSnapshot.findFirst({
+      where: { pdfStorageKey: { in: persistedReportStorageKeyAliases(cleanupStorageKey) } },
+      select: { id: true },
+    });
+    if (!remainingReference) {
+      await input.storage.delete(cleanupStorageKey);
+    }
+  } catch {
+    // The export is committed; reference checks and old-object cleanup are best-effort.
+  }
+}
+
 export async function exportReportSnapshotPdf(teacherId: string, snapshotId: string) {
   const snapshot = await getReportSnapshotForTeacher(teacherId, snapshotId);
   if (!snapshot) {
@@ -419,16 +480,69 @@ export async function exportReportSnapshotPdf(teacherId: string, snapshotId: str
     namespace: teacherReportNamespace(teacherId),
     contentType: "application/pdf",
   });
-  const pdfGeneratedAt = new Date();
-  const updatedSnapshot = await prisma.reportSnapshot.update({
-    where: { id: snapshot.id },
-    data: { pdfGeneratedAt, pdfStorageKey: storageKey },
+  let exported: { previousPdfStorageKey: string | null; snapshot: typeof snapshot };
+  try {
+    exported = await prisma.$transaction(async (transaction) => {
+      const currentSnapshot = await getReportSnapshotForTeacher(teacherId, snapshotId, transaction);
+      if (!currentSnapshot) {
+        throw new Error("Report snapshot not found.");
+      }
+
+      const pdfGeneratedAt = new Date();
+      const updatedSnapshot = await transaction.reportSnapshot.update({
+        where: {
+          id: currentSnapshot.id,
+          generatedByTeacherId: teacherId,
+          updatedAt: currentSnapshot.updatedAt,
+        },
+        data: { pdfGeneratedAt, pdfStorageKey: storageKey },
+      });
+      await createAdminAuditLog(
+        {
+          adminUserId: teacherId,
+          action: "REPORT_PDF_EXPORTED",
+          targetType: "reportSnapshot",
+          targetId: currentSnapshot.id,
+          before: {
+            pdfGeneratedAt: currentSnapshot.pdfGeneratedAt,
+            pdfStorageKey: currentSnapshot.pdfStorageKey,
+          },
+          after: {
+            pdfGeneratedAt: updatedSnapshot.pdfGeneratedAt,
+            pdfStorageKey: updatedSnapshot.pdfStorageKey,
+          },
+          meta: {
+            teacherId,
+            reportSnapshotId: currentSnapshot.id,
+            storageKey,
+            pdfStorageKey: updatedSnapshot.pdfStorageKey,
+            pdfGeneratedAt: updatedSnapshot.pdfGeneratedAt,
+          },
+        },
+        transaction,
+      );
+
+      return {
+        previousPdfStorageKey: currentSnapshot.pdfStorageKey,
+        snapshot: updatedSnapshot,
+      };
+    });
+  } catch (error) {
+    await deleteReportStorageKeyBestEffort(storage, storageKey);
+    throw error;
+  }
+
+  await cleanupPreviousReportPdfBestEffort({
+    persistedValue: exported.previousPdfStorageKey,
+    replacementStorageKey: storageKey,
+    storage,
+    teacherId,
   });
 
   return {
     ...rendered,
     publicUrl: storage.getURL(storageKey),
-    snapshot: updatedSnapshot,
+    snapshot: exported.snapshot,
     storageKey,
   };
 }

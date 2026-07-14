@@ -5,11 +5,19 @@ import { storageUrlForKey } from "@/lib/storage/storage-url";
 
 const storageUploadMock = vi.hoisted(() => vi.fn());
 const storageGetUrlMock = vi.hoisted(() => vi.fn());
+const storageDeleteMock = vi.hoisted(() => vi.fn());
 const renderReportSnapshotPdfMock = vi.hoisted(() => vi.fn());
-const prismaMock = vi.hoisted(() => ({
+const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
+const transactionClientMock = vi.hoisted(() => ({
   reportSnapshot: {
     findFirst: vi.fn(),
     update: vi.fn(),
+  },
+}));
+const prismaMock = vi.hoisted(() => ({
+  $transaction: vi.fn(),
+  reportSnapshot: {
+    findFirst: vi.fn(),
   },
 }));
 
@@ -17,9 +25,13 @@ vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/services/report-pdf", () => ({
   renderReportSnapshotPdf: renderReportSnapshotPdfMock,
 }));
+vi.mock("@/lib/repositories/admin-audit-repository", () => ({
+  createAdminAuditLog: createAdminAuditLogMock,
+}));
 vi.mock("@/lib/storage", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/storage")>()),
   createStorageService: () => ({
+    delete: storageDeleteMock,
     upload: storageUploadMock,
     getURL: storageGetUrlMock,
   }),
@@ -28,16 +40,28 @@ vi.mock("@/lib/storage", async (importOriginal) => ({
 describe("report PDF storage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(
+      async (callback: (transaction: typeof transactionClientMock) => Promise<unknown>) =>
+        callback(transactionClientMock),
+    );
+    createAdminAuditLogMock.mockResolvedValue(undefined);
+    storageDeleteMock.mockResolvedValue(undefined);
   });
 
   it("uploads rendered bytes to the authenticated teacher report namespace and persists only key metadata", async () => {
     const storageKey = "private/teachers/teacher-1/reports/report.pdf";
     const publicUrl = storageUrlForKey(storageKey);
-    prismaMock.reportSnapshot.findFirst.mockResolvedValueOnce({
+    const persistedSnapshot = {
       id: "snapshot-1",
       studentId: "student-1",
       snapshotData: { student: { fullName: "Student One" } },
-    });
+      generatedByTeacherId: "teacher-1",
+      pdfGeneratedAt: null,
+      pdfStorageKey: null,
+      updatedAt: new Date("2026-07-14T09:00:00.000Z"),
+    };
+    prismaMock.reportSnapshot.findFirst.mockResolvedValueOnce(persistedSnapshot);
+    transactionClientMock.reportSnapshot.findFirst.mockResolvedValueOnce(persistedSnapshot);
     renderReportSnapshotPdfMock.mockResolvedValueOnce({
       bytes: Uint8Array.from([0x25, 0x50, 0x44, 0x46]),
       filename: "report.pdf",
@@ -45,7 +69,7 @@ describe("report PDF storage", () => {
     });
     storageUploadMock.mockResolvedValueOnce(storageKey);
     storageGetUrlMock.mockReturnValueOnce(publicUrl);
-    prismaMock.reportSnapshot.update.mockImplementationOnce(async ({ data }) => ({
+    transactionClientMock.reportSnapshot.update.mockImplementationOnce(async ({ data }) => ({
       id: "snapshot-1",
       studentId: "student-1",
       ...data,
@@ -60,13 +84,26 @@ describe("report PDF storage", () => {
       contentType: "application/pdf",
     });
     expect(Buffer.isBuffer(storageUploadMock.mock.calls[0]?.[0])).toBe(true);
-    expect(prismaMock.reportSnapshot.update).toHaveBeenCalledWith({
-      where: { id: "snapshot-1" },
+    expect(transactionClientMock.reportSnapshot.update).toHaveBeenCalledWith({
+      where: {
+        id: "snapshot-1",
+        generatedByTeacherId: "teacher-1",
+        updatedAt: new Date("2026-07-14T09:00:00.000Z"),
+      },
       data: {
         pdfGeneratedAt: expect.any(Date),
         pdfStorageKey: storageKey,
       },
     });
+    expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "REPORT_PDF_EXPORTED",
+        targetId: "snapshot-1",
+        meta: expect.objectContaining({ storageKey }),
+      }),
+      transactionClientMock,
+    );
+    expect(storageDeleteMock).not.toHaveBeenCalled();
     expect(result.publicUrl).toBe(publicUrl);
     expect(storageGetUrlMock).toHaveBeenCalledWith(storageKey);
   });

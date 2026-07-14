@@ -1,6 +1,8 @@
 import { UserRole } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
 const prismaMock = vi.hoisted(() => ({
   appUser: {
     findFirst: vi.fn(),
@@ -228,6 +230,49 @@ describe("parent material read repository", () => {
           safeFileUrl: null,
         }),
       ]),
+    );
+  });
+
+  it("preserves the shared newest-primary mapping for a linked parent view", async () => {
+    const primaryKey = "private/teachers/teacher-1/materials/current-parent-view.pdf";
+    const tiedCreatedAt = new Date("2026-06-02T09:00:00.000Z");
+    listStudentCourseMaterialsMock.mockResolvedValueOnce([
+      material({
+        fileUrl: "https://cdn.example.com/stale-parent-view.pdf",
+        safeFileUrl: storageUrlForKey(primaryKey),
+        attachments: [
+          {
+            id: "attachment-z",
+            filename: "current-parent-view.pdf",
+            href: storageUrlForKey(primaryKey),
+            mimeType: "application/pdf",
+            size: 2048,
+            storageKey: primaryKey,
+            createdAt: tiedCreatedAt,
+          },
+          {
+            id: "attachment-a",
+            filename: "old-parent-view.pdf",
+            href: storageUrlForKey("private/teachers/teacher-1/materials/old-parent-view.pdf"),
+            mimeType: "application/pdf",
+            size: 1024,
+            storageKey: "private/teachers/teacher-1/materials/old-parent-view.pdf",
+            createdAt: tiedCreatedAt,
+          },
+        ],
+      }),
+    ]);
+
+    const { listMaterialsForParentChild } = await loadRepository();
+    const [row] = await listMaterialsForParentChild("parent-1", "student-1");
+
+    expect(row).toEqual(
+      expect.objectContaining({
+        safeFileUrl: storageUrlForKey(primaryKey),
+        attachments: expect.arrayContaining([
+          expect.objectContaining({ href: storageUrlForKey(primaryKey) }),
+        ]),
+      }),
     );
   });
 

@@ -45,13 +45,39 @@ describe("course material storage presentation", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("prefers a current attachment key over a stale duplicated URL", async () => {
-    prismaMock.courseMaterial.findMany.mockResolvedValueOnce([material()]);
+    const tiedCreatedAt = new Date("2026-07-14T08:00:00.000Z");
+    const olderKey = "private/teachers/teacher-1/materials/older.pdf";
+    prismaMock.courseMaterial.findMany.mockResolvedValueOnce([
+      material({
+        attachments: [
+          {
+            id: "attachment-z",
+            filename: "current.pdf",
+            storageKey: currentKey,
+            mimeType: "application/pdf",
+            size: 123,
+            createdAt: tiedCreatedAt,
+          },
+          {
+            id: "attachment-a",
+            filename: "older.pdf",
+            storageKey: olderKey,
+            mimeType: "application/pdf",
+            size: 122,
+            createdAt: tiedCreatedAt,
+          },
+        ],
+      }),
+    ]);
 
     const { listStudentCourseMaterials } = await import(
       "@/lib/repositories/course-material-repository"
     );
     const [result] = await listStudentCourseMaterials("student-1");
 
+    expect(prismaMock.courseMaterial.findMany.mock.calls[0]?.[0]?.include?.attachments).toEqual({
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
     expect(result.safeFileUrl).toBe(storageUrlForKey(currentKey));
     expect(result.attachments[0]?.href).toBe(storageUrlForKey(currentKey));
   });
