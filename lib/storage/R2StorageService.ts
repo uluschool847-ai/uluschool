@@ -7,7 +7,11 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import type { StorageService, UploadInput, UploadOptions } from "@/lib/storage/StorageService";
-import { buildStorageKey, validateStorageKey } from "@/lib/storage/storage-key";
+import {
+  buildStorageKey,
+  validateLegacyStorageKey,
+  validateStorageKey,
+} from "@/lib/storage/storage-key";
 import { storageUrlForKey } from "@/lib/storage/storage-url";
 import { normalizeUploadInput } from "@/lib/storage/upload-input";
 
@@ -125,6 +129,14 @@ function validateExpiry(expiresInSeconds: number | undefined) {
   return expiry;
 }
 
+function validateDeletionStorageKey(storageKey: string) {
+  try {
+    return validateStorageKey(storageKey);
+  } catch {
+    return validateLegacyStorageKey(storageKey);
+  }
+}
+
 export class R2StorageService implements StorageService {
   private readonly client: S3Client;
   private readonly bucket: string;
@@ -175,7 +187,7 @@ export class R2StorageService implements StorageService {
   }
 
   async delete(storageKey: string): Promise<void> {
-    const validStorageKey = validateStorageKey(storageKey);
+    const validStorageKey = validateDeletionStorageKey(storageKey);
     const command = new DeleteObjectCommand({ Bucket: this.bucket, Key: validStorageKey });
     try {
       await this.client.send(command);

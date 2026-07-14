@@ -397,10 +397,30 @@ describe("R2StorageService", () => {
     expect(sdkMocks.send).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects invalid delete keys before SDK work", async () => {
+  it("deletes a separately validated legacy object key", async () => {
     const service = createService();
 
-    await expect(service.delete("../outside.pdf")).rejects.toThrow(/storage key/i);
+    await service.delete("uploads/reports/old-report.pdf");
+
+    expect(sdkMocks.commandInputs.delete).toEqual([
+      { Bucket: bucket, Key: "uploads/reports/old-report.pdf" },
+    ]);
+    expect(sdkMocks.send).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    "../outside.pdf",
+    "uploads/../private/report.pdf",
+    "uploads/reports/../../secret.pdf",
+    "https://cdn.example.com/report.pdf",
+    "archive/reports/old-report.pdf",
+    "private/teachers/teacher-1/reports/file name.pdf",
+    "/private/teachers/teacher-1/reports/report.pdf",
+    "reports/old-report.pdf",
+  ])("rejects invalid delete key %s before SDK work", async (storageKey) => {
+    const service = createService();
+
+    await expect(service.delete(storageKey)).rejects.toThrow(/storage key/i);
     expect(sdkMocks.commandInputs.delete).toHaveLength(0);
     expect(sdkMocks.send).not.toHaveBeenCalled();
   });

@@ -1,5 +1,7 @@
+import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { R2StorageService } from "@/lib/storage/R2StorageService";
 import { storageUrlForKey } from "@/lib/storage/storage-url";
 
 const OLD_REPORT_KEY =
@@ -14,6 +16,12 @@ const LEGACY_REPORT_ALIASES = [
   `/public/${LEGACY_REPORT_KEY}`,
   "reports/old-report.pdf",
 ];
+const R2_TEST_CONFIG = {
+  endpoint: "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com",
+  bucket: "ulu-school-private",
+  accessKeyId: "r2-access-key-value",
+  secretAccessKey: "r2-secret-key-value",
+};
 
 type StorageReferences = Partial<
   Record<"attachment" | "courseMaterial" | "reportSnapshot" | "submission" | "teacher", string[]>
@@ -814,6 +822,32 @@ describe("report-repository contract", () => {
       select: { id: true },
     });
     expect(deleteMock).toHaveBeenCalledWith(LEGACY_REPORT_KEY);
+  });
+
+  it("passes repository-normalized legacy cleanup through the actual R2 adapter", async () => {
+    prepareReportExport(`/${LEGACY_REPORT_KEY}`);
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    const normalizedCleanupKey = deleteMock.mock.calls[0]?.[0] as string;
+    expect(normalizedCleanupKey).toBe(LEGACY_REPORT_KEY);
+
+    const service = new R2StorageService(R2_TEST_CONFIG);
+    const client = Reflect.get(service, "client") as {
+      send(command: unknown): Promise<unknown>;
+    };
+    const sendSpy = vi.spyOn(client, "send").mockResolvedValue({});
+
+    await service.delete(normalizedCleanupKey);
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    const command = sendSpy.mock.calls[0]?.[0];
+    expect(command).toBeInstanceOf(DeleteObjectCommand);
+    expect((command as DeleteObjectCommand).input).toEqual({
+      Bucket: R2_TEST_CONFIG.bucket,
+      Key: LEGACY_REPORT_KEY,
+    });
   });
 
   it("normalizes a canonical current previous value and deletes its unreferenced raw key", async () => {
