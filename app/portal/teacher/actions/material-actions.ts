@@ -122,6 +122,14 @@ function revalidateMaterialPaths(source: MaterialAuditSource | null | undefined)
   revalidatePath("/portal/parent");
 }
 
+function revalidateMaterialPathsBestEffort(source: MaterialAuditSource | null | undefined) {
+  try {
+    revalidateMaterialPaths(source);
+  } catch {
+    // Mutation and audit are already committed; cache invalidation must not change that result.
+  }
+}
+
 async function writeMaterialAudit(
   input: {
     teacherId: string;
@@ -305,7 +313,7 @@ export async function submitCourseMaterialAction(
       }
       return created;
     }, MATERIAL_TRANSACTION_OPTIONS);
-    revalidateMaterialPaths(material);
+    revalidateMaterialPathsBestEffort(material);
 
     if (parsed.data._redirectToList) {
       redirect("/portal/teacher/materials");
@@ -382,13 +390,13 @@ export async function updateCourseMaterialAction(
       }
       return updated;
     }, MATERIAL_TRANSACTION_OPTIONS);
-    revalidateMaterialPaths(material);
     const cleanup = attachments?.length
       ? await cleanupStorageKeysBestEffort(
           (material as { cleanup?: { storageKeys?: string[] } }).cleanup?.storageKeys,
           session.uid,
         )
       : undefined;
+    revalidateMaterialPathsBestEffort(material);
 
     if (parsed.data._redirectToList) {
       redirect("/portal/teacher/materials");
@@ -420,11 +428,11 @@ export async function deleteCourseMaterialAction(id: string) {
       );
       return material;
     }, MATERIAL_TRANSACTION_OPTIONS);
-    revalidateMaterialPaths(deleted);
     const cleanupResult = await cleanupStorageKeysBestEffort(
       deleted.cleanup?.storageKeys,
       session.uid,
     );
+    revalidateMaterialPathsBestEffort(deleted);
 
     return {
       success: true as const,
@@ -496,11 +504,11 @@ export async function unlinkAttachmentAction(payload: {
       );
       return unlinked;
     }, MATERIAL_TRANSACTION_OPTIONS);
-    revalidateMaterialPaths(attachment);
     const cleanupResult = await cleanupStorageKeysBestEffort(
       attachment.cleanup?.storageKeys,
       session.uid,
     );
+    revalidateMaterialPathsBestEffort(attachment);
 
     return {
       success: true as const,

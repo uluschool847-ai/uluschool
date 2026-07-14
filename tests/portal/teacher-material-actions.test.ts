@@ -495,6 +495,20 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       expect(revalidatePathMock).not.toHaveBeenCalled();
     });
 
+    it("returns success for a committed create when revalidation fails", async () => {
+      revalidatePathMock.mockImplementationOnce(() => {
+        throw new Error("revalidation failed");
+      });
+
+      const response = await submitCourseMaterialAction(validMaterialPayload);
+
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+      expectMaterialAudit("COURSE_MATERIAL_CREATED");
+      expect(createStorageServiceMock).not.toHaveBeenCalled();
+      expect(storageDeleteMock).not.toHaveBeenCalled();
+    });
+
     it("rejects a cross-teacher attachment before repository mutation or success audit", async () => {
       const response = await submitCourseMaterialAction({
         ...validMaterialPayload,
@@ -971,6 +985,43 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       expectMaterialRevalidation();
     });
 
+    it("cleans committed replacement orphans once and returns success when revalidation fails", async () => {
+      const replacementStorageKey =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000004-replacement.pdf";
+      const firstOrphan =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-old.pdf";
+      const secondOrphan =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000002-old.pdf";
+      updateCourseMaterialForTeacherMock.mockResolvedValueOnce(
+        material({
+          cleanup: {
+            queued: true,
+            deleted: 0,
+            storageKeys: [firstOrphan, secondOrphan, firstOrphan],
+          },
+        }),
+      );
+      revalidatePathMock.mockImplementationOnce(() => {
+        throw new Error("revalidation failed");
+      });
+
+      const response = await updateCourseMaterialAction("mat-123", {
+        title: "Replacement",
+        fileUrl: storageUrlForKey(replacementStorageKey),
+        attachment: {
+          filename: "replacement.pdf",
+          storageKey: replacementStorageKey,
+          mimeType: "application/pdf",
+          size: 4096,
+        },
+      });
+
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(storageDeleteMock).toHaveBeenCalledTimes(2);
+      expect(storageDeleteMock).toHaveBeenCalledWith(firstOrphan);
+      expect(storageDeleteMock).toHaveBeenCalledWith(secondOrphan);
+    });
+
     it("returns success after an audited delete when best-effort cleanup fails", async () => {
       storageDeleteMock.mockRejectedValueOnce(new Error("backend cleanup failed"));
 
@@ -980,6 +1031,32 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       expect(storageDeleteMock).toHaveBeenCalledTimes(1);
       expectMaterialAudit("COURSE_MATERIAL_DELETED");
       expectMaterialRevalidation();
+    });
+
+    it("cleans committed delete orphans once and returns success when revalidation fails", async () => {
+      const firstOrphan =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-deleted.pdf";
+      const secondOrphan =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000002-deleted.pdf";
+      deleteCourseMaterialForTeacherMock.mockResolvedValueOnce({
+        ...material(),
+        success: true,
+        cleanup: {
+          queued: true,
+          deleted: 0,
+          storageKeys: [firstOrphan, secondOrphan, firstOrphan],
+        },
+      });
+      revalidatePathMock.mockImplementationOnce(() => {
+        throw new Error("revalidation failed");
+      });
+
+      const response = await deleteCourseMaterialAction("mat-123");
+
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(storageDeleteMock).toHaveBeenCalledTimes(2);
+      expect(storageDeleteMock).toHaveBeenCalledWith(firstOrphan);
+      expect(storageDeleteMock).toHaveBeenCalledWith(secondOrphan);
     });
 
     it("returns success after an audited unlink when best-effort cleanup fails", async () => {
@@ -996,6 +1073,30 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
         expect.objectContaining({ action: "COURSE_MATERIAL_ATTACHMENT_DELETED" }),
         expect.anything(),
       );
+    });
+
+    it("cleans a committed unlink orphan once and returns success when revalidation fails", async () => {
+      const orphan =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-unlinked.pdf";
+      unlinkCourseMaterialAttachmentForTeacherMock.mockResolvedValueOnce({
+        ...material({ attachments: [] }),
+        attachmentId: "attachment-1",
+        materialId: "mat-123",
+        storageKey: orphan,
+        cleanup: { queued: true, deleted: 0, storageKeys: [orphan, orphan] },
+      });
+      revalidatePathMock.mockImplementationOnce(() => {
+        throw new Error("revalidation failed");
+      });
+
+      const response = await unlinkAttachmentAction({
+        materialId: "mat-123",
+        attachmentId: "attachment-1",
+      });
+
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(storageDeleteMock).toHaveBeenCalledTimes(1);
+      expect(storageDeleteMock).toHaveBeenCalledWith(orphan);
     });
 
     it("uses one cleanup path when deleting through the compatibility action", async () => {
