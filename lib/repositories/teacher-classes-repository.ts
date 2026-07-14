@@ -2,6 +2,7 @@ import { type ClassGroupStatus, LessonStatus, type Prisma } from "@prisma/client
 
 import { validateLiveLessonUrl } from "@/lib/lessons/live-lesson-url";
 import { prisma } from "@/lib/prisma";
+import { preferredStoredFileHref } from "@/lib/security/storage-links";
 
 type SortKey = "name" | "nextLesson" | "pendingSubmissions" | "rosterSize";
 
@@ -53,6 +54,7 @@ type LevelRecord = { id: string; name: string };
 type MaterialRecord = {
   id: string;
   title: string;
+  attachments?: Array<{ storageKey: string }>;
   fileUrl?: string | null;
   fileHref?: string | null;
 };
@@ -198,7 +200,16 @@ function groupSelect() {
         status: true,
         liveLessonUrl: true,
         courseMaterials: {
-          select: { id: true, title: true, fileUrl: true },
+          select: {
+            id: true,
+            title: true,
+            fileUrl: true,
+            attachments: {
+              select: { storageKey: true },
+              orderBy: [{ createdAt: "asc" as const }, { id: "asc" as const }],
+              take: 1,
+            },
+          },
           orderBy: { createdAt: "desc" as const },
         },
         assignments: {
@@ -507,12 +518,18 @@ function mapDetail(group: ClassGroupRecord, now: Date): TeacherClassGroupDetail 
     upcomingLessons,
     pastLessons,
     assignments,
-    materials: Array.from(materialsById.values()).map((material) => ({
-      id: material.id,
-      title: material.title,
-      fileUrl: material.fileUrl ?? material.fileHref ?? null,
-      fileHref: material.fileHref ?? material.fileUrl ?? null,
-    })),
+    materials: Array.from(materialsById.values()).map((material) => {
+      const fileHref = preferredStoredFileHref(
+        material.attachments?.[0]?.storageKey,
+        material.fileHref ?? material.fileUrl,
+      );
+      return {
+        id: material.id,
+        title: material.title,
+        fileUrl: fileHref,
+        fileHref,
+      };
+    }),
     pendingSubmissions,
   };
 }

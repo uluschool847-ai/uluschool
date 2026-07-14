@@ -46,6 +46,19 @@ describe("storage link presentation", () => {
   });
 
   it.each([
+    "private/teachers/teacher-1/materials/file name.pdf",
+    "private/teachers/teacher-1/materials/%2e%2e.pdf",
+    "public/teachers/admin-1/photo name.webp",
+    "/private/teachers/teacher-1/materials/file name.pdf",
+    "/public/teachers/admin-1/photo name.webp",
+  ])("rejects malformed current namespace key %s without a legacy upload fallback", (value) => {
+    const href = storageHrefForKey(value);
+
+    expect(href).toBeNull();
+    expect(href).not.toBe(`/uploads/${value}`);
+  });
+
+  it.each([
     null,
     "",
     " javascript:alert(1)",

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { encodeStorageKey, storageUrlForKey } from "@/lib/storage/storage-url";
+
 const prismaMock = vi.hoisted(() => ({
   appUser: {
     count: vi.fn(),
@@ -1937,6 +1939,30 @@ describe("portal-repository teacher portal visibility", () => {
     const endAt = new Date("2026-06-01T10:00:00.000Z");
     const dueDate = new Date("2026-06-03T09:00:00.000Z");
     const submittedAt = new Date("2026-05-31T12:00:00.000Z");
+    const submissionStorageKey = "private/teachers/teacher-john/submissions/submission-sofia.pdf";
+    const externalHref =
+      "https://CDN.Example.com/Files/Submission%20One.pdf?download=1#teacher-copy";
+    const crossPurposeHref = `/api/public-files/${encodeStorageKey(submissionStorageKey)}`;
+    const submissionRecord = (
+      id: string,
+      contentUrl: string,
+      attachments: Array<{ storageKey: string }> = [],
+    ) => ({
+      id,
+      contentUrl,
+      submittedAt,
+      attachments,
+      student: {
+        id: `student-${id}`,
+        fullName: `Student ${id}`,
+        email: `${id}@example.com`,
+      },
+      assignment: {
+        id: "assignment-math",
+        title: "Math Homework",
+        scheduledClass: { id: "class-math", title: "Math - Group A", classGroup: null },
+      },
+    });
 
     prismaMock.classGroup.count.mockResolvedValueOnce(1);
     prismaMock.scheduledClass.count.mockResolvedValueOnce(1);
@@ -1978,20 +2004,21 @@ describe("portal-repository teacher portal visibility", () => {
     ]);
     prismaMock.submission.findMany.mockResolvedValueOnce([
       {
-        id: "submission-sofia",
-        contentUrl: "/uploads/sofia.pdf",
-        submittedAt,
+        ...submissionRecord("submission-sofia", "https://cdn.example.com/stale-submission.pdf", [
+          { storageKey: submissionStorageKey },
+        ]),
         student: {
           id: "student-sofia",
           fullName: "Sofia",
           email: "sofia@example.com",
         },
-        assignment: {
-          id: "assignment-math",
-          title: "Math Homework",
-          scheduledClass: { id: "class-math", title: "Math - Group A", classGroup: null },
-        },
       },
+      submissionRecord("submission-external", externalHref),
+      submissionRecord(
+        "submission-malformed",
+        "private/teachers/teacher-john/submissions/file name.pdf",
+      ),
+      submissionRecord("submission-cross-purpose", crossPurposeHref),
     ]);
     prismaMock.scheduledClass.findMany.mockResolvedValueOnce([
       {
@@ -2061,6 +2088,11 @@ describe("portal-repository teacher portal visibility", () => {
         }),
       }),
     );
+    expect(prismaMock.submission.findMany.mock.calls[0]?.[0]?.select?.attachments).toEqual({
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: { storageKey: true },
+      take: 1,
+    });
     expect(result.classes).toEqual([
       expect.objectContaining({
         id: "class-math",
@@ -2081,13 +2113,19 @@ describe("portal-repository teacher portal visibility", () => {
         studentCount: 2,
       }),
     ]);
-    expect(result.pendingSubmissions).toEqual([
-      expect.objectContaining({
-        studentName: "Sofia",
-        assignmentTitle: "Math Homework",
-        classTitle: "Math - Group A",
-      }),
-    ]);
+    expect(result.pendingSubmissions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          contentUrl: storageUrlForKey(submissionStorageKey),
+          studentName: "Sofia",
+          assignmentTitle: "Math Homework",
+          classTitle: "Math - Group A",
+        }),
+        expect.objectContaining({ id: "submission-external", contentUrl: externalHref }),
+        expect.objectContaining({ id: "submission-malformed", contentUrl: null }),
+        expect.objectContaining({ id: "submission-cross-purpose", contentUrl: null }),
+      ]),
+    );
     expect(JSON.stringify(result)).not.toContain("Other Teacher");
     expect(JSON.stringify(result)).not.toContain("Unassigned Student");
   });

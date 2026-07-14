@@ -5,6 +5,8 @@ import { notFound } from "next/navigation";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { encodeStorageKey, storageUrlForKey } from "@/lib/storage/storage-url";
+
 const requireRoleMock = vi.hoisted(() => vi.fn());
 const getTeacherClassGroupDetailMock = vi.hoisted(() => vi.fn());
 const notFoundMock = vi.hoisted(() => vi.fn());
@@ -238,6 +240,48 @@ describe("Teacher class/group detail page", () => {
     expect(screen.queryByRole("button", { name: /enrol student/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /change teacher/i })).toBeNull();
     expect(screen.queryByRole("link", { name: /edit student profile/i })).toBeNull();
+  });
+
+  it("renders only validated canonical, external, and legacy material hrefs", async () => {
+    const storageKey = "private/teachers/teacher-1/materials/angles.pdf";
+    const canonicalHref = storageUrlForKey(storageKey);
+    const externalHref =
+      "https://cdn.example.com/Files/Extension%20Work.pdf?download=1#teacher-copy";
+    const crossPurposeHref = `/api/public-files/${encodeStorageKey(storageKey)}`;
+    getTeacherClassGroupDetailMock.mockResolvedValueOnce(
+      classGroupDetail({
+        materials: [
+          { id: "canonical", title: "Canonical material", fileHref: canonicalHref },
+          { id: "external", title: "External material", fileHref: externalHref },
+          { id: "legacy", title: "Legacy material", fileHref: "/uploads/legacy/file.pdf" },
+          { id: "unsafe", title: "Unsafe material", fileHref: "javascript:alert(1)" },
+          { id: "malformed", title: "Malformed material", fileHref: "/api/files/not+base64url" },
+          { id: "cross-purpose", title: "Cross purpose material", fileHref: crossPurposeHref },
+        ],
+      }),
+    );
+
+    const page = await loadTeacherClassGroupPage();
+    const element = await page.default({ params: { classGroupId: "group-1" } });
+    render(element);
+
+    expect(screen.getByRole("link", { name: /open material canonical material/i })).toHaveAttribute(
+      "href",
+      canonicalHref,
+    );
+    expect(screen.getByRole("link", { name: /open material external material/i })).toHaveAttribute(
+      "href",
+      externalHref,
+    );
+    expect(screen.getByRole("link", { name: /open material legacy material/i })).toHaveAttribute(
+      "href",
+      "/uploads/legacy/file.pdf",
+    );
+    expect(screen.queryByRole("link", { name: /open material unsafe material/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /open material malformed material/i })).toBeNull();
+    expect(
+      screen.queryByRole("link", { name: /open material cross purpose material/i }),
+    ).toBeNull();
   });
 
   it("handles empty roster, lessons, assignments, materials, and submissions safely", async () => {

@@ -5,6 +5,7 @@ import { MaterialForm } from "@/app/portal/teacher/components/MaterialForm";
 import { requireRole } from "@/lib/auth/session";
 import { getCourseMaterialForTeacher } from "@/lib/repositories/course-material-repository";
 import { listTeacherSchedule } from "@/lib/repositories/teacher-schedule-repository";
+import { preferredStoredFileHref } from "@/lib/security/storage-links";
 
 type Params = {
   materialId: string;
@@ -17,6 +18,7 @@ type LessonOptionRecord = {
 };
 
 type MaterialRecord = Awaited<ReturnType<typeof getCourseMaterialForTeacher>> & {
+  attachments?: Array<{ storageKey: string }>;
   scheduledClassId?: string | null;
 };
 
@@ -48,6 +50,8 @@ export default async function EditTeacherMaterialPage({
   }
 
   const lessons = (await listTeacherSchedule(session.uid, {})) as LessonOptionRecord[];
+  const fileUrl =
+    preferredStoredFileHref(material.attachments?.[0]?.storageKey, material.fileUrl) ?? "";
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 px-4 py-8">
@@ -63,7 +67,7 @@ export default async function EditTeacherMaterialPage({
         initialValues={{
           title: material.title,
           description: material.description ?? "",
-          fileUrl: material.fileUrl,
+          fileUrl,
           scheduledClassId: material.scheduledClassId ?? "",
         }}
         cancelHref="/portal/teacher/materials"

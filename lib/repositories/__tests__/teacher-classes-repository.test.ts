@@ -1,6 +1,8 @@
 import { ClassGroupStatus, LessonStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
 const prismaMock = vi.hoisted(() => ({
   classGroup: {
     findFirst: vi.fn(),
@@ -255,9 +257,37 @@ describe("teacher classes repository", () => {
   );
 
   it("loads class group detail by classGroup.id and ClassGroup.teacherId with the full read-only class contract", async () => {
+    const storageKey = "private/teachers/teacher-1/materials/angles.pdf";
+    const externalHref =
+      "https://cdn.example.com/Files/Extension%20Work.pdf?download=1#teacher-copy";
     prismaMock.classGroup.findFirst.mockResolvedValueOnce({
       ...groupRecord,
-      materials: [{ id: "material-1", title: "Angles worksheet", fileUrl: "/uploads/angles.pdf" }],
+      materials: [
+        {
+          id: "material-1",
+          title: "Angles worksheet",
+          fileUrl: "https://cdn.example.com/stale-angles.pdf",
+          attachments: [{ storageKey }],
+        },
+        {
+          id: "material-external",
+          title: "External extension",
+          fileUrl: externalHref,
+          attachments: [],
+        },
+        {
+          id: "material-legacy",
+          title: "Legacy worksheet",
+          fileUrl: "/uploads/legacy/worksheet.pdf",
+          attachments: [],
+        },
+        {
+          id: "material-malformed",
+          title: "Malformed worksheet",
+          fileUrl: "javascript:alert(1)",
+          attachments: [{ storageKey: "private/teachers/teacher-1/materials/file name.pdf" }],
+        },
+      ],
       pendingSubmissions: [
         {
           id: "submission-pending",
@@ -283,6 +313,14 @@ describe("teacher classes repository", () => {
         },
       }),
     );
+    expect(
+      prismaMock.classGroup.findFirst.mock.calls[0]?.[0]?.select?.lessons?.select?.courseMaterials
+        ?.select?.attachments,
+    ).toEqual({
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: { storageKey: true },
+      take: 1,
+    });
     expect(result).toEqual(
       expect.objectContaining({
         id: "group-1",
@@ -317,7 +355,25 @@ describe("teacher classes repository", () => {
           }),
         ]),
         materials: expect.arrayContaining([
-          expect.objectContaining({ fileHref: "/uploads/angles.pdf", title: "Angles worksheet" }),
+          expect.objectContaining({
+            fileHref: storageUrlForKey(storageKey),
+            fileUrl: storageUrlForKey(storageKey),
+            title: "Angles worksheet",
+          }),
+          expect.objectContaining({
+            fileHref: externalHref,
+            fileUrl: externalHref,
+            title: "External extension",
+          }),
+          expect.objectContaining({
+            fileHref: "/uploads/legacy/worksheet.pdf",
+            title: "Legacy worksheet",
+          }),
+          expect.objectContaining({
+            fileHref: null,
+            fileUrl: null,
+            title: "Malformed worksheet",
+          }),
         ]),
         pendingSubmissions: expect.arrayContaining([
           expect.objectContaining({

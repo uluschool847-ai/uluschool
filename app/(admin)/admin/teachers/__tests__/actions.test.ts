@@ -173,6 +173,7 @@ describe("Admin teacher profile actions", () => {
     });
     expect(createTeacherMock).not.toHaveBeenCalled();
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(storageDeleteMock).not.toHaveBeenCalled();
   });
 
   it("requires an admin session before mutating teacher records", async () => {
@@ -206,6 +207,7 @@ describe("Admin teacher profile actions", () => {
     });
     expect(createTeacherMock).not.toHaveBeenCalled();
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(storageDeleteMock).not.toHaveBeenCalled();
   });
 
   it("rejects uploaded photo files with disallowed MIME types", async () => {
@@ -282,6 +284,7 @@ describe("Admin teacher profile actions", () => {
     expect(revalidatePathMock).toHaveBeenCalledWith("/teachers");
     expect(revalidatePathMock).toHaveBeenCalledWith("/admin/teachers");
     expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(storageDeleteMock).not.toHaveBeenCalled();
     expectTeacherAuditTarget("TEACHER_PROFILE_CREATED");
     expect(getTeacherAuditPayload("TEACHER_PROFILE_CREATED")).toEqual(
       expect.objectContaining({
@@ -325,6 +328,112 @@ describe("Admin teacher profile actions", () => {
     expect(JSON.stringify(result)).not.toMatch(/secret|r2|private\/teachers|photo\.webp/i);
     expect(createTeacherMock).not.toHaveBeenCalled();
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(storageDeleteMock).not.toHaveBeenCalled();
+  });
+
+  it("does not delete an uploaded photo when canonical URL generation fails", async () => {
+    const storageKey = "public/teachers/admin-1/url-failure.webp";
+    storageUploadMock.mockResolvedValueOnce(storageKey);
+    storageGetUrlMock.mockImplementationOnce(() => {
+      throw new Error("Storage URL unavailable");
+    });
+    const { createTeacherAction } = await loadTeachersActions();
+    const formData = buildBaseFormData();
+    formData.set(
+      "photo",
+      new File([new Uint8Array([1, 2, 3])], "url-failure.webp", { type: "image/webp" }),
+    );
+
+    const result = await createTeacherAction(formData);
+
+    expect(result).toEqual({
+      success: false,
+      errors: { photo: ["Failed to store teacher photo."] },
+    });
+    expect(storageDeleteMock).not.toHaveBeenCalled();
+    expect(createTeacherMock).not.toHaveBeenCalled();
+  });
+
+  it("does not delete a newly uploaded photo when success redirect runs after commit", async () => {
+    const storageKey = "public/teachers/admin-1/redirected-photo.webp";
+    storageUploadMock.mockResolvedValueOnce(storageKey);
+    createTeacherMock.mockResolvedValueOnce({ id: "teacher-1" });
+    redirectMock.mockImplementationOnce(() => {
+      throw new Error("NEXT_REDIRECT");
+    });
+    const { createTeacherAction } = await loadTeachersActions();
+    const formData = buildBaseFormData({
+      flash: true,
+      successRedirect: "/admin/teachers",
+    });
+    formData.set(
+      "photo",
+      new File([new Uint8Array([1, 2, 3])], "redirected-photo.webp", { type: "image/webp" }),
+    );
+
+    await expect(createTeacherAction(formData)).rejects.toThrow("NEXT_REDIRECT");
+
+    expect(createAdminAuditLogMock).toHaveBeenCalled();
+    expect(storageDeleteMock).not.toHaveBeenCalled();
+  });
+
+  it("best-effort deletes a newly uploaded create photo after the audited transaction rolls back", async () => {
+    const events: string[] = [];
+    const storageKey = "public/teachers/admin-1/create-rollback.webp";
+    storageUploadMock.mockResolvedValueOnce(storageKey);
+    createTeacherMock.mockResolvedValueOnce({ id: "teacher-1" });
+    createAdminAuditLogMock.mockImplementationOnce(async () => {
+      events.push("audit-failed");
+      throw new Error("Audit unavailable");
+    });
+    storageDeleteMock.mockImplementationOnce(async (key: string) => {
+      events.push(`cleanup:${key}`);
+    });
+
+    const { createTeacherAction } = await loadTeachersActions();
+    const formData = buildBaseFormData();
+    formData.set(
+      "photo",
+      new File([new Uint8Array([1, 2, 3])], "create-rollback.webp", { type: "image/webp" }),
+    );
+
+    const result = await createTeacherAction(formData);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: false,
+        message: expect.stringMatching(/audit unavailable/i),
+      }),
+    );
+    expect(storageDeleteMock).toHaveBeenCalledWith(storageKey);
+    expect(events).toEqual(["audit-failed", `cleanup:${storageKey}`]);
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the create transaction failure when rollback photo cleanup also fails", async () => {
+    const storageKey = "public/teachers/admin-1/create-cleanup-failure.webp";
+    storageUploadMock.mockResolvedValueOnce(storageKey);
+    createTeacherMock.mockResolvedValueOnce({ id: "teacher-1" });
+    createAdminAuditLogMock.mockRejectedValueOnce(new Error("Audit unavailable"));
+    storageDeleteMock.mockRejectedValueOnce(new Error("R2 cleanup unavailable"));
+
+    const { createTeacherAction } = await loadTeachersActions();
+    const formData = buildBaseFormData();
+    formData.set(
+      "photo",
+      new File([new Uint8Array([1, 2, 3])], "cleanup-failure.webp", { type: "image/webp" }),
+    );
+
+    const result = await createTeacherAction(formData);
+
+    expect(storageDeleteMock).toHaveBeenCalledWith(storageKey);
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: false,
+        message: expect.stringMatching(/audit unavailable/i),
+      }),
+    );
+    expect(JSON.stringify(result)).not.toMatch(/r2|cleanup/i);
   });
 
   it("creates a teacher profile and revalidates both public and admin pages", async () => {
@@ -453,6 +562,70 @@ describe("Admin teacher profile actions", () => {
     );
   });
 
+  it("best-effort deletes only the newly uploaded update photo after audit rollback", async () => {
+    const newStorageKey = "public/teachers/admin-1/update-rollback.webp";
+    const oldStorageKey = "public/teachers/admin-1/existing-photo.webp";
+    const events: string[] = [];
+    storageUploadMock.mockResolvedValueOnce(newStorageKey);
+    updateTeacherMock.mockResolvedValueOnce({
+      id: "teacher-1",
+      before: { id: "teacher-1", photoUrl: storageUrlForKey(oldStorageKey) },
+      after: { id: "teacher-1", photoUrl: storageUrlForKey(newStorageKey) },
+    });
+    createAdminAuditLogMock.mockImplementationOnce(async () => {
+      events.push("audit-failed");
+      throw new Error("Audit unavailable");
+    });
+    storageDeleteMock.mockImplementationOnce(async (key: string) => {
+      events.push(`cleanup:${key}`);
+    });
+
+    const { updateTeacherAction } = await loadTeachersActions();
+    const formData = buildBaseFormData();
+    formData.set("id", "teacher-1");
+    formData.set("photoUrl", storageUrlForKey(oldStorageKey));
+    formData.set(
+      "photo",
+      new File([new Uint8Array([4, 5, 6])], "update-rollback.webp", { type: "image/webp" }),
+    );
+
+    const result = await updateTeacherAction(formData);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: false,
+        message: expect.stringMatching(/audit unavailable/i),
+      }),
+    );
+    expect(storageDeleteMock).toHaveBeenCalledTimes(1);
+    expect(storageDeleteMock).toHaveBeenCalledWith(newStorageKey);
+    expect(storageDeleteMock).not.toHaveBeenCalledWith(oldStorageKey);
+    expect(events).toEqual(["audit-failed", `cleanup:${newStorageKey}`]);
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("does not delete a newly uploaded photo after the audited create transaction commits", async () => {
+    const storageKey = "public/teachers/admin-1/committed-photo.webp";
+    storageUploadMock.mockResolvedValueOnce(storageKey);
+    createTeacherMock.mockResolvedValueOnce({ id: "teacher-1" });
+    revalidatePathMock.mockImplementationOnce(() => {
+      throw new Error("Revalidation unavailable");
+    });
+
+    const { createTeacherAction } = await loadTeachersActions();
+    const formData = buildBaseFormData();
+    formData.set(
+      "photo",
+      new File([new Uint8Array([7, 8, 9])], "committed-photo.webp", { type: "image/webp" }),
+    );
+
+    const result = await createTeacherAction(formData);
+
+    expect(createAdminAuditLogMock).toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({ success: false }));
+    expect(storageDeleteMock).not.toHaveBeenCalled();
+  });
+
   it("updates an existing teacher profile with a replacement photo and removes the previous upload", async () => {
     const newStorageKey =
       "public/teachers/admin-1/00000000-0000-4000-8000-000000000002-jane-updated.webp";
@@ -490,6 +663,7 @@ describe("Admin teacher profile actions", () => {
       contentType: "image/webp",
     });
     expect(storageDeleteMock).toHaveBeenCalledWith("uploads/teacher-1/old-photo.webp");
+    expect(storageDeleteMock).not.toHaveBeenCalledWith(newStorageKey);
     expect(updateTeacherMock).toHaveBeenCalledWith(
       "teacher-1",
       expect.objectContaining({

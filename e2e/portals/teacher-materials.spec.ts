@@ -1,4 +1,5 @@
 import { createSessionToken } from "@/e2e/helpers/session";
+import { createTinyPdf } from "@/e2e/helpers/tiny-pdf";
 import { storageKeyFromUrl } from "@/lib/storage/storage-url";
 import { type Locator, type Page, expect, test } from "@playwright/test";
 import { ClassGroupStatus, LessonStatus, PrismaClient, UserRole } from "@prisma/client";
@@ -7,13 +8,6 @@ const COOKIE_DOMAIN = new URL(BASE_URL).hostname;
 const prisma = new PrismaClient();
 
 const PREFIX = "qa.teacher-materials";
-
-function validPdfBytes(label: string) {
-  return Buffer.from(
-    `%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n% ${label}\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n`,
-    "ascii",
-  );
-}
 
 type Fixture = {
   createdTitle: string;
@@ -165,12 +159,12 @@ test.describe("Teacher course materials portal", () => {
     const firstFile = {
       name: "worksheet-upload.pdf",
       mimeType: "application/pdf",
-      buffer: validPdfBytes("first"),
+      buffer: createTinyPdf(),
     };
     const replacementFile = {
       name: "worksheet-replacement.pdf",
       mimeType: "application/pdf",
-      buffer: validPdfBytes("replacement"),
+      buffer: createTinyPdf(),
     };
 
     await setPortalSession(page);

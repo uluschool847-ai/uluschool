@@ -114,7 +114,7 @@ function validatePhoto(photo: File | null) {
 async function resolvePhotoUrl(
   formData: FormData,
   adminId: string,
-): Promise<{ photoUrl?: string | null; errors?: string[] }> {
+): Promise<{ photoUrl?: string | null; uploadedStorageKey?: string; errors?: string[] }> {
   const photo = extractPhoto(formData);
   const photoErrors = validatePhoto(photo);
   if (photoErrors) {
@@ -129,7 +129,10 @@ async function resolvePhotoUrl(
         namespace: publicTeacherPhotoNamespace(adminId),
         contentType: photo.type,
       });
-      return { photoUrl: storage.getURL(storageKey) };
+      return {
+        photoUrl: storage.getURL(storageKey),
+        uploadedStorageKey: storageKey,
+      };
     } catch {
       return { errors: ["Failed to store teacher photo."] };
     }
@@ -185,6 +188,15 @@ function persistedTeacherPhotoStorageKey(photoUrl: unknown) {
     return legacyStorageKeyFromUrl(photoUrl);
   } catch {
     return null;
+  }
+}
+
+async function deleteUploadedTeacherPhotoBestEffort(storageKey: string | undefined) {
+  if (!storageKey) return;
+  try {
+    await createStorageService().delete(storageKey);
+  } catch {
+    // Rollback cleanup must not replace the audited transaction error.
   }
 }
 
@@ -254,42 +266,47 @@ export async function createTeacherAction(
     if (!session) {
       throw new Error("Failed to create teacher profile.");
     }
-    await prisma.$transaction(async (tx) => {
-      const createdTeacher = await createTeacher(
-        {
-          ...parsed.data,
-          subjects,
-          cabinetUserId,
-          ...(photoResult.photoUrl !== undefined ? { photoUrl: photoResult.photoUrl } : {}),
-        },
-        tx,
-      );
-      const teacherId = createdTeacher?.id;
-      if (!teacherId) {
-        throw new Error("Failed to create teacher profile.");
-      }
-      await createAdminAuditLog(
-        {
-          adminUserId: session.uid,
-          action: "TEACHER_PROFILE_CREATED",
-          targetType: "teacher",
-          targetId: teacherId,
-          before: null,
-          after: teacherAuditSnapshot({
-            id: teacherId,
+    try {
+      await prisma.$transaction(async (tx) => {
+        const createdTeacher = await createTeacher(
+          {
             ...parsed.data,
             subjects,
             cabinetUserId,
             ...(photoResult.photoUrl !== undefined ? { photoUrl: photoResult.photoUrl } : {}),
-          }),
-          meta: {
-            actorRole: UserRole.ADMIN,
-            teacherProfileId: teacherId,
           },
-        },
-        tx,
-      );
-    });
+          tx,
+        );
+        const teacherId = createdTeacher?.id;
+        if (!teacherId) {
+          throw new Error("Failed to create teacher profile.");
+        }
+        await createAdminAuditLog(
+          {
+            adminUserId: session.uid,
+            action: "TEACHER_PROFILE_CREATED",
+            targetType: "teacher",
+            targetId: teacherId,
+            before: null,
+            after: teacherAuditSnapshot({
+              id: teacherId,
+              ...parsed.data,
+              subjects,
+              cabinetUserId,
+              ...(photoResult.photoUrl !== undefined ? { photoUrl: photoResult.photoUrl } : {}),
+            }),
+            meta: {
+              actorRole: UserRole.ADMIN,
+              teacherProfileId: teacherId,
+            },
+          },
+          tx,
+        );
+      });
+    } catch (error) {
+      await deleteUploadedTeacherPhotoBestEffort(photoResult.uploadedStorageKey);
+      throw error;
+    }
     revalidateTeacherPages();
   } catch (error) {
     if (flashMode && errorRedirect) {
@@ -381,54 +398,60 @@ export async function updateTeacherAction(
     if (!session) {
       throw new Error("Failed to update teacher profile.");
     }
-    const updatedTeacher = await prisma.$transaction(async (tx) => {
-      const updatedTeacher = await updateTeacher(
-        parsed.data.id,
-        {
-          fullName: parsed.data.fullName,
-          title: parsed.data.title,
-          bio: parsed.data.bio,
-          displayOrder: parsed.data.displayOrder,
-          isActive: parsed.data.isActive,
-          subjects,
-          cabinetUserId,
-          ...(photoResult.photoUrl !== undefined ? { photoUrl: photoResult.photoUrl } : {}),
-        },
-        tx,
-      );
-      const resultWithAudit = updatedTeacher as {
-        before?: Record<string, unknown> | null;
-        after?: Record<string, unknown> | null;
-      } | null;
-      await createAdminAuditLog(
-        {
-          adminUserId: session.uid,
-          action: "TEACHER_PROFILE_UPDATED",
-          targetType: "teacher",
-          targetId: parsed.data.id,
-          before: teacherAuditSnapshot(
-            resultWithAudit?.before ?? {
-              id: parsed.data.id,
-              photoUrl: currentPhotoUrl,
-            },
-          ),
-          after: teacherAuditSnapshot(
-            resultWithAudit?.after ?? {
-              ...parsed.data,
-              subjects,
-              cabinetUserId,
-              ...(photoResult.photoUrl !== undefined ? { photoUrl: photoResult.photoUrl } : {}),
-            },
-          ),
-          meta: {
-            actorRole: UserRole.ADMIN,
-            teacherProfileId: parsed.data.id,
+    let updatedTeacher: unknown;
+    try {
+      updatedTeacher = await prisma.$transaction(async (tx) => {
+        const teacherUpdateResult = await updateTeacher(
+          parsed.data.id,
+          {
+            fullName: parsed.data.fullName,
+            title: parsed.data.title,
+            bio: parsed.data.bio,
+            displayOrder: parsed.data.displayOrder,
+            isActive: parsed.data.isActive,
+            subjects,
+            cabinetUserId,
+            ...(photoResult.photoUrl !== undefined ? { photoUrl: photoResult.photoUrl } : {}),
           },
-        },
-        tx,
-      );
-      return updatedTeacher;
-    });
+          tx,
+        );
+        const resultWithAudit = teacherUpdateResult as {
+          before?: Record<string, unknown> | null;
+          after?: Record<string, unknown> | null;
+        } | null;
+        await createAdminAuditLog(
+          {
+            adminUserId: session.uid,
+            action: "TEACHER_PROFILE_UPDATED",
+            targetType: "teacher",
+            targetId: parsed.data.id,
+            before: teacherAuditSnapshot(
+              resultWithAudit?.before ?? {
+                id: parsed.data.id,
+                photoUrl: currentPhotoUrl,
+              },
+            ),
+            after: teacherAuditSnapshot(
+              resultWithAudit?.after ?? {
+                ...parsed.data,
+                subjects,
+                cabinetUserId,
+                ...(photoResult.photoUrl !== undefined ? { photoUrl: photoResult.photoUrl } : {}),
+              },
+            ),
+            meta: {
+              actorRole: UserRole.ADMIN,
+              teacherProfileId: parsed.data.id,
+            },
+          },
+          tx,
+        );
+        return teacherUpdateResult;
+      });
+    } catch (error) {
+      await deleteUploadedTeacherPhotoBestEffort(photoResult.uploadedStorageKey);
+      throw error;
+    }
 
     const persistedResult = updatedTeacher as {
       before?: { photoUrl?: unknown } | null;

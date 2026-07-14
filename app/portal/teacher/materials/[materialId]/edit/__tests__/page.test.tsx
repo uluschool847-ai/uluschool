@@ -5,6 +5,8 @@ import { notFound } from "next/navigation";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { encodeStorageKey, storageUrlForKey } from "@/lib/storage/storage-url";
+
 const requireRoleMock = vi.hoisted(() => vi.fn());
 const getCourseMaterialForTeacherMock = vi.hoisted(() => vi.fn());
 const listTeacherScheduleMock = vi.hoisted(() => vi.fn());
@@ -86,6 +88,7 @@ function material(overrides: Record<string, unknown> = {}) {
     title: "Algebra worksheet",
     description: "Practice problems",
     fileUrl: "https://cdn.school/materials/algebra.pdf",
+    attachments: [],
     scheduledClassId: "lesson-1",
     scheduledClass: {
       id: "lesson-1",
@@ -133,6 +136,54 @@ describe("Teacher material edit page", () => {
     expect(screen.getByDisplayValue(/algebra worksheet/i)).toBeDefined();
     expect(screen.getByDisplayValue("https://cdn.school/materials/algebra.pdf")).toBeDefined();
     expect(screen.getByLabelText(/lesson|scheduled class/i)).toHaveProperty("value", "lesson-1");
+  });
+
+  it("prefills the canonical primary attachment href instead of a stale duplicated URL", async () => {
+    const storageKey = "private/teachers/teacher-1/materials/algebra.pdf";
+    getCourseMaterialForTeacherMock.mockResolvedValueOnce(
+      material({
+        fileUrl: "https://cdn.example.com/stale-algebra.pdf",
+        attachments: [{ storageKey }],
+      }),
+    );
+
+    const page = await loadEditMaterialPage();
+    const element = await page.default({ params: { materialId: "material-1" } });
+    render(element);
+
+    expect(screen.getByLabelText(/file url/i)).toHaveProperty(
+      "value",
+      storageUrlForKey(storageKey),
+    );
+    expect(screen.queryByDisplayValue("https://cdn.example.com/stale-algebra.pdf")).toBeNull();
+  });
+
+  it("preserves a safe external material URL byte-for-byte when no attachment exists", async () => {
+    const externalHref =
+      "https://cdn.example.com/Files/Extension%20Work.pdf?download=1#teacher-copy";
+    getCourseMaterialForTeacherMock.mockResolvedValueOnce(
+      material({ fileUrl: externalHref, attachments: [] }),
+    );
+
+    const page = await loadEditMaterialPage();
+    const element = await page.default({ params: { materialId: "material-1" } });
+    render(element);
+
+    expect(screen.getByLabelText(/file url/i)).toHaveProperty("value", externalHref);
+  });
+
+  it.each([
+    "javascript:alert(1)",
+    "/api/files/not+base64url",
+    `/api/public-files/${encodeStorageKey("private/teachers/teacher-1/materials/algebra.pdf")}`,
+  ])("does not prefill malformed or cross-purpose material href %s", async (fileUrl) => {
+    getCourseMaterialForTeacherMock.mockResolvedValueOnce(material({ fileUrl, attachments: [] }));
+
+    const page = await loadEditMaterialPage();
+    const element = await page.default({ params: { materialId: "material-1" } });
+    render(element);
+
+    expect(screen.getByLabelText(/file url/i)).toHaveProperty("value", "");
   });
 
   it("returns notFound for missing or foreign material", async () => {

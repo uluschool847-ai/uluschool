@@ -5,6 +5,7 @@ import { generateTemporaryPassword } from "@/lib/auth/temporary-password";
 import { canStartLesson as getLessonStartState } from "@/lib/lessons/lesson-status";
 import { validateLiveLessonUrl } from "@/lib/lessons/live-lesson-url";
 import { prisma } from "@/lib/prisma";
+import { preferredStoredFileHref } from "@/lib/security/storage-links";
 
 type PortalDatabase = typeof prisma | Prisma.TransactionClient;
 
@@ -943,7 +944,7 @@ type TeacherDashboardAssignment = {
 
 type TeacherDashboardSubmission = {
   id: string;
-  contentUrl: string;
+  contentUrl: string | null;
   submittedAt: Date;
   student: { id: string; fullName: string; email: string };
   studentName: string;
@@ -1534,6 +1535,11 @@ export async function getTeacherDashboardData(teacherId: string): Promise<Teache
         contentUrl: true,
         submittedAt: true,
         grade: true,
+        attachments: {
+          select: { storageKey: true },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          take: 1,
+        },
         student: {
           select: {
             id: true,
@@ -1656,7 +1662,10 @@ export async function getTeacherDashboardData(teacherId: string): Promise<Teache
 
     return {
       id: submission.id,
-      contentUrl: submission.contentUrl,
+      contentUrl: preferredStoredFileHref(
+        submission.attachments[0]?.storageKey,
+        submission.contentUrl,
+      ),
       submittedAt: submission.submittedAt,
       student: {
         id: submission.student.id,

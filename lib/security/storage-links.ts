@@ -12,6 +12,29 @@ function hasControlCharacters(value: string) {
   });
 }
 
+function hasCurrentStorageRoot(value: string) {
+  const candidate = value.startsWith("/") ? value.slice(1) : value;
+  return (
+    candidate === "private" ||
+    candidate.startsWith("private/") ||
+    candidate === "public" ||
+    candidate.startsWith("public/")
+  );
+}
+
+function validatedLegacyStorageHref(value: string) {
+  try {
+    return `/${validateLegacyStorageKey(value)}`;
+  } catch {
+    return null;
+  }
+}
+
+function bareLegacyStorageHref(value: string) {
+  if (value.startsWith("/") || hasCurrentStorageRoot(value)) return null;
+  return validatedLegacyStorageHref(`uploads/${value}`);
+}
+
 export function safeStoredFileHref(value: string | null | undefined) {
   if (!value || value !== value.trim() || hasControlCharacters(value)) return null;
 
@@ -48,15 +71,10 @@ export function storageHrefForKey(storageKey: string | null | undefined) {
   try {
     return storageUrlForKey(storageKey);
   } catch {
-    try {
-      return `/${validateLegacyStorageKey(storageKey)}`;
-    } catch {
-      try {
-        return `/${validateLegacyStorageKey(`uploads/${storageKey}`)}`;
-      } catch {
-        return null;
-      }
-    }
+    const persistedLegacyHref = validatedLegacyStorageHref(storageKey);
+    if (persistedLegacyHref) return persistedLegacyHref;
+    if (hasCurrentStorageRoot(storageKey)) return null;
+    return bareLegacyStorageHref(storageKey);
   }
 }
 
