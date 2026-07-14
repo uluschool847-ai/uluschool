@@ -30,6 +30,8 @@ type ReportActionResult =
   | { success: true; data: unknown }
   | { success: false; error: string | Record<string, string[] | undefined> };
 
+const REPORT_EXPORT_PUBLIC_ERROR = "Unable to export report PDF.";
+
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unable to process report.";
 }
@@ -160,7 +162,7 @@ export async function exportReportSnapshotPdfAction(
     const exported = await exportReportSnapshotPdf(session.uid, snapshotId);
     revalidateReportSnapshotPaths(snapshotId, exported.snapshot.studentId);
     return { success: true, data: exported };
-  } catch (error) {
-    return { success: false, error: errorMessage(error) };
+  } catch {
+    return { success: false, error: REPORT_EXPORT_PUBLIC_ERROR };
   }
 }

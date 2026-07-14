@@ -168,15 +168,20 @@ describe("teacher report actions", () => {
     expect(revalidatePathMock).toHaveBeenCalledWith("/portal/student/reports/snapshot-1");
   });
 
-  it("does not audit or revalidate when the transactional export fails", async () => {
+  it("returns a fixed public error without key, path, or configuration details", async () => {
     exportReportSnapshotPdfMock.mockRejectedValueOnce(
-      new Error("report export transaction failed"),
+      new Error(
+        "R2_SECRET_ACCESS_KEY=storage-secret failed for D:\\uploads\\private\\teachers\\teacher-1\\reports\\report.pdf",
+      ),
     );
     const { exportReportSnapshotPdfAction } = await loadReportActions();
 
     const result = await exportReportSnapshotPdfAction("snapshot-1");
 
-    expect(result).toEqual({ success: false, error: "report export transaction failed" });
+    expect(result).toEqual({ success: false, error: "Unable to export report PDF." });
+    expect(JSON.stringify(result)).not.toMatch(
+      /storage-secret|R2_SECRET_ACCESS_KEY|private\/teachers|uploads/i,
+    );
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });

@@ -744,7 +744,7 @@ describe("course-material-repository teacher ownership contract", () => {
     expect(prismaMock.attachment.deleteMany).not.toHaveBeenCalled();
   });
 
-  it("keeps an unchanged persisted internal application URL during metadata-only edits", async () => {
+  it("accepts canonical A only when it binds to persisted primary attachment A", async () => {
     const storageKey =
       "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-algebra.pdf";
     const fileUrl = storageUrlForKey(storageKey);
@@ -768,7 +768,56 @@ describe("course-material-repository teacher ownership contract", () => {
       fileUrl,
     });
 
-    expect(prismaMock.courseMaterial.update).toHaveBeenCalled();
+    expect(prismaMock.courseMaterial.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ fileUrl }),
+      }),
+    );
+    expect(prismaMock.attachment.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicated canonical B when persisted primary attachment A is trusted", async () => {
+    const primaryStorageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-primary.pdf";
+    const duplicatedStorageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000002-duplicate.pdf";
+    const duplicatedFileUrl = storageUrlForKey(duplicatedStorageKey);
+    prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(
+      material({
+        fileUrl: duplicatedFileUrl,
+        attachments: [{ id: "attachment-a", storageKey: primaryStorageKey }],
+      }),
+    );
+
+    const { updateCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+    await expect(
+      updateCourseMaterialForTeacher("material-1", "teacher-1", {
+        title: "Rejected duplicate token",
+        fileUrl: duplicatedFileUrl,
+      }),
+    ).rejects.toThrow(/attachment|storage key|internal upload/i);
+
+    expect(prismaMock.courseMaterial.update).not.toHaveBeenCalled();
+    expect(prismaMock.attachment.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicated canonical B when no persisted attachment exists", async () => {
+    const duplicatedStorageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000002-duplicate.pdf";
+    const duplicatedFileUrl = storageUrlForKey(duplicatedStorageKey);
+    prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(
+      material({ fileUrl: duplicatedFileUrl, attachments: [] }),
+    );
+
+    const { updateCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+    await expect(
+      updateCourseMaterialForTeacher("material-1", "teacher-1", {
+        title: "Rejected attachment-less token",
+        fileUrl: duplicatedFileUrl,
+      }),
+    ).rejects.toThrow(/attachment|storage key|internal upload/i);
+
+    expect(prismaMock.courseMaterial.update).not.toHaveBeenCalled();
     expect(prismaMock.attachment.deleteMany).not.toHaveBeenCalled();
   });
 

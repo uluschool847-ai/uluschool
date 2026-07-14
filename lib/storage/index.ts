@@ -51,6 +51,7 @@ export {
   decodeStorageToken,
   encodeStorageKey,
   legacyStorageKeyFromUrl,
+  normalizePersistedStorageReference,
   storageKeyFromUrl,
   storageUrlForKey,
   storageUrlMatchesKey,

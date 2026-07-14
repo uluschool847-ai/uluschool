@@ -9,9 +9,8 @@ import { listProgressNotesForTeacherStudent } from "@/lib/repositories/student-p
 import { renderReportSnapshotPdf } from "@/lib/services/report-pdf";
 import {
   createStorageService,
+  normalizePersistedStorageReference,
   teacherReportNamespace,
-  validateLegacyStorageKey,
-  validateStorageKey,
 } from "@/lib/storage";
 
 type ReportDatabase = typeof prisma | Prisma.TransactionClient;
@@ -413,25 +412,13 @@ export async function listReportSnapshotsForParentChild(
   );
 }
 
-function trustedPreviousReportStorageKey(value: unknown, teacherId: string) {
-  if (typeof value !== "string" || !value) return null;
+function trustedPreviousReportStorageReference(value: unknown, teacherId: string) {
+  const reference = normalizePersistedStorageReference(value);
+  if (!reference) return null;
+  if (reference.kind === "legacy") return reference;
 
-  try {
-    const storageKey = validateStorageKey(value);
-    const namespace = teacherReportNamespace(teacherId);
-    return storageKey.startsWith(`${namespace}/`) ? storageKey : null;
-  } catch {
-    try {
-      return validateLegacyStorageKey(value);
-    } catch {
-      return null;
-    }
-  }
-}
-
-function persistedReportStorageKeyAliases(storageKey: string) {
-  if (!storageKey.startsWith("uploads/")) return [storageKey];
-  return [storageKey, `/${storageKey}`, `public/${storageKey}`, `/public/${storageKey}`];
+  const namespace = teacherReportNamespace(teacherId);
+  return reference.storageKey.startsWith(`${namespace}/`) ? reference : null;
 }
 
 async function deleteReportStorageKeyBestEffort(
@@ -445,27 +432,69 @@ async function deleteReportStorageKeyBestEffort(
   }
 }
 
+async function hasLiveStorageReference(aliases: string[]) {
+  const lookups = [
+    () =>
+      prisma.reportSnapshot.findFirst({
+        where: { pdfStorageKey: { in: aliases } },
+        select: { id: true },
+      }),
+    () =>
+      prisma.attachment.findFirst({
+        where: { storageKey: { in: aliases } },
+        select: { id: true },
+      }),
+    () =>
+      prisma.courseMaterial.findFirst({
+        where: { fileUrl: { in: aliases } },
+        select: { id: true },
+      }),
+    () =>
+      prisma.submission.findFirst({
+        where: { contentUrl: { in: aliases } },
+        select: { id: true },
+      }),
+    () =>
+      prisma.teacher.findFirst({
+        where: { photoUrl: { in: aliases } },
+        select: { id: true },
+      }),
+  ];
+
+  for (const lookup of lookups) {
+    try {
+      if (await lookup()) return true;
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function cleanupPreviousReportPdfBestEffort(input: {
   persistedValue: unknown;
   replacementStorageKey: string;
   storage: ReturnType<typeof createStorageService>;
   teacherId: string;
 }) {
-  if (input.persistedValue === input.replacementStorageKey) return;
-  const cleanupStorageKey = trustedPreviousReportStorageKey(input.persistedValue, input.teacherId);
-  if (!cleanupStorageKey || typeof input.persistedValue !== "string") return;
+  const previousReference = trustedPreviousReportStorageReference(
+    input.persistedValue,
+    input.teacherId,
+  );
+  const replacementReference = normalizePersistedStorageReference(input.replacementStorageKey);
+  if (!previousReference || !replacementReference) return;
+  if (previousReference.storageKey === replacementReference.storageKey) return;
 
   try {
-    const remainingReference = await prisma.reportSnapshot.findFirst({
-      where: { pdfStorageKey: { in: persistedReportStorageKeyAliases(cleanupStorageKey) } },
-      select: { id: true },
-    });
-    if (!remainingReference) {
-      await input.storage.delete(cleanupStorageKey);
-    }
+    if (await hasLiveStorageReference(previousReference.aliases)) return;
+    await input.storage.delete(previousReference.storageKey);
   } catch {
     // The export is committed; reference checks and old-object cleanup are best-effort.
   }
+}
+
+function reportAuditTimestamp(value: Date | null) {
+  return value?.toISOString() ?? null;
 }
 
 export async function exportReportSnapshotPdf(teacherId: string, snapshotId: string) {
@@ -504,11 +533,11 @@ export async function exportReportSnapshotPdf(teacherId: string, snapshotId: str
           targetType: "reportSnapshot",
           targetId: currentSnapshot.id,
           before: {
-            pdfGeneratedAt: currentSnapshot.pdfGeneratedAt,
+            pdfGeneratedAt: reportAuditTimestamp(currentSnapshot.pdfGeneratedAt),
             pdfStorageKey: currentSnapshot.pdfStorageKey,
           },
           after: {
-            pdfGeneratedAt: updatedSnapshot.pdfGeneratedAt,
+            pdfGeneratedAt: reportAuditTimestamp(updatedSnapshot.pdfGeneratedAt),
             pdfStorageKey: updatedSnapshot.pdfStorageKey,
           },
           meta: {
@@ -516,7 +545,7 @@ export async function exportReportSnapshotPdf(teacherId: string, snapshotId: str
             reportSnapshotId: currentSnapshot.id,
             storageKey,
             pdfStorageKey: updatedSnapshot.pdfStorageKey,
-            pdfGeneratedAt: updatedSnapshot.pdfGeneratedAt,
+            pdfGeneratedAt: reportAuditTimestamp(updatedSnapshot.pdfGeneratedAt),
           },
         },
         transaction,

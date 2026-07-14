@@ -296,6 +296,39 @@ describe("admin-audit-repository", () => {
     );
   });
 
+  it("persists ISO report timestamps through the real audit sanitizer boundary", async () => {
+    prismaMock.adminAuditLog.create.mockResolvedValueOnce({
+      id: "audit-report-export",
+      adminUserId: "admin-1",
+      action: "REPORT_PDF_EXPORTED",
+      targetType: "reportSnapshot",
+      targetId: "snapshot-1",
+      before: { pdfGeneratedAt: "2026-05-21T10:00:00.000Z" },
+      after: { pdfGeneratedAt: "2026-05-21T11:00:00.000Z" },
+      meta: { pdfGeneratedAt: "2026-05-21T11:00:00.000Z" },
+      createdAt: new Date("2026-05-21T11:00:01.000Z"),
+    });
+
+    const { createAdminAuditLog } = await loadAuditRepository();
+    await createAdminAuditLog({
+      adminUserId: "admin-1",
+      action: "REPORT_PDF_EXPORTED",
+      targetType: "reportSnapshot",
+      targetId: "snapshot-1",
+      before: { pdfGeneratedAt: "2026-05-21T10:00:00.000Z" },
+      after: { pdfGeneratedAt: "2026-05-21T11:00:00.000Z" },
+      meta: { pdfGeneratedAt: "2026-05-21T11:00:00.000Z" },
+    });
+
+    expect(prismaMock.adminAuditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        before: { pdfGeneratedAt: "2026-05-21T10:00:00.000Z" },
+        after: { pdfGeneratedAt: "2026-05-21T11:00:00.000Z" },
+        meta: { pdfGeneratedAt: "2026-05-21T11:00:00.000Z" },
+      }),
+    });
+  });
+
   it("createLog surfaces database failures cleanly", async () => {
     prismaMock.adminAuditLog.create.mockRejectedValueOnce(new Error("Database connection lost"));
 

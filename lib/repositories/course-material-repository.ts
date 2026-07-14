@@ -245,14 +245,14 @@ function validateUpdateFileUrl(
     throw new Error("File URL is required.");
   }
   const primaryHref = storageHrefForKey(existingPrimaryStorageKey);
-  let matchesTrustedExistingUrl = false;
-  try {
-    matchesTrustedExistingUrl =
-      validateCourseMaterialFileUrl(existingFileUrl, { allowTrustedLegacy: true }) === value;
-  } catch {
-    matchesTrustedExistingUrl = false;
-  }
   if (value.startsWith("/uploads/") || value.startsWith("/public/uploads/")) {
+    let matchesTrustedExistingUrl = false;
+    try {
+      matchesTrustedExistingUrl =
+        validateCourseMaterialFileUrl(existingFileUrl, { allowTrustedLegacy: true }) === value;
+    } catch {
+      matchesTrustedExistingUrl = false;
+    }
     const legacyUrl = validateCourseMaterialFileUrl(value, { allowTrustedLegacy: true });
     const matchesPrimaryAttachment = primaryHref === legacyUrl;
     if (!hasReplacement && !matchesPrimaryAttachment && !matchesTrustedExistingUrl) {
@@ -262,17 +262,13 @@ function validateUpdateFileUrl(
   }
   const validatedFileUrl = validateCourseMaterialFileUrl(value);
   if (validatedFileUrl?.startsWith("/api/") && !hasReplacement) {
-    const matchesPrimaryAttachment = Boolean(
-      existingPrimaryStorageKey &&
-        storageUrlMatchesKey(validatedFileUrl, existingPrimaryStorageKey),
-    );
-    if (!matchesPrimaryAttachment && !matchesTrustedExistingUrl) {
+    if (
+      !existingPrimaryStorageKey ||
+      !storageUrlMatchesKey(validatedFileUrl, existingPrimaryStorageKey)
+    ) {
       throw new Error("Internal upload URLs require matching attachment metadata.");
     }
-    if (matchesPrimaryAttachment) {
-      return storageUrlForKey(existingPrimaryStorageKey as string);
-    }
-    return primaryHref ?? validatedFileUrl;
+    return storageUrlForKey(existingPrimaryStorageKey);
   }
   return validatedFileUrl;
 }

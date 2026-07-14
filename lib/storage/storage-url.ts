@@ -8,6 +8,37 @@ const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
 const STORAGE_URL_PATTERN = /^\/api\/(files|public-files)\/([A-Za-z0-9_-]+)$/;
 const MAX_STORAGE_TOKEN_LENGTH = Math.ceil((MAX_STORAGE_KEY_LENGTH * 4) / 3);
 
+export type PersistedStorageReference = {
+  aliases: string[];
+  kind: "current" | "legacy";
+  storageKey: string;
+};
+
+function hasCurrentStorageRoot(value: string) {
+  const candidate = value.startsWith("/") ? value.slice(1) : value;
+  return (
+    candidate === "private" ||
+    candidate.startsWith("private/") ||
+    candidate === "public" ||
+    candidate.startsWith("public/")
+  );
+}
+
+function legacyReference(storageKey: string): PersistedStorageReference {
+  const suffix = storageKey.slice("uploads/".length);
+  return {
+    aliases: [
+      storageKey,
+      `/${storageKey}`,
+      `public/${storageKey}`,
+      `/public/${storageKey}`,
+      suffix,
+    ],
+    kind: "legacy",
+    storageKey,
+  };
+}
+
 export function encodeStorageKey(storageKey: string) {
   return Buffer.from(validateStorageKey(storageKey), "utf8").toString("base64url");
 }
@@ -43,6 +74,50 @@ export function storageKeyFromUrl(storageUrl: string) {
   const expectedRoute = storageKey.startsWith("public/") ? "public-files" : "files";
   if (match[1] !== expectedRoute) throw new Error("Invalid storage URL");
   return storageKey;
+}
+
+export function normalizePersistedStorageReference(
+  value: unknown,
+): PersistedStorageReference | null {
+  if (typeof value !== "string" || !value || value !== value.trim()) return null;
+
+  if (
+    value.startsWith("uploads/") ||
+    value.startsWith("/uploads/") ||
+    value.startsWith("public/uploads/") ||
+    value.startsWith("/public/uploads/")
+  ) {
+    try {
+      return legacyReference(validateLegacyStorageKey(value));
+    } catch {
+      return null;
+    }
+  }
+
+  try {
+    const storageKey = validateStorageKey(value);
+    return {
+      aliases: [storageKey, storageUrlForKey(storageKey)],
+      kind: "current",
+      storageKey,
+    };
+  } catch {
+    try {
+      const storageKey = storageKeyFromUrl(value);
+      return {
+        aliases: [storageKey, storageUrlForKey(storageKey)],
+        kind: "current",
+        storageKey,
+      };
+    } catch {
+      if (value.startsWith("/") || hasCurrentStorageRoot(value)) return null;
+      try {
+        return legacyReference(validateLegacyStorageKey(`uploads/${value}`));
+      } catch {
+        return null;
+      }
+    }
+  }
 }
 
 export function storageUrlMatchesKey(storageUrl: string, storageKey: string) {

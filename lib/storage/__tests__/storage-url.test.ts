@@ -4,6 +4,7 @@ import {
   decodeStorageToken,
   encodeStorageKey,
   legacyStorageKeyFromUrl,
+  normalizePersistedStorageReference,
   storageKeyFromUrl,
   storageUrlForKey,
   storageUrlMatchesKey,
@@ -60,6 +61,48 @@ describe("storage application URLs", () => {
     );
     expect(() => legacyStorageKeyFromUrl("/uploads/../private.txt")).toThrow(/legacy storage url/i);
     expect(() => storageKeyFromUrl("/uploads/teacher-1/old-photo.webp")).toThrow(/storage url/i);
+  });
+
+  it("normalizes raw and canonical current references to one key with complete aliases", () => {
+    const storageKey = "private/teachers/teacher-1/reports/report.pdf";
+    const canonicalUrl = storageUrlForKey(storageKey);
+    const expected = {
+      aliases: [storageKey, canonicalUrl],
+      kind: "current" as const,
+      storageKey,
+    };
+
+    expect(normalizePersistedStorageReference(storageKey)).toEqual(expected);
+    expect(normalizePersistedStorageReference(canonicalUrl)).toEqual(expected);
+  });
+
+  it.each([
+    "uploads/reports/old.pdf",
+    "/uploads/reports/old.pdf",
+    "public/uploads/reports/old.pdf",
+    "/public/uploads/reports/old.pdf",
+    "reports/old.pdf",
+  ])("normalizes every supported legacy reference form: %s", (value) => {
+    expect(normalizePersistedStorageReference(value)).toEqual({
+      aliases: [
+        "uploads/reports/old.pdf",
+        "/uploads/reports/old.pdf",
+        "public/uploads/reports/old.pdf",
+        "/public/uploads/reports/old.pdf",
+        "reports/old.pdf",
+      ],
+      kind: "legacy",
+      storageKey: "uploads/reports/old.pdf",
+    });
+  });
+
+  it.each([
+    "https://cdn.example.com/report.pdf",
+    "private/teachers/teacher-1/reports/file name.pdf",
+    "/api/files/not-a-valid-token",
+    "/private/teachers/teacher-1/reports/report.pdf",
+  ])("rejects malformed, external, or untrusted persisted references: %s", (value) => {
+    expect(normalizePersistedStorageReference(value)).toBeNull();
   });
 
   it("rejects a Base64URL token with non-zero unused padding bits", () => {

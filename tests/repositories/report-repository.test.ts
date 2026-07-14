@@ -6,18 +6,34 @@ const OLD_REPORT_KEY =
   "private/teachers/teacher-1/reports/00000000-0000-4000-8000-000000000001-old-report.pdf";
 const NEW_REPORT_KEY =
   "private/teachers/teacher-1/reports/00000000-0000-4000-8000-000000000002-report.pdf";
+const LEGACY_REPORT_KEY = "uploads/reports/old-report.pdf";
+const LEGACY_REPORT_ALIASES = [
+  LEGACY_REPORT_KEY,
+  `/${LEGACY_REPORT_KEY}`,
+  `public/${LEGACY_REPORT_KEY}`,
+  `/public/${LEGACY_REPORT_KEY}`,
+  "reports/old-report.pdf",
+];
+
+type StorageReferences = Partial<
+  Record<"attachment" | "courseMaterial" | "reportSnapshot" | "submission" | "teacher", string[]>
+>;
 
 const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(),
   academicTerm: { findMany: vi.fn() },
   appUser: { findFirst: vi.fn(), findMany: vi.fn() },
+  attachment: { findFirst: vi.fn() },
   classGroup: { findMany: vi.fn() },
+  courseMaterial: { findFirst: vi.fn() },
   reportSnapshot: {
     create: vi.fn(),
     findFirst: vi.fn(),
     findMany: vi.fn(),
     update: vi.fn(),
   },
+  submission: { findFirst: vi.fn() },
+  teacher: { findFirst: vi.fn() },
 }));
 const transactionClientMock = vi.hoisted(() => ({
   auditRows: [] as unknown[],
@@ -138,23 +154,55 @@ function snapshot(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function queryIncludesReference(input: unknown, field: string, references: string[] | undefined) {
+  const where = (input as { where?: Record<string, unknown> } | null)?.where;
+  const filter = where?.[field] as { in?: unknown } | undefined;
+  const aliases = Array.isArray(filter?.in) ? filter.in : [];
+  return references?.some((reference) => aliases.includes(reference)) ?? false;
+}
+
 function prepareReportExport(
   oldPdfStorageKey: string | null = OLD_REPORT_KEY,
-  remainingReference: Record<string, unknown> | null = null,
+  references: StorageReferences = {},
+  replacementStorageKey = NEW_REPORT_KEY,
 ) {
   const before = snapshot({ pdfStorageKey: oldPdfStorageKey });
   const after = snapshot({
     pdfGeneratedAt: new Date("2026-05-21T11:00:00.000Z"),
-    pdfStorageKey: NEW_REPORT_KEY,
+    pdfStorageKey: replacementStorageKey,
   });
   prismaMock.reportSnapshot.findFirst.mockReset();
-  prismaMock.reportSnapshot.findFirst
-    .mockResolvedValueOnce(before)
-    .mockResolvedValueOnce(remainingReference);
+  prismaMock.reportSnapshot.findFirst.mockImplementation(async (input: unknown) => {
+    const where = (input as { where?: { id?: string } } | null)?.where;
+    if (where?.id) return before;
+    return queryIncludesReference(input, "pdfStorageKey", references.reportSnapshot)
+      ? { id: "report-reference" }
+      : null;
+  });
+  prismaMock.attachment.findFirst.mockImplementation(async (input: unknown) =>
+    queryIncludesReference(input, "storageKey", references.attachment)
+      ? { id: "attachment-reference" }
+      : null,
+  );
+  prismaMock.courseMaterial.findFirst.mockImplementation(async (input: unknown) =>
+    queryIncludesReference(input, "fileUrl", references.courseMaterial)
+      ? { id: "material-reference" }
+      : null,
+  );
+  prismaMock.submission.findFirst.mockImplementation(async (input: unknown) =>
+    queryIncludesReference(input, "contentUrl", references.submission)
+      ? { id: "submission-reference" }
+      : null,
+  );
+  prismaMock.teacher.findFirst.mockImplementation(async (input: unknown) =>
+    queryIncludesReference(input, "photoUrl", references.teacher)
+      ? { id: "teacher-reference" }
+      : null,
+  );
   transactionClientMock.reportSnapshot.findFirst.mockResolvedValueOnce(before);
   transactionClientMock.reportSnapshot.update.mockResolvedValueOnce(after);
-  uploadMock.mockResolvedValueOnce(NEW_REPORT_KEY);
-  getURLMock.mockReturnValueOnce(storageUrlForKey(NEW_REPORT_KEY));
+  uploadMock.mockResolvedValueOnce(replacementStorageKey);
+  getURLMock.mockReturnValueOnce(storageUrlForKey(replacementStorageKey));
   return { after, before };
 }
 
@@ -629,23 +677,48 @@ describe("report-repository contract", () => {
     expect(createAdminAuditLogMock).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "REPORT_PDF_EXPORTED",
+        before: {
+          pdfGeneratedAt: "2026-05-21T10:00:00.000Z",
+          pdfStorageKey: OLD_REPORT_KEY,
+        },
+        after: {
+          pdfGeneratedAt: "2026-05-21T11:00:00.000Z",
+          pdfStorageKey: NEW_REPORT_KEY,
+        },
         targetId: "snapshot-1",
         targetType: "reportSnapshot",
-        meta: expect.objectContaining({
+        meta: {
           teacherId: "teacher-1",
           reportSnapshotId: "snapshot-1",
           storageKey: NEW_REPORT_KEY,
           pdfStorageKey: NEW_REPORT_KEY,
-          pdfGeneratedAt: expect.any(Date),
-        }),
+          pdfGeneratedAt: "2026-05-21T11:00:00.000Z",
+        },
       }),
       transactionClientMock,
     );
     expect(committedAuditRows).toEqual([
       expect.objectContaining({ action: "REPORT_PDF_EXPORTED", targetId: "snapshot-1" }),
     ]);
-    expect(prismaMock.reportSnapshot.findFirst).toHaveBeenLastCalledWith({
-      where: { pdfStorageKey: { in: [OLD_REPORT_KEY] } },
+    const oldAliases = [OLD_REPORT_KEY, storageUrlForKey(OLD_REPORT_KEY)];
+    expect(prismaMock.reportSnapshot.findFirst).toHaveBeenCalledWith({
+      where: { pdfStorageKey: { in: oldAliases } },
+      select: { id: true },
+    });
+    expect(prismaMock.attachment.findFirst).toHaveBeenCalledWith({
+      where: { storageKey: { in: oldAliases } },
+      select: { id: true },
+    });
+    expect(prismaMock.courseMaterial.findFirst).toHaveBeenCalledWith({
+      where: { fileUrl: { in: oldAliases } },
+      select: { id: true },
+    });
+    expect(prismaMock.submission.findFirst).toHaveBeenCalledWith({
+      where: { contentUrl: { in: oldAliases } },
+      select: { id: true },
+    });
+    expect(prismaMock.teacher.findFirst).toHaveBeenCalledWith({
+      where: { photoUrl: { in: oldAliases } },
       select: { id: true },
     });
     expect(deleteMock).toHaveBeenCalledWith(OLD_REPORT_KEY);
@@ -725,33 +798,134 @@ describe("report-repository contract", () => {
   });
 
   it("normalizes and deletes an unreferenced trusted legacy report key after commit", async () => {
-    prepareReportExport("/uploads/reports/old-report.pdf");
+    prepareReportExport(`/${LEGACY_REPORT_KEY}`);
     const { exportReportSnapshotPdf } = await loadReportRepository();
 
     await expect(exportReportSnapshotPdf("teacher-1", "snapshot-1")).resolves.toEqual(
       expect.objectContaining({ storageKey: NEW_REPORT_KEY }),
     );
 
-    expect(prismaMock.reportSnapshot.findFirst).toHaveBeenLastCalledWith({
-      where: {
-        pdfStorageKey: {
-          in: [
-            "uploads/reports/old-report.pdf",
-            "/uploads/reports/old-report.pdf",
-            "public/uploads/reports/old-report.pdf",
-            "/public/uploads/reports/old-report.pdf",
-          ],
-        },
-      },
+    expect(prismaMock.reportSnapshot.findFirst).toHaveBeenCalledWith({
+      where: { pdfStorageKey: { in: LEGACY_REPORT_ALIASES } },
       select: { id: true },
     });
-    expect(deleteMock).toHaveBeenCalledWith("uploads/reports/old-report.pdf");
+    expect(prismaMock.teacher.findFirst).toHaveBeenCalledWith({
+      where: { photoUrl: { in: LEGACY_REPORT_ALIASES } },
+      select: { id: true },
+    });
+    expect(deleteMock).toHaveBeenCalledWith(LEGACY_REPORT_KEY);
+  });
+
+  it("normalizes a canonical current previous value and deletes its unreferenced raw key", async () => {
+    prepareReportExport(storageUrlForKey(OLD_REPORT_KEY));
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    expect(deleteMock).toHaveBeenCalledWith(OLD_REPORT_KEY);
+  });
+
+  it("retains a raw current key referenced through its canonical current alias", async () => {
+    const canonicalOldUrl = storageUrlForKey(OLD_REPORT_KEY);
+    prepareReportExport(OLD_REPORT_KEY, { reportSnapshot: [canonicalOldUrl] });
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    expect(prismaMock.reportSnapshot.findFirst).toHaveBeenCalledWith({
+      where: { pdfStorageKey: { in: [OLD_REPORT_KEY, canonicalOldUrl] } },
+      select: { id: true },
+    });
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it("normalizes a bare legacy previous value and retains its aliased live reference", async () => {
+    prepareReportExport("reports/old-report.pdf", {
+      reportSnapshot: [`/${LEGACY_REPORT_KEY}`],
+    });
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    expect(prismaMock.reportSnapshot.findFirst).toHaveBeenCalledWith({
+      where: { pdfStorageKey: { in: LEGACY_REPORT_ALIASES } },
+      select: { id: true },
+    });
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "current attachment key",
+      model: "attachment" as const,
+      previous: storageUrlForKey(OLD_REPORT_KEY),
+      reference: OLD_REPORT_KEY,
+    },
+    {
+      label: "legacy material URL",
+      model: "courseMaterial" as const,
+      previous: `/${LEGACY_REPORT_KEY}`,
+      reference: "reports/old-report.pdf",
+    },
+    {
+      label: "legacy submission URL",
+      model: "submission" as const,
+      previous: LEGACY_REPORT_KEY,
+      reference: `/public/${LEGACY_REPORT_KEY}`,
+    },
+    {
+      label: "legacy teacher photo URL",
+      model: "teacher" as const,
+      previous: `public/${LEGACY_REPORT_KEY}`,
+      reference: `/${LEGACY_REPORT_KEY}`,
+    },
+  ])("retains an old object referenced by a cross-model $label", async (testCase) => {
+    prepareReportExport(testCase.previous, {
+      [testCase.model]: [testCase.reference],
+    } as StorageReferences);
+    const referenceLookupMocks = {
+      attachment: prismaMock.attachment.findFirst,
+      courseMaterial: prismaMock.courseMaterial.findFirst,
+      submission: prismaMock.submission.findFirst,
+      teacher: prismaMock.teacher.findFirst,
+    };
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    expect(referenceLookupMocks[testCase.model]).toHaveBeenCalled();
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it("does not delete when canonical previous and raw replacement normalize to the same key", async () => {
+    prepareReportExport(storageUrlForKey(OLD_REPORT_KEY), {}, OLD_REPORT_KEY);
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    expect(prismaMock.attachment.findFirst).not.toHaveBeenCalled();
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it("retains the old object when a cross-model reference query fails", async () => {
+    prepareReportExport();
+    prismaMock.attachment.findFirst.mockRejectedValueOnce(new Error("reference query failed"));
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await expect(exportReportSnapshotPdf("teacher-1", "snapshot-1")).resolves.toEqual(
+      expect.objectContaining({ storageKey: NEW_REPORT_KEY }),
+    );
+
+    expect(prismaMock.attachment.findFirst).toHaveBeenCalled();
+    expect(deleteMock).not.toHaveBeenCalled();
   });
 
   it.each([
     "https://cdn.example.com/reports/external.pdf",
     "private/teachers/teacher-1/reports/file name.pdf",
     "private/teachers/teacher-2/reports/foreign.pdf",
+    storageUrlForKey("private/teachers/teacher-2/reports/foreign.pdf"),
+    storageUrlForKey("public/teachers/admin-1/report.pdf"),
   ])(
     "does not delete an external, malformed, or untrusted previous value: %s",
     async (oldValue) => {
@@ -766,7 +940,7 @@ describe("report-repository contract", () => {
   );
 
   it("does not delete a previous report key that remains referenced after commit", async () => {
-    prepareReportExport(OLD_REPORT_KEY, { id: "snapshot-2" });
+    prepareReportExport(OLD_REPORT_KEY, { reportSnapshot: [OLD_REPORT_KEY] });
     const { exportReportSnapshotPdf } = await loadReportRepository();
 
     await exportReportSnapshotPdf("teacher-1", "snapshot-1");
@@ -776,22 +950,15 @@ describe("report-repository contract", () => {
   });
 
   it("keeps a legacy report object referenced through an equivalent persisted URL form", async () => {
-    prepareReportExport("/uploads/reports/old-report.pdf", { id: "snapshot-2" });
+    prepareReportExport(`/${LEGACY_REPORT_KEY}`, {
+      reportSnapshot: [`public/${LEGACY_REPORT_KEY}`],
+    });
     const { exportReportSnapshotPdf } = await loadReportRepository();
 
     await exportReportSnapshotPdf("teacher-1", "snapshot-1");
 
-    expect(prismaMock.reportSnapshot.findFirst).toHaveBeenLastCalledWith({
-      where: {
-        pdfStorageKey: {
-          in: [
-            "uploads/reports/old-report.pdf",
-            "/uploads/reports/old-report.pdf",
-            "public/uploads/reports/old-report.pdf",
-            "/public/uploads/reports/old-report.pdf",
-          ],
-        },
-      },
+    expect(prismaMock.reportSnapshot.findFirst).toHaveBeenCalledWith({
+      where: { pdfStorageKey: { in: LEGACY_REPORT_ALIASES } },
       select: { id: true },
     });
     expect(deleteMock).not.toHaveBeenCalled();
