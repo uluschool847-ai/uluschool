@@ -3,6 +3,7 @@ import { strToU8, zipSync } from "fflate";
 const OLE_SIGNATURE = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
 const MAX_FIXTURE_SOURCE_BYTES = 64 * 1024;
 const MAX_FIXTURE_ENTRIES = 16;
+const ZIP_FIXTURE_MTIME = new Date(2000, 0, 1, 0, 0, 0);
 const CONTENT_TYPES_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/content-types";
 const RELATIONSHIPS_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/relationships";
 const OFFICE_DOCUMENT_RELATIONSHIP =
@@ -65,7 +66,7 @@ export function zipFixture(entries: Record<string, string>) {
     }),
   );
 
-  return Buffer.from(zipSync(encodedEntries, { level: 0 }));
+  return Buffer.from(zipSync(encodedEntries, { level: 0, mtime: ZIP_FIXTURE_MTIME }));
 }
 
 export function zipFixtureWithClaimedSize(entryName: string, claimedSize: number) {
@@ -87,7 +88,7 @@ export function zipFixtureWithCorruptedCompressedPayload() {
           true,
         ),
       },
-      { level: 6 },
+      { level: 6, mtime: ZIP_FIXTURE_MTIME },
     ),
   );
   const localHeader = bytes.indexOf(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
@@ -104,7 +105,36 @@ export function zipFixtureWithCorruptedCompressedPayload() {
 }
 
 export function zipFixtureWithHighCompressionRatio() {
-  return Buffer.from(zipSync({ "bomb.txt": strToU8("A".repeat(32 * 1024), true) }, { level: 9 }));
+  return Buffer.from(
+    zipSync(
+      { "bomb.txt": strToU8("A".repeat(32 * 1024), true) },
+      { level: 9, mtime: ZIP_FIXTURE_MTIME },
+    ),
+  );
+}
+
+export function zipFixtureWithInvalidLocalHeaderOffset() {
+  const bytes = zipFixture({ "notes.txt": "Course notes" });
+  const centralHeader = bytes.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+  if (centralHeader < 0) throw new Error("ZIP fixture central header is missing");
+  bytes.writeUInt32LE(bytes.length + 1, centralHeader + 42);
+  return bytes;
+}
+
+export function zipFixtureWithInvalidLocalHeaderSignature() {
+  const bytes = zipFixture({ "notes.txt": "Course notes" });
+  const localHeader = bytes.indexOf(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  if (localHeader < 0) throw new Error("ZIP fixture local header is missing");
+  bytes.writeUInt32LE(0, localHeader);
+  return bytes;
+}
+
+export function zipFixtureWithInvalidPayloadBounds() {
+  const bytes = zipFixture({ "notes.txt": "Course notes" });
+  const localHeader = bytes.indexOf(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  if (localHeader < 0) throw new Error("ZIP fixture local header is missing");
+  bytes.writeUInt16LE(0xffff, localHeader + 26);
+  return bytes;
 }
 
 export function ooxmlFixture(kind: OoxmlKind, overrides: OoxmlOverrides = {}) {

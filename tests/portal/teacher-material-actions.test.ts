@@ -26,6 +26,10 @@ const legacyDeleteCourseMaterialMock = vi.hoisted(() => vi.fn());
 const revalidatePathMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const storageDeleteMock = vi.hoisted(() => vi.fn());
+const transactionClientMock = vi.hoisted(() => ({ transaction: "material-write" }));
+const prismaMock = vi.hoisted(() => ({
+  $transaction: vi.fn(),
+}));
 const createStorageServiceMock = vi.hoisted(() =>
   vi.fn(() => ({
     delete: storageDeleteMock,
@@ -41,6 +45,10 @@ vi.mock("@/lib/auth/session", () => ({
     return mockSession;
   }),
   getSession: vi.fn(async () => mockSession),
+}));
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: prismaMock,
 }));
 
 vi.mock("@/lib/repositories/course-material-repository", () => ({
@@ -175,6 +183,11 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       email: "teacher@uluglobalacademy.com",
     };
     vi.clearAllMocks();
+    prismaMock.$transaction.mockImplementation(
+      async (callback: (transaction: typeof transactionClientMock) => unknown) =>
+        callback(transactionClientMock),
+    );
+    createAdminAuditLogMock.mockResolvedValue(undefined);
     createCourseMaterialForTeacherMock.mockResolvedValue(material());
     updateCourseMaterialForTeacherMock.mockResolvedValue(
       material({ title: validMaterialUpdate.title, ...validMaterialUpdate }),
@@ -192,10 +205,18 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
     });
     getCourseMaterialForTeacherMock.mockResolvedValue(material());
     unlinkCourseMaterialAttachmentForTeacherMock.mockResolvedValue({
+      ...material({ attachments: [] }),
       attachmentId: "attachment-1",
       materialId: "mat-123",
       storageKey:
         "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-material-1.pdf",
+      cleanup: {
+        queued: true,
+        deleted: 0,
+        storageKeys: [
+          "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-material-1.pdf",
+        ],
+      },
     });
     legacyCreateCourseMaterialMock.mockResolvedValue(material());
     legacyUpdateCourseMaterialMock.mockResolvedValue(
@@ -287,6 +308,144 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
     });
   });
 
+  describe("Atomic material transactions", () => {
+    it.each([
+      {
+        name: "create",
+        invoke: () => submitCourseMaterialAction(validMaterialPayload),
+        repository: createCourseMaterialForTeacherMock,
+      },
+      {
+        name: "update",
+        invoke: () => updateCourseMaterialAction("mat-123", validMaterialUpdate),
+        repository: updateCourseMaterialForTeacherMock,
+      },
+      {
+        name: "delete",
+        invoke: () => deleteCourseMaterialAction("mat-123"),
+        repository: deleteCourseMaterialForTeacherMock,
+      },
+      {
+        name: "unlink",
+        invoke: () =>
+          unlinkAttachmentAction({ materialId: "mat-123", attachmentId: "attachment-1" }),
+        repository: unlinkCourseMaterialAttachmentForTeacherMock,
+      },
+    ])(
+      "uses one serializable transaction client for $name mutation and audits",
+      async ({ invoke, repository }) => {
+        const response = await invoke();
+
+        expect(response).toEqual(expect.objectContaining({ success: true }));
+        expect(prismaMock.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+          isolationLevel: "Serializable",
+        });
+        expect(repository.mock.calls[0].at(-1)).toBe(transactionClientMock);
+        expect(createAdminAuditLogMock).toHaveBeenCalled();
+        for (const auditCall of createAdminAuditLogMock.mock.calls) {
+          expect(auditCall[1]).toBe(transactionClientMock);
+        }
+      },
+    );
+
+    it.each([
+      ["create", () => submitCourseMaterialAction(validMaterialPayload)],
+      ["update", () => updateCourseMaterialAction("mat-123", validMaterialUpdate)],
+      ["delete", () => deleteCourseMaterialAction("mat-123")],
+      [
+        "unlink",
+        () => unlinkAttachmentAction({ materialId: "mat-123", attachmentId: "attachment-1" }),
+      ],
+    ] as const)(
+      "does not run post-commit effects when the %s audit fails",
+      async (_name, invoke) => {
+        createAdminAuditLogMock.mockRejectedValueOnce(new Error("audit write failed"));
+
+        const response = await invoke();
+
+        expect(response).toEqual(
+          expect.objectContaining({
+            success: false,
+            error: expect.stringMatching(/audit write failed/i),
+          }),
+        );
+        expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+        expect(revalidatePathMock).not.toHaveBeenCalled();
+        expect(createStorageServiceMock).not.toHaveBeenCalled();
+        expect(storageDeleteMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it("rolls back the action path when attachment deletion fails", async () => {
+      unlinkCourseMaterialAttachmentForTeacherMock.mockRejectedValueOnce(
+        new Error("attachment delete failed"),
+      );
+
+      const response = await unlinkAttachmentAction({
+        materialId: "mat-123",
+        attachmentId: "attachment-1",
+      });
+
+      expect(response).toEqual(
+        expect.objectContaining({
+          success: false,
+          error: expect.stringMatching(/attachment delete/i),
+        }),
+      );
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+      expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      expect(revalidatePathMock).not.toHaveBeenCalled();
+      expect(storageDeleteMock).not.toHaveBeenCalled();
+    });
+
+    it("does not commit when the required file audit fails after the material audit", async () => {
+      const storageKey =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000003-audited.pdf";
+      createAdminAuditLogMock
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("file audit failed"));
+
+      const response = await submitCourseMaterialAction({
+        ...validMaterialPayload,
+        fileUrl: storageUrlForKey(storageKey),
+        attachment: {
+          filename: "audited.pdf",
+          storageKey,
+          mimeType: "application/pdf",
+          size: 2048,
+        },
+      });
+
+      expect(response).toEqual(
+        expect.objectContaining({
+          success: false,
+          error: expect.stringMatching(/file audit failed/i),
+        }),
+      );
+      expect(createAdminAuditLogMock).toHaveBeenCalledTimes(2);
+      expect(
+        createAdminAuditLogMock.mock.calls.every((call) => call[1] === transactionClientMock),
+      ).toBe(true);
+      expect(revalidatePathMock).not.toHaveBeenCalled();
+    });
+
+    it("attempts storage deletion only once for a duplicated orphan cleanup key", async () => {
+      const storageKey =
+        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-material-1.pdf";
+      deleteCourseMaterialForTeacherMock.mockResolvedValueOnce({
+        ...material(),
+        success: true,
+        cleanup: { queued: true, deleted: 0, storageKeys: [storageKey, storageKey] },
+      });
+
+      const response = await deleteCourseMaterialAction("mat-123");
+
+      expect(response).toEqual(expect.objectContaining({ success: true }));
+      expect(storageDeleteMock).toHaveBeenCalledTimes(1);
+      expect(storageDeleteMock).toHaveBeenCalledWith(storageKey);
+    });
+  });
+
   describe("Create action", () => {
     it("uses session.uid, ignores submitted teacherId, calls dedicated repository, audits, and revalidates", async () => {
       const response = await submitCourseMaterialAction({
@@ -306,6 +465,7 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
           scheduledClassId: "lesson-123",
           teacherId: "teacher-123",
         }),
+        transactionClientMock,
       );
       expect(JSON.stringify(createCourseMaterialForTeacherMock.mock.calls[0][0])).not.toContain(
         "teacher-2",
@@ -373,6 +533,7 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       expect(response).toEqual(expect.objectContaining({ success: true }));
       expect(createCourseMaterialForTeacherMock).toHaveBeenCalledWith(
         expect.objectContaining({ fileUrl: storageUrlForKey(storageKey) }),
+        transactionClientMock,
       );
     });
 
@@ -432,6 +593,7 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
 
       expect(createCourseMaterialForTeacherMock).toHaveBeenCalledWith(
         expect.objectContaining({ fileUrl }),
+        transactionClientMock,
       );
     });
 
@@ -467,6 +629,7 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
         "mat-123",
         "teacher-123",
         expect.not.objectContaining({ teacherId: "teacher-2" }),
+        transactionClientMock,
       );
       expect(legacyUpdateCourseMaterialMock).not.toHaveBeenCalled();
       expectMaterialAudit("COURSE_MATERIAL_UPDATED");
@@ -529,7 +692,11 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       const response = await deleteCourseMaterialAction("mat-123");
 
       expect(response).toEqual(expect.objectContaining({ success: true }));
-      expect(deleteCourseMaterialForTeacherMock).toHaveBeenCalledWith("mat-123", "teacher-123");
+      expect(deleteCourseMaterialForTeacherMock).toHaveBeenCalledWith(
+        "mat-123",
+        "teacher-123",
+        transactionClientMock,
+      );
       expect(legacyDeleteCourseMaterialMock).not.toHaveBeenCalled();
       expectMaterialAudit("COURSE_MATERIAL_DELETED");
       expectMaterialRevalidation();
@@ -564,7 +731,11 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
         success: false,
         error: "Uploaded file is not owned by this teacher.",
       });
-      expect(deleteCourseMaterialForTeacherMock).toHaveBeenCalledWith("mat-123", "teacher-123");
+      expect(deleteCourseMaterialForTeacherMock).toHaveBeenCalledWith(
+        "mat-123",
+        "teacher-123",
+        transactionClientMock,
+      );
       expect(storageDeleteMock).not.toHaveBeenCalled();
       expect(createAdminAuditLogMock).not.toHaveBeenCalled();
       expect(revalidatePathMock).not.toHaveBeenCalled();
@@ -573,7 +744,11 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
     it("deleteCourseMaterialWithFilesAction delegates ownership and does not clean arbitrary files", async () => {
       await deleteCourseMaterialWithFilesAction({ materialId: "mat-123" });
 
-      expect(deleteCourseMaterialForTeacherMock).toHaveBeenCalledWith("mat-123", "teacher-123");
+      expect(deleteCourseMaterialForTeacherMock).toHaveBeenCalledWith(
+        "mat-123",
+        "teacher-123",
+        transactionClientMock,
+      );
       expect(storageDeleteMock).not.toHaveBeenCalledWith("teacher-2/private.pdf");
       expectMaterialAudit("COURSE_MATERIAL_DELETED");
     });
@@ -640,6 +815,7 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
             }),
           ],
         }),
+        transactionClientMock,
       );
       expectMaterialAudit("COURSE_MATERIAL_CREATED");
       expect(createAdminAuditLogMock).toHaveBeenCalledWith(
@@ -690,6 +866,7 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
         expect.not.objectContaining({
           attachments: expect.anything(),
         }),
+        transactionClientMock,
       );
       expect(createAdminAuditLogMock).not.toHaveBeenCalledWith(
         expect.objectContaining({ action: "COURSE_MATERIAL_FILE_REPLACED" }),
@@ -745,6 +922,7 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
             }),
           ],
         }),
+        transactionClientMock,
       );
       expect(createAdminAuditLogMock).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -840,6 +1018,7 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
         "teacher-123",
         "mat-123",
         "attachment-1",
+        transactionClientMock,
       );
       expect(storageDeleteMock).toHaveBeenCalledWith(
         "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-material-1.pdf",
@@ -901,6 +1080,7 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
         "teacher-123",
         "mat-123",
         "attachment-1",
+        transactionClientMock,
       );
       expect(storageDeleteMock).not.toHaveBeenCalled();
       expect(createAdminAuditLogMock).not.toHaveBeenCalled();

@@ -14,6 +14,9 @@ import {
   zipFixtureWithClaimedSize,
   zipFixtureWithCorruptedCompressedPayload,
   zipFixtureWithHighCompressionRatio,
+  zipFixtureWithInvalidLocalHeaderOffset,
+  zipFixtureWithInvalidLocalHeaderSignature,
+  zipFixtureWithInvalidPayloadBounds,
 } from "@/tests/helpers/upload-fixtures";
 
 const namespace = "private/teachers/teacher-1/materials";
@@ -23,6 +26,21 @@ describe("shared upload content validation", () => {
     expect(uploadFixtures.zip.length).toBeLessThan(2 * 1024);
     expect(uploadFixtures.docx.length).toBeLessThan(2 * 1024);
     expect(uploadFixtures.pptx.length).toBeLessThan(2 * 1024);
+  });
+
+  it.each([
+    ["stored", zipFixture({ "notes.txt": "Course notes" })],
+    ["deflated", zipFixtureWithCorruptedCompressedPayload()],
+    ["high-ratio", zipFixtureWithHighCompressionRatio()],
+  ])("uses one fixed valid DOS timestamp for the %s ZIP fixture", (_label, bytes) => {
+    const localHeader = bytes.indexOf(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    const centralHeader = bytes.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    expect(localHeader).toBeGreaterThanOrEqual(0);
+    expect(centralHeader).toBeGreaterThanOrEqual(0);
+    expect(bytes.readUInt16LE(localHeader + 10)).toBe(0);
+    expect(bytes.readUInt16LE(localHeader + 12)).toBe(0x2821);
+    expect(bytes.readUInt16LE(centralHeader + 12)).toBe(0);
+    expect(bytes.readUInt16LE(centralHeader + 14)).toBe(0x2821);
   });
 
   it.each([
@@ -132,6 +150,20 @@ describe("shared upload content validation", () => {
   });
 
   it.each([
+    ["out-of-range local-header offset", zipFixtureWithInvalidLocalHeaderOffset()],
+    ["invalid local-header signature", zipFixtureWithInvalidLocalHeaderSignature()],
+    ["compressed payload outside local bounds", zipFixtureWithInvalidPayloadBounds()],
+  ])("rejects a ZIP with an %s before inflating", async (_label, bytes) => {
+    await expect(
+      normalizeUploadInput(bytes, {
+        filename: "bundle.zip",
+        namespace,
+        contentType: "application/zip",
+      }),
+    ).rejects.toMatchObject({ status: 415 });
+  });
+
+  it.each([
     ["dot segment", "./file.txt"],
     ["traversal segment", "../file.txt"],
     ["empty segment", "folder//file.txt"],
@@ -177,6 +209,25 @@ describe("shared upload content validation", () => {
   );
 
   it.each(["docx", "pptx"] as const)(
+    "rejects duplicate or conflicting %s declarations for the main part",
+    async (kind) => {
+      const spec = ooxmlFixtureSpecs[kind];
+      for (const duplicateContentType of [spec.contentType, "application/octet-stream"]) {
+        const contentTypes = `<Types xmlns="${spec.contentTypeNamespace}"><Override PartName="/${spec.mainPart}" ContentType="${spec.contentType}"/><Override PartName="/${spec.mainPart}" ContentType="${duplicateContentType}"/></Types>`;
+        const bytes = ooxmlFixture(kind, { contentTypes });
+
+        await expect(
+          normalizeUploadInput(bytes, {
+            filename: spec.filename,
+            namespace,
+            contentType: spec.mimeType,
+          }),
+        ).rejects.toMatchObject({ status: 415 });
+      }
+    },
+  );
+
+  it.each(["docx", "pptx"] as const)(
     "rejects %s with an arbitrary package relationships part",
     async (kind) => {
       const spec = ooxmlFixtureSpecs[kind];
@@ -189,6 +240,107 @@ describe("shared upload content validation", () => {
           contentType: spec.mimeType,
         }),
       ).rejects.toMatchObject({ status: 415 });
+    },
+  );
+
+  it.each(["docx", "pptx"] as const)(
+    "rejects %s when the officeDocument relationship has no Id",
+    async (kind) => {
+      const spec = ooxmlFixtureSpecs[kind];
+      const relationships = ooxmlXmlParts(kind).relationships.replace(' Id="rId1"', "");
+      const bytes = ooxmlFixture(kind, { relationships });
+
+      await expect(
+        normalizeUploadInput(bytes, {
+          filename: spec.filename,
+          namespace,
+          contentType: spec.mimeType,
+        }),
+      ).rejects.toMatchObject({ status: 415 });
+    },
+  );
+
+  it.each(["docx", "pptx"] as const)(
+    "rejects duplicate or conflicting %s officeDocument relationships",
+    async (kind) => {
+      const spec = ooxmlFixtureSpecs[kind];
+      const defaults = ooxmlXmlParts(kind);
+      const relationship = defaults.relationships.match(/<Relationship [^>]+\/>/)?.[0];
+      if (!relationship) throw new Error("OOXML fixture relationship is missing");
+
+      for (const target of [spec.mainPart, `${spec.mainPart}.other`]) {
+        const duplicate = relationship
+          .replace('Id="rId1"', 'Id="rId2"')
+          .replace(`Target="${spec.mainPart}"`, `Target="${target}"`);
+        const relationships = defaults.relationships.replace(
+          "</Relationships>",
+          `${duplicate}</Relationships>`,
+        );
+        const bytes = ooxmlFixture(kind, { relationships });
+
+        await expect(
+          normalizeUploadInput(bytes, {
+            filename: spec.filename,
+            namespace,
+            contentType: spec.mimeType,
+          }),
+        ).rejects.toMatchObject({ status: 415 });
+      }
+    },
+  );
+
+  it.each(["docx", "pptx"] as const)(
+    "rejects duplicate package relationship Id values in %s",
+    async (kind) => {
+      const spec = ooxmlFixtureSpecs[kind];
+      const defaults = ooxmlXmlParts(kind);
+      const relationship = defaults.relationships.match(/<Relationship [^>]+\/>/)?.[0];
+      if (!relationship) throw new Error("OOXML fixture relationship is missing");
+      const duplicateId = relationship
+        .replace(/Type="[^"]+"/, 'Type="https://example.com/relationships/other"')
+        .replace(`Target="${spec.mainPart}"`, 'Target="metadata/other.xml"');
+      const relationships = defaults.relationships.replace(
+        "</Relationships>",
+        `${duplicateId}</Relationships>`,
+      );
+      const bytes = ooxmlFixture(kind, { relationships });
+
+      await expect(
+        normalizeUploadInput(bytes, {
+          filename: spec.filename,
+          namespace,
+          contentType: spec.mimeType,
+        }),
+      ).rejects.toMatchObject({ status: 415 });
+    },
+  );
+
+  it.each(["docx", "pptx"] as const)(
+    "requires an exact internal officeDocument target with no TargetMode in %s",
+    async (kind) => {
+      const spec = ooxmlFixtureSpecs[kind];
+      const defaults = ooxmlXmlParts(kind);
+      const invalidRelationships = [
+        defaults.relationships.replace(' Target="', ' TargetMode="" Target="'),
+        defaults.relationships.replace(' Target="', ' TargetMode="External" Target="'),
+        defaults.relationships.replace(
+          `Target="${spec.mainPart}"`,
+          'Target="https://example.com/external.xml"',
+        ),
+        defaults.relationships.replace(`Target="${spec.mainPart}"`, `Target="./${spec.mainPart}"`),
+        defaults.relationships.replace(`Target="${spec.mainPart}"`, `Target="../${spec.mainPart}"`),
+      ];
+
+      for (const relationships of invalidRelationships) {
+        const bytes = ooxmlFixture(kind, { relationships });
+        await expect(
+          normalizeUploadInput(bytes, {
+            filename: spec.filename,
+            namespace,
+            contentType: spec.mimeType,
+          }),
+        ).rejects.toMatchObject({ status: 415 });
+      }
     },
   );
 

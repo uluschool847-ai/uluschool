@@ -11,6 +11,11 @@ const MAX_ZIP_UNCOMPRESSED_BYTES = 20 * 1024 * 1024;
 const MAX_ZIP_COMPRESSION_RATIO = 100;
 const MAX_OOXML_XML_PART_BYTES = 256 * 1024;
 const MAX_OOXML_EXTRACTED_BYTES = 3 * MAX_OOXML_XML_PART_BYTES;
+const ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06054b50;
+const ZIP_CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50;
+const ZIP_LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
+const ZIP_END_OF_CENTRAL_DIRECTORY_BYTES = 22;
+const ZIP_MAX_COMMENT_BYTES = 0xffff;
 const CONTENT_TYPES_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/content-types";
 const RELATIONSHIPS_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/relationships";
 const OFFICE_DOCUMENT_RELATIONSHIP =
@@ -196,6 +201,119 @@ function assertSafeZipEntryName(name: string) {
   }
 }
 
+function findZipEndOfCentralDirectory(bytes: Buffer) {
+  const firstCandidate = Math.max(
+    0,
+    bytes.length - ZIP_END_OF_CENTRAL_DIRECTORY_BYTES - ZIP_MAX_COMMENT_BYTES,
+  );
+  for (
+    let offset = bytes.length - ZIP_END_OF_CENTRAL_DIRECTORY_BYTES;
+    offset >= firstCandidate;
+    offset -= 1
+  ) {
+    if (
+      bytes.readUInt32LE(offset) === ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE &&
+      offset + ZIP_END_OF_CENTRAL_DIRECTORY_BYTES + bytes.readUInt16LE(offset + 20) === bytes.length
+    ) {
+      return offset;
+    }
+  }
+  contentMismatch();
+}
+
+function assertZipContainerBounds(bytes: Buffer) {
+  if (bytes.length < ZIP_END_OF_CENTRAL_DIRECTORY_BYTES) contentMismatch();
+
+  const endOffset = findZipEndOfCentralDirectory(bytes);
+  const diskNumber = bytes.readUInt16LE(endOffset + 4);
+  const centralDirectoryDisk = bytes.readUInt16LE(endOffset + 6);
+  const diskEntryCount = bytes.readUInt16LE(endOffset + 8);
+  const entryCount = bytes.readUInt16LE(endOffset + 10);
+  const centralDirectoryBytes = bytes.readUInt32LE(endOffset + 12);
+  const centralDirectoryOffset = bytes.readUInt32LE(endOffset + 16);
+  if (
+    diskNumber !== 0 ||
+    centralDirectoryDisk !== 0 ||
+    diskEntryCount !== entryCount ||
+    entryCount === 0 ||
+    entryCount > MAX_ZIP_ENTRIES ||
+    centralDirectoryOffset + centralDirectoryBytes !== endOffset
+  ) {
+    contentMismatch();
+  }
+
+  const localRanges: Array<{ start: number; end: number }> = [];
+  let centralOffset = centralDirectoryOffset;
+  for (let index = 0; index < entryCount; index += 1) {
+    if (
+      centralOffset + 46 > endOffset ||
+      bytes.readUInt32LE(centralOffset) !== ZIP_CENTRAL_DIRECTORY_SIGNATURE
+    ) {
+      contentMismatch();
+    }
+
+    const centralFlags = bytes.readUInt16LE(centralOffset + 8);
+    const centralCompression = bytes.readUInt16LE(centralOffset + 10);
+    const centralCrc = bytes.readUInt32LE(centralOffset + 16);
+    const compressedSize = bytes.readUInt32LE(centralOffset + 20);
+    const uncompressedSize = bytes.readUInt32LE(centralOffset + 24);
+    const filenameBytes = bytes.readUInt16LE(centralOffset + 28);
+    const extraBytes = bytes.readUInt16LE(centralOffset + 30);
+    const commentBytes = bytes.readUInt16LE(centralOffset + 32);
+    const diskStart = bytes.readUInt16LE(centralOffset + 34);
+    const localOffset = bytes.readUInt32LE(centralOffset + 42);
+    const centralEntryEnd = centralOffset + 46 + filenameBytes + extraBytes + commentBytes;
+    if (
+      diskStart !== 0 ||
+      compressedSize === 0xffffffff ||
+      uncompressedSize === 0xffffffff ||
+      localOffset === 0xffffffff ||
+      centralEntryEnd > endOffset ||
+      localOffset + 30 > centralDirectoryOffset ||
+      bytes.readUInt32LE(localOffset) !== ZIP_LOCAL_FILE_HEADER_SIGNATURE
+    ) {
+      contentMismatch();
+    }
+
+    const localFlags = bytes.readUInt16LE(localOffset + 6);
+    const localCompression = bytes.readUInt16LE(localOffset + 8);
+    const localFilenameBytes = bytes.readUInt16LE(localOffset + 26);
+    const localExtraBytes = bytes.readUInt16LE(localOffset + 28);
+    const payloadOffset = localOffset + 30 + localFilenameBytes + localExtraBytes;
+    const payloadEnd = payloadOffset + compressedSize;
+    if (
+      localFlags !== centralFlags ||
+      localCompression !== centralCompression ||
+      payloadOffset > centralDirectoryOffset ||
+      payloadEnd > centralDirectoryOffset ||
+      localFilenameBytes !== filenameBytes ||
+      !bytes
+        .subarray(localOffset + 30, localOffset + 30 + localFilenameBytes)
+        .equals(bytes.subarray(centralOffset + 46, centralOffset + 46 + filenameBytes))
+    ) {
+      contentMismatch();
+    }
+
+    if (
+      (centralFlags & 0x08) === 0 &&
+      (bytes.readUInt32LE(localOffset + 14) !== centralCrc ||
+        bytes.readUInt32LE(localOffset + 18) !== compressedSize ||
+        bytes.readUInt32LE(localOffset + 22) !== uncompressedSize)
+    ) {
+      contentMismatch();
+    }
+
+    localRanges.push({ start: localOffset, end: payloadEnd });
+    centralOffset = centralEntryEnd;
+  }
+
+  if (centralOffset !== endOffset) contentMismatch();
+  localRanges.sort((left, right) => left.start - right.start);
+  for (let index = 1; index < localRanges.length; index += 1) {
+    if (localRanges[index].start < localRanges[index - 1].end) contentMismatch();
+  }
+}
+
 function unqualifiedXmlAttribute(tag: SaxesTagNS, name: string) {
   return Object.values(tag.attributes).find(
     (attribute) => attribute.local === name && attribute.prefix === "" && attribute.uri === "",
@@ -212,6 +330,7 @@ function assertContentTypesXml(bytes: Uint8Array, mainPart: string, requiredCont
 
   let depth = 0;
   let validRoot = false;
+  let mainOverrideCount = 0;
   let validOverride = false;
   const parser = new SaxesParser<{ xmlns: true; position: false }>({
     xmlns: true,
@@ -222,14 +341,11 @@ function assertContentTypesXml(bytes: Uint8Array, mainPart: string, requiredCont
     if (depth === 0) {
       if (tag.local !== "Types" || tag.uri !== CONTENT_TYPES_NAMESPACE) contentMismatch();
       validRoot = true;
-    } else if (
-      depth === 1 &&
-      tag.local === "Override" &&
-      tag.uri === CONTENT_TYPES_NAMESPACE &&
-      unqualifiedXmlAttribute(tag, "PartName") === `/${mainPart}` &&
-      unqualifiedXmlAttribute(tag, "ContentType") === requiredContentType
-    ) {
-      validOverride = true;
+    } else if (depth === 1 && tag.local === "Override" && tag.uri === CONTENT_TYPES_NAMESPACE) {
+      if (unqualifiedXmlAttribute(tag, "PartName") === `/${mainPart}`) {
+        mainOverrideCount += 1;
+        validOverride = unqualifiedXmlAttribute(tag, "ContentType") === requiredContentType;
+      }
     }
     depth += 1;
   });
@@ -243,7 +359,7 @@ function assertContentTypesXml(bytes: Uint8Array, mainPart: string, requiredCont
     if (error instanceof UploadValidationError) throw error;
     contentMismatch();
   }
-  if (!validRoot || !validOverride) contentMismatch();
+  if (!validRoot || mainOverrideCount !== 1 || !validOverride) contentMismatch();
 }
 
 function assertRelationshipsXml(bytes: Uint8Array, mainPart: string) {
@@ -256,7 +372,9 @@ function assertRelationshipsXml(bytes: Uint8Array, mainPart: string) {
 
   let depth = 0;
   let validRoot = false;
+  let officeDocumentRelationshipCount = 0;
   let validRelationship = false;
+  const relationshipIds = new Set<string>();
   const parser = new SaxesParser<{ xmlns: true; position: false }>({
     xmlns: true,
     position: false,
@@ -268,15 +386,19 @@ function assertRelationshipsXml(bytes: Uint8Array, mainPart: string) {
         contentMismatch();
       }
       validRoot = true;
-    } else if (
-      depth === 1 &&
-      tag.local === "Relationship" &&
-      tag.uri === RELATIONSHIPS_NAMESPACE &&
-      unqualifiedXmlAttribute(tag, "Type") === OFFICE_DOCUMENT_RELATIONSHIP &&
-      unqualifiedXmlAttribute(tag, "Target") === mainPart &&
-      !unqualifiedXmlAttribute(tag, "TargetMode")
-    ) {
-      validRelationship = true;
+    } else if (depth === 1 && tag.local === "Relationship" && tag.uri === RELATIONSHIPS_NAMESPACE) {
+      const id = unqualifiedXmlAttribute(tag, "Id");
+      if (typeof id !== "string" || id.trim() !== id || id === "" || relationshipIds.has(id)) {
+        contentMismatch();
+      }
+      relationshipIds.add(id);
+      const type = unqualifiedXmlAttribute(tag, "Type");
+      if (type === OFFICE_DOCUMENT_RELATIONSHIP) {
+        officeDocumentRelationshipCount += 1;
+        validRelationship =
+          unqualifiedXmlAttribute(tag, "Target") === mainPart &&
+          unqualifiedXmlAttribute(tag, "TargetMode") === undefined;
+      }
     }
     depth += 1;
   });
@@ -290,7 +412,9 @@ function assertRelationshipsXml(bytes: Uint8Array, mainPart: string) {
     if (error instanceof UploadValidationError) throw error;
     contentMismatch();
   }
-  if (!validRoot || !validRelationship) contentMismatch();
+  if (!validRoot || officeDocumentRelationshipCount !== 1 || !validRelationship) {
+    contentMismatch();
+  }
 }
 
 function assertMainDocumentXml(bytes: Uint8Array, kind: "docx" | "pptx") {
@@ -332,6 +456,7 @@ function assertMainDocumentXml(bytes: Uint8Array, kind: "docx" | "pptx") {
 }
 
 function assertZip(bytes: Buffer, kind: "docx" | "pptx" | "zip") {
+  assertZipContainerBounds(bytes);
   const mainPart =
     kind === "docx" ? "word/document.xml" : kind === "pptx" ? "ppt/presentation.xml" : null;
   const entries = new Set<string>();

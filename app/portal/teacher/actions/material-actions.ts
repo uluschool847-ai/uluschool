@@ -1,6 +1,6 @@
 "use server";
 
-import { UserRole } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -82,6 +82,10 @@ type MaterialAuditSource = {
   classGroupId?: string | null;
 };
 
+const MATERIAL_TRANSACTION_OPTIONS = {
+  isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+};
+
 function isNextRedirectError(error: unknown) {
   return (
     typeof error === "object" &&
@@ -118,15 +122,18 @@ function revalidateMaterialPaths(source: MaterialAuditSource | null | undefined)
   revalidatePath("/portal/parent");
 }
 
-async function writeMaterialAudit(input: {
-  teacherId: string;
-  action: string;
-  targetType?: string;
-  targetId?: string | null;
-  before?: unknown;
-  after?: unknown;
-  meta?: Record<string, unknown>;
-}) {
+async function writeMaterialAudit(
+  input: {
+    teacherId: string;
+    action: string;
+    targetType?: string;
+    targetId?: string | null;
+    before?: unknown;
+    after?: unknown;
+    meta?: Record<string, unknown>;
+  },
+  database: NonNullable<Parameters<typeof createAdminAuditLog>[1]>,
+) {
   const payload = {
     adminUserId: input.teacherId,
     actorId: input.teacherId,
@@ -138,7 +145,7 @@ async function writeMaterialAudit(input: {
     meta: { teacherId: input.teacherId, ...input.meta },
   };
 
-  await createAdminAuditLog(payload, prisma);
+  await createAdminAuditLog(payload, database);
 }
 
 function materialMeta(teacherId: string, material: MaterialAuditSource | null | undefined) {
@@ -203,21 +210,21 @@ async function cleanupStorageKeysBestEffort(storageKeys: unknown, teacherId: str
     return { attempted: 0, deleted: 0, failed: 0 };
   }
 
-  const keys = storageKeys.map((storageKey) => trustedCleanupKey(storageKey, teacherId));
+  const validatedKeys = storageKeys.map((storageKey) => trustedCleanupKey(storageKey, teacherId));
+  const keys = [
+    ...new Set(validatedKeys.filter((storageKey): storageKey is string => Boolean(storageKey))),
+  ];
+  const invalidKeyCount = validatedKeys.filter((storageKey) => !storageKey).length;
   let storage: ReturnType<typeof createStorageService>;
   try {
     storage = createStorageService();
   } catch {
-    return { attempted: keys.length, deleted: 0, failed: keys.length };
+    return { attempted: keys.length, deleted: 0, failed: keys.length + invalidKeyCount };
   }
 
   let deleted = 0;
-  let failed = 0;
+  let failed = invalidKeyCount;
   for (const storageKey of keys) {
-    if (!storageKey) {
-      failed += 1;
-      continue;
-    }
     try {
       await storage.delete(storageKey);
       deleted += 1;
@@ -252,40 +259,52 @@ export async function submitCourseMaterialAction(
       throw new Error("Legacy upload URLs cannot be submitted as new material files.");
     }
 
-    const material = await createCourseMaterialForTeacher({
-      title: parsed.data.title,
-      description: parsed.data.description,
-      fileUrl: parsed.data.fileUrl,
-      scheduledClassId: parsed.data.scheduledClassId,
-      teacherId: session.uid,
-      attachments,
-    });
-
-    await writeMaterialAudit({
-      teacherId: session.uid,
-      action: "COURSE_MATERIAL_CREATED",
-      targetId: material.id,
-      before: null,
-      after: material,
-      meta: materialMeta(session.uid, material),
-    });
-    if (attachments?.length) {
-      await writeMaterialAudit({
-        teacherId: session.uid,
-        action: "COURSE_MATERIAL_FILE_UPLOADED",
-        targetType: "course_material_attachment",
-        targetId: attachments[0]?.storageKey ?? null,
-        before: null,
-        after: attachments,
-        meta: {
-          ...materialMeta(session.uid, material),
-          storageKey: attachments[0]?.storageKey ?? null,
-          filename: attachments[0]?.filename ?? null,
-          mimeType: attachments[0]?.mimeType ?? null,
-          size: attachments[0]?.size ?? null,
+    const material = await prisma.$transaction(async (transaction) => {
+      const created = await createCourseMaterialForTeacher(
+        {
+          title: parsed.data.title,
+          description: parsed.data.description,
+          fileUrl: parsed.data.fileUrl,
+          scheduledClassId: parsed.data.scheduledClassId,
+          teacherId: session.uid,
+          attachments,
         },
-      });
-    }
+        transaction,
+      );
+
+      await writeMaterialAudit(
+        {
+          teacherId: session.uid,
+          action: "COURSE_MATERIAL_CREATED",
+          targetId: created.id,
+          before: null,
+          after: created,
+          meta: materialMeta(session.uid, created),
+        },
+        transaction,
+      );
+      if (attachments?.length) {
+        await writeMaterialAudit(
+          {
+            teacherId: session.uid,
+            action: "COURSE_MATERIAL_FILE_UPLOADED",
+            targetType: "course_material_attachment",
+            targetId: attachments[0]?.storageKey ?? null,
+            before: null,
+            after: attachments,
+            meta: {
+              ...materialMeta(session.uid, created),
+              storageKey: attachments[0]?.storageKey ?? null,
+              filename: attachments[0]?.filename ?? null,
+              mimeType: attachments[0]?.mimeType ?? null,
+              size: attachments[0]?.size ?? null,
+            },
+          },
+          transaction,
+        );
+      }
+      return created;
+    }, MATERIAL_TRANSACTION_OPTIONS);
     revalidateMaterialPaths(material);
 
     if (parsed.data._redirectToList) {
@@ -321,34 +340,48 @@ export async function updateCourseMaterialAction(
     const attachments = normalizeAttachments(parsed.data);
     assertTeacherOwnsAttachments(attachments, session.uid);
     assertAttachmentUrlMatchesStorageKey(parsed.data.fileUrl, attachments);
-    const material = await updateCourseMaterialForTeacher(id, session.uid, {
-      ...parsed.data,
-      attachments,
-    });
-
-    await writeMaterialAudit({
-      teacherId: session.uid,
-      action: "COURSE_MATERIAL_UPDATED",
-      targetId: material.id,
-      before: null,
-      after: material,
-      meta: materialMeta(session.uid, material),
-    });
-    if (attachments?.length) {
-      const cleanup = (material as { cleanup?: { storageKeys?: string[] } }).cleanup;
-      await writeMaterialAudit({
-        teacherId: session.uid,
-        action: "COURSE_MATERIAL_FILE_REPLACED",
-        targetId: material.id,
-        before: null,
-        after: attachments,
-        meta: {
-          ...materialMeta(session.uid, material),
-          oldStorageKeys: cleanup?.storageKeys ?? [],
-          storageKey: attachments[0]?.storageKey ?? null,
+    const material = await prisma.$transaction(async (transaction) => {
+      const updated = await updateCourseMaterialForTeacher(
+        id,
+        session.uid,
+        {
+          ...parsed.data,
+          attachments,
         },
-      });
-    }
+        transaction,
+      );
+
+      await writeMaterialAudit(
+        {
+          teacherId: session.uid,
+          action: "COURSE_MATERIAL_UPDATED",
+          targetId: updated.id,
+          before: null,
+          after: updated,
+          meta: materialMeta(session.uid, updated),
+        },
+        transaction,
+      );
+      if (attachments?.length) {
+        const cleanup = (updated as { cleanup?: { storageKeys?: string[] } }).cleanup;
+        await writeMaterialAudit(
+          {
+            teacherId: session.uid,
+            action: "COURSE_MATERIAL_FILE_REPLACED",
+            targetId: updated.id,
+            before: null,
+            after: attachments,
+            meta: {
+              ...materialMeta(session.uid, updated),
+              oldStorageKeys: cleanup?.storageKeys ?? [],
+              storageKey: attachments[0]?.storageKey ?? null,
+            },
+          },
+          transaction,
+        );
+      }
+      return updated;
+    }, MATERIAL_TRANSACTION_OPTIONS);
     revalidateMaterialPaths(material);
     const cleanup = attachments?.length
       ? await cleanupStorageKeysBestEffort(
@@ -372,16 +405,21 @@ export async function updateCourseMaterialAction(
 export async function deleteCourseMaterialAction(id: string) {
   try {
     const session = await requireRole([UserRole.TEACHER]);
-    const deleted = await deleteCourseMaterialForTeacher(id, session.uid);
-
-    await writeMaterialAudit({
-      teacherId: session.uid,
-      action: "COURSE_MATERIAL_DELETED",
-      targetId: deleted.id,
-      before: deleted,
-      after: null,
-      meta: materialMeta(session.uid, deleted),
-    });
+    const deleted = await prisma.$transaction(async (transaction) => {
+      const material = await deleteCourseMaterialForTeacher(id, session.uid, transaction);
+      await writeMaterialAudit(
+        {
+          teacherId: session.uid,
+          action: "COURSE_MATERIAL_DELETED",
+          targetId: material.id,
+          before: material,
+          after: null,
+          meta: materialMeta(session.uid, material),
+        },
+        transaction,
+      );
+      return material;
+    }, MATERIAL_TRANSACTION_OPTIONS);
     revalidateMaterialPaths(deleted);
     const cleanupResult = await cleanupStorageKeysBestEffort(
       deleted.cleanup?.storageKeys,
@@ -432,28 +470,43 @@ export async function unlinkAttachmentAction(payload: {
     if (!payload.materialId?.trim() || !payload.attachmentId?.trim()) {
       throw new Error("Material attachment not found or not owned by teacher.");
     }
-    const attachment = await unlinkCourseMaterialAttachmentForTeacher(
+    const attachment = await prisma.$transaction(async (transaction) => {
+      const unlinked = await unlinkCourseMaterialAttachmentForTeacher(
+        session.uid,
+        payload.materialId,
+        payload.attachmentId,
+        transaction,
+      );
+      await writeMaterialAudit(
+        {
+          teacherId: session.uid,
+          action: "COURSE_MATERIAL_ATTACHMENT_DELETED",
+          targetType: "course_material_attachment",
+          targetId: unlinked.attachmentId,
+          before: null,
+          after: null,
+          meta: {
+            teacherId: session.uid,
+            materialId: unlinked.materialId,
+            attachmentId: unlinked.attachmentId,
+            storageKey: unlinked.storageKey,
+          },
+        },
+        transaction,
+      );
+      return unlinked;
+    }, MATERIAL_TRANSACTION_OPTIONS);
+    revalidateMaterialPaths(attachment);
+    const cleanupResult = await cleanupStorageKeysBestEffort(
+      attachment.cleanup?.storageKeys,
       session.uid,
-      payload.materialId,
-      payload.attachmentId,
     );
-    await writeMaterialAudit({
-      teacherId: session.uid,
-      action: "COURSE_MATERIAL_ATTACHMENT_DELETED",
-      targetType: "course_material_attachment",
-      targetId: attachment.attachmentId,
-      before: null,
-      after: null,
-      meta: {
-        teacherId: session.uid,
-        materialId: attachment.materialId,
-        attachmentId: attachment.attachmentId,
-        storageKey: attachment.storageKey,
-      },
-    });
-    await cleanupStorageKeysBestEffort([attachment.storageKey], session.uid);
 
-    return { success: true as const, message: "Attachment deleted" };
+    return {
+      success: true as const,
+      message: "Attachment deleted",
+      cleanup: { ...attachment.cleanup, ...cleanupResult },
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to delete attachment";
     return { success: false as const, error: message };

@@ -164,13 +164,38 @@ function assertTeacherOwnsAttachmentInputs(
   fileUrl: string | null,
 ) {
   if (!attachments?.length) return;
+  const storageKeys = new Set<string>();
   for (const attachment of attachments) {
     if (!isTeacherMaterialStorageKey(attachment.storageKey, teacherId)) {
       throw new Error("Uploaded file is not owned by this teacher.");
     }
+    const storageKey = attachment.storageKey.trim();
+    if (storageKeys.has(storageKey)) {
+      throw new Error("Duplicate attachment storage key.");
+    }
+    storageKeys.add(storageKey);
   }
   if (fileUrl && !storageUrlMatchesKey(fileUrl, attachments[0].storageKey)) {
     throw new Error("Uploaded file URL does not match its storage key.");
+  }
+}
+
+async function assertAttachmentInputKeysAvailable(
+  attachments: CourseMaterialAttachmentInput[] | null | undefined,
+  database: MaterialDatabase,
+  excludedAttachmentIds: string[] = [],
+) {
+  if (!attachments?.length) return;
+  const storageKeys = attachments.map((attachment) => attachment.storageKey.trim());
+  const existing = await database.attachment.findMany({
+    where: {
+      storageKey: { in: storageKeys },
+      ...(excludedAttachmentIds.length > 0 ? { id: { notIn: excludedAttachmentIds } } : {}),
+    },
+    select: { storageKey: true },
+  });
+  if (existing.length > 0) {
+    throw new Error("Uploaded file is already attached to another record.");
   }
 }
 
@@ -190,6 +215,19 @@ function validateStoredCleanupKeys(attachments: Array<{ storageKey: unknown }>, 
   return attachments.map((attachment) =>
     validateStoredCleanupKey(attachment.storageKey, teacherId),
   );
+}
+
+async function findOrphanStorageKeys(storageKeys: string[], database: MaterialDatabase) {
+  const uniqueStorageKeys = [...new Set(storageKeys)];
+  if (uniqueStorageKeys.length === 0) return [];
+  const remainingReferences = await database.attachment.findMany({
+    where: { storageKey: { in: uniqueStorageKeys } },
+    select: { storageKey: true },
+  });
+  const referencedStorageKeys = new Set(
+    remainingReferences.map((attachment) => attachment.storageKey),
+  );
+  return uniqueStorageKeys.filter((storageKey) => !referencedStorageKeys.has(storageKey));
 }
 
 function validateUpdateFileUrl(
@@ -310,6 +348,7 @@ export async function createCourseMaterialForTeacher(
     scheduledClassId,
     database,
   );
+  await assertAttachmentInputKeysAvailable(input.attachments, database);
 
   return database.courseMaterial.create({
     data: {
@@ -372,6 +411,14 @@ export async function updateCourseMaterialForTeacher(
     data.scheduledClass = { connect: { id: scheduledClass.id } };
   }
 
+  if (isReplacingFile) {
+    await assertAttachmentInputKeysAvailable(
+      input.attachments,
+      database,
+      existing.attachments.map((attachment) => attachment.id),
+    );
+  }
+
   const updated = await database.courseMaterial.update({
     where: { id: existing.id },
     data,
@@ -387,16 +434,22 @@ export async function updateCourseMaterialForTeacher(
     });
   }
 
-  return isReplacingFile
-    ? {
-        ...updated,
-        cleanup: {
-          queued: oldStorageKeys.length > 0,
-          deleted: 0,
-          storageKeys: oldStorageKeys,
-        },
-      }
-    : updated;
+  if (!isReplacingFile) return updated;
+
+  const finalMaterial = await database.courseMaterial.findUnique({
+    where: { id: existing.id },
+    include: materialInclude,
+  });
+  if (!finalMaterial) throw new Error("Material not found after update.");
+  const orphanStorageKeys = await findOrphanStorageKeys(oldStorageKeys, database);
+  return {
+    ...finalMaterial,
+    cleanup: {
+      queued: orphanStorageKeys.length > 0,
+      deleted: 0,
+      storageKeys: orphanStorageKeys,
+    },
+  };
 }
 
 export async function getCourseMaterialForTeacher(
@@ -482,14 +535,15 @@ export async function deleteCourseMaterialForTeacher(
   const storageKeys = validateStoredCleanupKeys(existing.attachments, teacherId);
 
   await database.courseMaterial.delete({ where: { id: existing.id } });
+  const orphanStorageKeys = await findOrphanStorageKeys(storageKeys, database);
 
   return {
     ...existing,
     success: true as const,
     cleanup: {
-      queued: storageKeys.length > 0,
+      queued: orphanStorageKeys.length > 0,
       deleted: 0,
-      storageKeys,
+      storageKeys: orphanStorageKeys,
     },
   };
 }
@@ -520,10 +574,23 @@ export async function unlinkCourseMaterialAttachmentForTeacher(
     where: { id: attachment.id },
   });
 
+  const finalMaterial = await database.courseMaterial.findUnique({
+    where: { id: material.id },
+    include: materialInclude,
+  });
+  if (!finalMaterial) throw new Error("Material not found after unlinking attachment.");
+  const orphanStorageKeys = await findOrphanStorageKeys([storageKey], database);
+
   return {
+    ...finalMaterial,
     attachmentId: attachment.id,
     materialId,
     storageKey,
+    cleanup: {
+      queued: orphanStorageKeys.length > 0,
+      deleted: 0,
+      storageKeys: orphanStorageKeys,
+    },
   };
 }
 
