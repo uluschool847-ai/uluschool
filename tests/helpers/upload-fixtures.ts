@@ -3,6 +3,40 @@ import { strToU8, zipSync } from "fflate";
 const OLE_SIGNATURE = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
 const MAX_FIXTURE_SOURCE_BYTES = 64 * 1024;
 const MAX_FIXTURE_ENTRIES = 16;
+const CONTENT_TYPES_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/content-types";
+const RELATIONSHIPS_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/relationships";
+const OFFICE_DOCUMENT_RELATIONSHIP =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
+
+export const ooxmlFixtureSpecs = {
+  docx: {
+    contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+    contentTypeNamespace: CONTENT_TYPES_NAMESPACE,
+    filename: "lesson.docx",
+    mainPart: "word/document.xml",
+    mainRoot: "w:document",
+    mainRootNamespace: "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  },
+  pptx: {
+    contentType:
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml",
+    contentTypeNamespace: CONTENT_TYPES_NAMESPACE,
+    filename: "slides.pptx",
+    mainPart: "ppt/presentation.xml",
+    mainRoot: "p:presentation",
+    mainRootNamespace: "http://schemas.openxmlformats.org/presentationml/2006/main",
+    mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  },
+} as const;
+
+type OoxmlKind = keyof typeof ooxmlFixtureSpecs;
+type OoxmlOverrides = {
+  contentTypes?: string;
+  extraEntries?: Record<string, string>;
+  mainDocument?: string;
+  relationships?: string;
+};
 
 function oleDocument(streamName: string) {
   return Buffer.concat([
@@ -44,6 +78,56 @@ export function zipFixtureWithClaimedSize(entryName: string, claimedSize: number
   return bytes;
 }
 
+export function zipFixtureWithCorruptedCompressedPayload() {
+  const bytes = Buffer.from(
+    zipSync(
+      {
+        "payload.txt": strToU8(
+          "metadata-only ZIP validation must not inflate this payload".repeat(8),
+          true,
+        ),
+      },
+      { level: 6 },
+    ),
+  );
+  const localHeader = bytes.indexOf(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  if (localHeader < 0) throw new Error("ZIP fixture local header is missing");
+  const compressedSize = bytes.readUInt32LE(localHeader + 18);
+  const nameLength = bytes.readUInt16LE(localHeader + 26);
+  const extraLength = bytes.readUInt16LE(localHeader + 28);
+  const payloadOffset = localHeader + 30 + nameLength + extraLength;
+  if (compressedSize === 0 || payloadOffset + compressedSize > bytes.length) {
+    throw new Error("ZIP fixture compressed payload is missing");
+  }
+  bytes.fill(0xff, payloadOffset, payloadOffset + compressedSize);
+  return bytes;
+}
+
+export function zipFixtureWithHighCompressionRatio() {
+  return Buffer.from(zipSync({ "bomb.txt": strToU8("A".repeat(32 * 1024), true) }, { level: 9 }));
+}
+
+export function ooxmlFixture(kind: OoxmlKind, overrides: OoxmlOverrides = {}) {
+  const spec = ooxmlFixtureSpecs[kind];
+  const defaults = ooxmlXmlParts(kind);
+  return zipFixture({
+    "[Content_Types].xml": overrides.contentTypes ?? defaults.contentTypes,
+    "_rels/.rels": overrides.relationships ?? defaults.relationships,
+    [spec.mainPart]: overrides.mainDocument ?? defaults.mainDocument,
+    ...overrides.extraEntries,
+  });
+}
+
+export function ooxmlXmlParts(kind: OoxmlKind) {
+  const spec = ooxmlFixtureSpecs[kind];
+  const prefix = spec.mainRoot.split(":")[0];
+  return {
+    contentTypes: `<Types xmlns="${CONTENT_TYPES_NAMESPACE}"><Override PartName="/${spec.mainPart}" ContentType="${spec.contentType}"/></Types>`,
+    relationships: `<Relationships xmlns="${RELATIONSHIPS_NAMESPACE}"><Relationship Id="rId1" Type="${OFFICE_DOCUMENT_RELATIONSHIP}" Target="${spec.mainPart}"/></Relationships>`,
+    mainDocument: `<${spec.mainRoot} xmlns:${prefix}="${spec.mainRootNamespace}"></${spec.mainRoot}>`,
+  };
+}
+
 export const uploadFixtures = {
   pdf: Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF", "ascii"),
   png: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -58,16 +142,6 @@ export const uploadFixtures = {
   doc: oleDocument("WordDocument"),
   ppt: oleDocument("PowerPoint Document"),
   zip: zipFixture({ "notes.txt": "Course notes" }),
-  docx: zipFixture({
-    "[Content_Types].xml":
-      '<Types><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
-    "_rels/.rels": "<Relationships />",
-    "word/document.xml": "<w:document />",
-  }),
-  pptx: zipFixture({
-    "[Content_Types].xml":
-      '<Types><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/></Types>',
-    "_rels/.rels": "<Relationships />",
-    "ppt/presentation.xml": "<p:presentation />",
-  }),
+  docx: ooxmlFixture("docx"),
+  pptx: ooxmlFixture("pptx"),
 } as const;

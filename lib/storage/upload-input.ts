@@ -1,4 +1,5 @@
 import { unzipSync } from "fflate";
+import { SaxesParser, type SaxesTagNS } from "saxes";
 
 import type { UploadInput, UploadOptions } from "@/lib/storage/StorageService";
 import { sanitizeStorageFilename } from "@/lib/storage/storage-key";
@@ -7,7 +8,17 @@ export const MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_ZIP_ENTRIES = 256;
 const MAX_ZIP_ENTRY_BYTES = 10 * 1024 * 1024;
 const MAX_ZIP_UNCOMPRESSED_BYTES = 20 * 1024 * 1024;
-const MAX_CONTENT_TYPES_BYTES = 1024 * 1024;
+const MAX_ZIP_COMPRESSION_RATIO = 100;
+const MAX_OOXML_XML_PART_BYTES = 256 * 1024;
+const MAX_OOXML_EXTRACTED_BYTES = 3 * MAX_OOXML_XML_PART_BYTES;
+const CONTENT_TYPES_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/content-types";
+const RELATIONSHIPS_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/relationships";
+const OFFICE_DOCUMENT_RELATIONSHIP =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
+const WORDPROCESSING_MAIN_NAMESPACE =
+  "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const PRESENTATION_MAIN_NAMESPACE = "http://schemas.openxmlformats.org/presentationml/2006/main";
+const WINDOWS_DEVICE_NAME = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
 
 export type UploadValidationStatus = 400 | 413 | 415;
 
@@ -140,7 +151,7 @@ function containsOleStream(bytes: Buffer, streamName: string) {
 function hasControlCharacters(value: string, allowTextWhitespace = false) {
   for (const character of value) {
     const codePoint = character.codePointAt(0) ?? 0;
-    if (codePoint === 0x7f) return true;
+    if (codePoint >= 0x7f && codePoint <= 0x9f) return true;
     if (codePoint < 0x20 && (!allowTextWhitespace || ![0x09, 0x0a, 0x0d].includes(codePoint))) {
       return true;
     }
@@ -169,20 +180,169 @@ function assertSafeZipEntryName(name: string) {
     contentMismatch();
   }
   const segments = name.replace(/\/$/, "").split("/");
-  if (segments.some((segment) => !segment || segment === "." || segment === "..")) {
+  if (
+    segments.some(
+      (segment) =>
+        !segment ||
+        segment === "." ||
+        segment === ".." ||
+        segment.length > 255 ||
+        segment.includes(":") ||
+        /[. ]$/.test(segment) ||
+        WINDOWS_DEVICE_NAME.test(segment),
+    )
+  ) {
     contentMismatch();
   }
 }
 
+function unqualifiedXmlAttribute(tag: SaxesTagNS, name: string) {
+  return Object.values(tag.attributes).find(
+    (attribute) => attribute.local === name && attribute.prefix === "" && attribute.uri === "",
+  )?.value;
+}
+
+function assertContentTypesXml(bytes: Uint8Array, mainPart: string, requiredContentType: string) {
+  let xml: string;
+  try {
+    xml = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    contentMismatch();
+  }
+
+  let depth = 0;
+  let validRoot = false;
+  let validOverride = false;
+  const parser = new SaxesParser<{ xmlns: true; position: false }>({
+    xmlns: true,
+    position: false,
+  });
+  parser.on("doctype", () => contentMismatch());
+  parser.on("opentag", (tag) => {
+    if (depth === 0) {
+      if (tag.local !== "Types" || tag.uri !== CONTENT_TYPES_NAMESPACE) contentMismatch();
+      validRoot = true;
+    } else if (
+      depth === 1 &&
+      tag.local === "Override" &&
+      tag.uri === CONTENT_TYPES_NAMESPACE &&
+      unqualifiedXmlAttribute(tag, "PartName") === `/${mainPart}` &&
+      unqualifiedXmlAttribute(tag, "ContentType") === requiredContentType
+    ) {
+      validOverride = true;
+    }
+    depth += 1;
+  });
+  parser.on("closetag", () => {
+    depth -= 1;
+  });
+
+  try {
+    parser.write(xml).close();
+  } catch (error) {
+    if (error instanceof UploadValidationError) throw error;
+    contentMismatch();
+  }
+  if (!validRoot || !validOverride) contentMismatch();
+}
+
+function assertRelationshipsXml(bytes: Uint8Array, mainPart: string) {
+  let xml: string;
+  try {
+    xml = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    contentMismatch();
+  }
+
+  let depth = 0;
+  let validRoot = false;
+  let validRelationship = false;
+  const parser = new SaxesParser<{ xmlns: true; position: false }>({
+    xmlns: true,
+    position: false,
+  });
+  parser.on("doctype", () => contentMismatch());
+  parser.on("opentag", (tag) => {
+    if (depth === 0) {
+      if (tag.local !== "Relationships" || tag.uri !== RELATIONSHIPS_NAMESPACE) {
+        contentMismatch();
+      }
+      validRoot = true;
+    } else if (
+      depth === 1 &&
+      tag.local === "Relationship" &&
+      tag.uri === RELATIONSHIPS_NAMESPACE &&
+      unqualifiedXmlAttribute(tag, "Type") === OFFICE_DOCUMENT_RELATIONSHIP &&
+      unqualifiedXmlAttribute(tag, "Target") === mainPart &&
+      !unqualifiedXmlAttribute(tag, "TargetMode")
+    ) {
+      validRelationship = true;
+    }
+    depth += 1;
+  });
+  parser.on("closetag", () => {
+    depth -= 1;
+  });
+
+  try {
+    parser.write(xml).close();
+  } catch (error) {
+    if (error instanceof UploadValidationError) throw error;
+    contentMismatch();
+  }
+  if (!validRoot || !validRelationship) contentMismatch();
+}
+
+function assertMainDocumentXml(bytes: Uint8Array, kind: "docx" | "pptx") {
+  let xml: string;
+  try {
+    xml = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    contentMismatch();
+  }
+
+  const expectedRoot = kind === "docx" ? "document" : "presentation";
+  const expectedNamespace =
+    kind === "docx" ? WORDPROCESSING_MAIN_NAMESPACE : PRESENTATION_MAIN_NAMESPACE;
+  let depth = 0;
+  let validRoot = false;
+  const parser = new SaxesParser<{ xmlns: true; position: false }>({
+    xmlns: true,
+    position: false,
+  });
+  parser.on("doctype", () => contentMismatch());
+  parser.on("opentag", (tag) => {
+    if (depth === 0) {
+      if (tag.local !== expectedRoot || tag.uri !== expectedNamespace) contentMismatch();
+      validRoot = true;
+    }
+    depth += 1;
+  });
+  parser.on("closetag", () => {
+    depth -= 1;
+  });
+
+  try {
+    parser.write(xml).close();
+  } catch (error) {
+    if (error instanceof UploadValidationError) throw error;
+    contentMismatch();
+  }
+  if (!validRoot) contentMismatch();
+}
+
 function assertZip(bytes: Buffer, kind: "docx" | "pptx" | "zip") {
+  const mainPart =
+    kind === "docx" ? "word/document.xml" : kind === "pptx" ? "ppt/presentation.xml" : null;
   const entries = new Set<string>();
   let entryCount = 0;
   let fileCount = 0;
   let uncompressedBytes = 0;
+  let extractedBytes = 0;
 
-  let extracted: Record<string, Uint8Array>;
+  let metadataOnly: Record<string, Uint8Array>;
   try {
-    extracted = unzipSync(bytes, {
+    metadataOnly = unzipSync(bytes, {
       filter(entry) {
         entryCount += 1;
         if (entryCount > MAX_ZIP_ENTRIES) contentMismatch();
@@ -197,7 +357,10 @@ function assertZip(bytes: Buffer, kind: "docx" | "pptx" | "zip") {
           !Number.isSafeInteger(entry.size) ||
           entry.size < 0 ||
           entry.size > bytes.length ||
-          (entry.compression !== 0 && entry.compression !== 8)
+          (entry.compression !== 0 && entry.compression !== 8) ||
+          (entry.compression === 0 && entry.size !== entry.originalSize) ||
+          (entry.originalSize > 0 &&
+            (entry.size === 0 || entry.originalSize / entry.size > MAX_ZIP_COMPRESSION_RATIO))
         ) {
           contentMismatch();
         }
@@ -206,10 +369,19 @@ function assertZip(bytes: Buffer, kind: "docx" | "pptx" | "zip") {
 
         const isDirectory = entry.name.endsWith("/");
         if (!isDirectory) fileCount += 1;
-        if (kind === "zip") return !isDirectory;
-        return (
-          entry.name === "[Content_Types].xml" && entry.originalSize <= MAX_CONTENT_TYPES_BYTES
-        );
+        if (
+          kind !== "zip" &&
+          (entry.name === "[Content_Types].xml" ||
+            entry.name === "_rels/.rels" ||
+            entry.name === mainPart)
+        ) {
+          if (entry.originalSize <= 0 || entry.originalSize > MAX_OOXML_XML_PART_BYTES) {
+            contentMismatch();
+          }
+          extractedBytes += entry.originalSize;
+          if (extractedBytes > MAX_OOXML_EXTRACTED_BYTES) contentMismatch();
+        }
+        return false;
       },
     });
   } catch (error) {
@@ -217,10 +389,11 @@ function assertZip(bytes: Buffer, kind: "docx" | "pptx" | "zip") {
     contentMismatch();
   }
 
+  if (Object.keys(metadataOnly).length !== 0) contentMismatch();
   if (entryCount === 0 || fileCount === 0) contentMismatch();
   if (kind === "zip") return;
 
-  const mainPart = kind === "docx" ? "word/document.xml" : "ppt/presentation.xml";
+  if (!mainPart) contentMismatch();
   const requiredContentType =
     kind === "docx"
       ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
@@ -233,15 +406,29 @@ function assertZip(bytes: Buffer, kind: "docx" | "pptx" | "zip") {
     contentMismatch();
   }
 
-  const contentTypes = extracted["[Content_Types].xml"];
-  if (!contentTypes) contentMismatch();
-  let contentTypesXml: string;
+  let extracted: Record<string, Uint8Array>;
   try {
-    contentTypesXml = new TextDecoder("utf-8", { fatal: true }).decode(contentTypes);
-  } catch {
+    extracted = unzipSync(bytes, {
+      filter(entry) {
+        return (
+          entry.name === "[Content_Types].xml" ||
+          entry.name === "_rels/.rels" ||
+          entry.name === mainPart
+        );
+      },
+    });
+  } catch (error) {
+    if (error instanceof UploadValidationError) throw error;
     contentMismatch();
   }
-  if (!contentTypesXml.includes(requiredContentType)) contentMismatch();
+
+  const contentTypes = extracted["[Content_Types].xml"];
+  const relationships = extracted["_rels/.rels"];
+  const mainDocument = extracted[mainPart];
+  if (!contentTypes || !relationships || !mainDocument) contentMismatch();
+  assertContentTypesXml(contentTypes, mainPart, requiredContentType);
+  assertRelationshipsXml(relationships, mainPart);
+  assertMainDocumentXml(mainDocument, kind);
 }
 
 function validateUploadContent(bytes: Buffer, contentType: string) {

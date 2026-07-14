@@ -5,7 +5,16 @@ import {
   UploadValidationError,
   normalizeUploadInput,
 } from "@/lib/storage/upload-input";
-import { uploadFixtures, zipFixtureWithClaimedSize } from "@/tests/helpers/upload-fixtures";
+import {
+  ooxmlFixture,
+  ooxmlFixtureSpecs,
+  ooxmlXmlParts,
+  uploadFixtures,
+  zipFixture,
+  zipFixtureWithClaimedSize,
+  zipFixtureWithCorruptedCompressedPayload,
+  zipFixtureWithHighCompressionRatio,
+} from "@/tests/helpers/upload-fixtures";
 
 const namespace = "private/teachers/teacher-1/materials";
 
@@ -96,6 +105,139 @@ describe("shared upload content validation", () => {
         contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       }),
     ).rejects.toBeInstanceOf(UploadValidationError);
+  });
+
+  it("validates a generic ZIP from metadata without inflating its payload", async () => {
+    const bytes = zipFixtureWithCorruptedCompressedPayload();
+
+    await expect(
+      normalizeUploadInput(bytes, {
+        filename: "bundle.zip",
+        namespace,
+        contentType: "application/zip",
+      }),
+    ).resolves.toEqual(expect.objectContaining({ bytes }));
+  });
+
+  it("rejects a high-ratio ZIP from metadata without expanding its payload", async () => {
+    const bytes = zipFixtureWithHighCompressionRatio();
+
+    await expect(
+      normalizeUploadInput(bytes, {
+        filename: "bundle.zip",
+        namespace,
+        contentType: "application/zip",
+      }),
+    ).rejects.toMatchObject({ status: 415 });
+  });
+
+  it.each([
+    ["dot segment", "./file.txt"],
+    ["traversal segment", "../file.txt"],
+    ["empty segment", "folder//file.txt"],
+    ["NUL", "folder/\u0000bad.txt"],
+    ["control character", "folder/\u0001bad.txt"],
+    ["C1 control character", "folder/\u0085bad.txt"],
+    ["backslash", "folder\\file.txt"],
+    ["drive form", "C:/file.txt"],
+    ["ADS form", "file.txt:stream"],
+    ["trailing dot", "folder/file.txt."],
+    ["trailing space", "folder/file.txt "],
+    ["CON alias", "CON"],
+    ["NUL alias with extension", "folder/NUL.txt"],
+    ["COM1 alias with extension", "folder/COM1.doc"],
+    ["LPT9 alias with extension", "LPT9.data"],
+  ])("rejects a ZIP entry with a Win32-unsafe %s", async (_label, entryName) => {
+    const bytes = zipFixture({ [entryName]: "x" });
+
+    await expect(
+      normalizeUploadInput(bytes, {
+        filename: "bundle.zip",
+        namespace,
+        contentType: "application/zip",
+      }),
+    ).rejects.toMatchObject({ status: 415 });
+  });
+
+  it.each(["docx", "pptx"] as const)(
+    "rejects %s when the required MIME appears only inside an XML comment",
+    async (kind) => {
+      const spec = ooxmlFixtureSpecs[kind];
+      const contentTypes = `<Types xmlns="${spec.contentTypeNamespace}"><!-- ${spec.contentType} --></Types>`;
+      const bytes = ooxmlFixture(kind, { contentTypes });
+
+      await expect(
+        normalizeUploadInput(bytes, {
+          filename: spec.filename,
+          namespace,
+          contentType: spec.mimeType,
+        }),
+      ).rejects.toMatchObject({ status: 415 });
+    },
+  );
+
+  it.each(["docx", "pptx"] as const)(
+    "rejects %s with an arbitrary package relationships part",
+    async (kind) => {
+      const spec = ooxmlFixtureSpecs[kind];
+      const bytes = ooxmlFixture(kind, { relationships: "not relationship XML" });
+
+      await expect(
+        normalizeUploadInput(bytes, {
+          filename: spec.filename,
+          namespace,
+          contentType: spec.mimeType,
+        }),
+      ).rejects.toMatchObject({ status: 415 });
+    },
+  );
+
+  it.each(["docx", "pptx"] as const)(
+    "rejects %s with an arbitrary main document part",
+    async (kind) => {
+      const spec = ooxmlFixtureSpecs[kind];
+      const bytes = ooxmlFixture(kind, { mainDocument: "not main document XML" });
+
+      await expect(
+        normalizeUploadInput(bytes, {
+          filename: spec.filename,
+          namespace,
+          contentType: spec.mimeType,
+        }),
+      ).rejects.toMatchObject({ status: 415 });
+    },
+  );
+
+  it.each([
+    {
+      label: "content types DTD",
+      override: (parts: ReturnType<typeof ooxmlXmlParts>) => ({
+        contentTypes: `<!DOCTYPE Types>${parts.contentTypes}`,
+      }),
+    },
+    {
+      label: "relationships entity declaration",
+      override: (parts: ReturnType<typeof ooxmlXmlParts>) => ({
+        relationships: `<!DOCTYPE Relationships [<!ENTITY sample "value">]>${parts.relationships}`,
+      }),
+    },
+    {
+      label: "main document DTD",
+      override: (parts: ReturnType<typeof ooxmlXmlParts>) => ({
+        mainDocument: `<!DOCTYPE w:document>${parts.mainDocument}`,
+      }),
+    },
+  ])("rejects OOXML $label constructs", async ({ override }) => {
+    const spec = ooxmlFixtureSpecs.docx;
+    const bytes = ooxmlFixture("docx", override(ooxmlXmlParts("docx")));
+
+    await expect(
+      normalizeUploadInput(bytes, {
+        filename: spec.filename,
+        namespace,
+        contentType: spec.mimeType,
+      }),
+    ).rejects.toMatchObject({ status: 415 });
   });
 
   it("checks File metadata before reading bytes and validates content after the bounded read", async () => {
