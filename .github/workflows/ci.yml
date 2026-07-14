@@ -39,6 +39,8 @@ jobs:
       CRON_SECRET: ci-only-cron-secret
       REMINDER_CRON_TOKEN: ci-only-reminder-secret
       ALERT_TEST_TOKEN: ci-only-alert-secret
+      RUN_A7_POSTGRES_INTEGRATION: "1"
+      RUN_A8_POSTGRES_INTEGRATION: "1"
       NEXT_PUBLIC_SITE_URL: http://localhost:3000
       NEXT_PUBLIC_APP_URL: http://localhost:3000
       NODE_OPTIONS: --max-old-space-size=4096

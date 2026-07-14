@@ -45,9 +45,11 @@
     "next-themes": "^0.4.4",
     "nodemailer": "^7.0.13",
     "otplib": "^12.0.1",
+    "prisma": "^5.22.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "tailwind-merge": "^2.6.0",
+    "tsx": "^4.19.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -63,10 +65,8 @@
     "autoprefixer": "^10.4.20",
     "jsdom": "^29.1.0",
     "postcss": "^8.4.49",
-    "prisma": "^5.22.0",
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^4.1.5",
     "yaml": "^2.9.0"

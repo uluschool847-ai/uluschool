@@ -7,41 +7,40 @@ import {
 } from "../lib/bootstrap/production-admin";
 
 type BootstrapLogger = Pick<Console, "error" | "log">;
-type BootstrapEnvironment = Record<string, string | undefined>;
 type BootstrapCliDatabase = ProductionAdminDatabase & {
   $disconnect(): Promise<void>;
 };
 
 export async function runProductionAdminBootstrap(
-  environment: BootstrapEnvironment,
+  environment: unknown,
   database: BootstrapCliDatabase,
   logger: BootstrapLogger = console,
 ) {
-  let reportedFailure = false;
-  const reportFailure = () => {
-    if (!reportedFailure) {
-      logger.error("Production admin bootstrap failed.");
-      reportedFailure = true;
-    }
-    process.exitCode = 1;
-  };
+  let result: Awaited<ReturnType<typeof bootstrapProductionAdmin>>;
+  let disconnectAttempted = false;
 
   try {
-    const result = await bootstrapProductionAdmin(environment, database);
-    logger.log(
-      result.status === "created"
-        ? "Production admin created."
-        : "Production admin already exists.",
-    );
+    result = await bootstrapProductionAdmin(environment, database);
+    disconnectAttempted = true;
+    await database.$disconnect();
   } catch {
-    reportFailure();
-  } finally {
-    try {
-      await database.$disconnect();
-    } catch {
-      reportFailure();
+    if (!disconnectAttempted) {
+      try {
+        disconnectAttempted = true;
+        await database.$disconnect();
+      } catch {
+        // The CLI reports one generic failure for bootstrap and disconnect errors together.
+      }
     }
+
+    logger.error("Production admin bootstrap failed.");
+    process.exitCode = 1;
+    return;
   }
+
+  logger.log(
+    result.status === "created" ? "Production admin created." : "Production admin already exists.",
+  );
 }
 
 async function runFromCommandLine() {

@@ -41,6 +41,34 @@ function adminUser(overrides: Partial<BootstrapUser> = {}): BootstrapUser {
   };
 }
 
+function bootstrapWinner(overrides: Partial<BootstrapUser> = {}): BootstrapUser {
+  return adminUser({
+    fullName: "Bootstrap Admin",
+    mustChangePassword: true,
+    twoFactorEnabled: false,
+    twoFactorSecret: null,
+    twoFactorBackupCodes: [],
+    ...overrides,
+  });
+}
+
+function bootstrapAudit(targetId: string, overrides: Record<string, unknown> = {}) {
+  return {
+    adminUserId: null,
+    actorId: "system:production-bootstrap",
+    actorEmail: null,
+    actorFullName: null,
+    actorRole: "SYSTEM",
+    action: "PRODUCTION_ADMIN_BOOTSTRAPPED",
+    targetType: "AppUser",
+    targetId,
+    before: null,
+    after: null,
+    meta: { source: "production-bootstrap" },
+    ...overrides,
+  };
+}
+
 function configuredEnv(overrides: Record<string, string | undefined> = {}) {
   return {
     BOOTSTRAP_ADMIN_EMAIL: "Admin@Example.com",
@@ -58,6 +86,7 @@ function createDatabase() {
       create: vi.fn(),
     },
     adminAuditLog: {
+      findFirst: vi.fn(),
       create: vi.fn(),
     },
   };
@@ -65,6 +94,9 @@ function createDatabase() {
     appUser: {
       count: vi.fn(),
       findUnique: vi.fn(),
+    },
+    adminAuditLog: {
+      findFirst: vi.fn(),
     },
     $transaction: vi.fn(async (callback: (tx: typeof transaction) => Promise<unknown>) =>
       callback(transaction),
@@ -80,6 +112,68 @@ describe("bootstrapProductionAdmin", () => {
     hashPasswordMock.mockResolvedValue("new-password-hash");
   });
 
+  it.each([
+    ["null", null],
+    ["an array", []],
+    ["a primitive", "BOOTSTRAP_ADMIN_EMAIL=admin@example.com"],
+    ["a null field", { BOOTSTRAP_ADMIN_EMAIL: null }],
+    ["a non-string field", { BOOTSTRAP_ADMIN_PASSWORD: 123456789012 }],
+  ])(
+    "rejects %s environment input before hashing or database work",
+    async (_label, environment) => {
+      const { database } = createDatabase();
+
+      await expect(bootstrapProductionAdmin(environment, database)).rejects.toMatchObject({
+        name: "ProductionAdminBootstrapError",
+        message: "Production admin bootstrap failed",
+      });
+
+      expect(database.appUser.count).not.toHaveBeenCalled();
+      expect(database.appUser.findUnique).not.toHaveBeenCalled();
+      expect(database.$transaction).not.toHaveBeenCalled();
+      expect(hashPasswordMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("sanitizes a sensitive database error at the public boundary", async () => {
+    const { database } = createDatabase();
+    const password = "BootstrapPassword123!";
+    const hash = "sensitive-password-hash";
+    database.appUser.count.mockRejectedValue(
+      new Error(`database failed for ${password} with ${hash}`),
+    );
+
+    const error = await bootstrapProductionAdmin(
+      configuredEnv({ BOOTSTRAP_ADMIN_PASSWORD: password }),
+      database,
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ProductionAdminBootstrapError);
+    expect(error).toMatchObject({ message: "Production admin bootstrap failed" });
+    expect(JSON.stringify(error)).not.toContain(password);
+    expect(JSON.stringify(error)).not.toContain(hash);
+    expect(hashPasswordMock).not.toHaveBeenCalled();
+    expect(database.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("sanitizes a sensitive password-hashing error at the public boundary", async () => {
+    const { database } = createDatabase();
+    const password = "BootstrapPassword123!";
+    database.appUser.count.mockResolvedValue(0);
+    database.appUser.findUnique.mockResolvedValue(null);
+    hashPasswordMock.mockRejectedValue(new Error(`hash failed for ${password}`));
+
+    const error = await bootstrapProductionAdmin(
+      configuredEnv({ BOOTSTRAP_ADMIN_PASSWORD: password }),
+      database,
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ProductionAdminBootstrapError);
+    expect(error).toMatchObject({ message: "Production admin bootstrap failed" });
+    expect(JSON.stringify(error)).not.toContain(password);
+    expect(database.$transaction).not.toHaveBeenCalled();
+  });
+
   it("succeeds without bootstrap variables when an active admin exists", async () => {
     const { database, transaction } = createDatabase();
     database.appUser.count.mockResolvedValue(1);
@@ -90,6 +184,7 @@ describe("bootstrapProductionAdmin", () => {
       where: { role: UserRole.ADMIN, isActive: true },
     });
     expect(database.appUser.findUnique).not.toHaveBeenCalled();
+    expect(database.adminAuditLog.findFirst).not.toHaveBeenCalled();
     expect(hashPasswordMock).not.toHaveBeenCalled();
     expect(database.$transaction).not.toHaveBeenCalled();
     expect(transaction.appUser.create).not.toHaveBeenCalled();
@@ -287,13 +382,14 @@ describe("bootstrapProductionAdmin", () => {
 
   it("converges concurrent same-email calls to one created admin and one audit", async () => {
     const { database, transaction } = createDatabase();
-    const created = adminUser({ id: "admin-race", twoFactorEnabled: false, twoFactorSecret: null });
+    const created = bootstrapWinner({ id: "admin-race" });
     let createAttempts = 0;
     database.appUser.count.mockResolvedValue(0);
     database.appUser.findUnique
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
       .mockResolvedValue(created);
+    database.adminAuditLog.findFirst.mockResolvedValue(bootstrapAudit(created.id));
     transaction.appUser.create.mockImplementation(async () => {
       createAttempts += 1;
       if (createAttempts === 1) return { id: created.id, email: created.email };
@@ -312,6 +408,7 @@ describe("bootstrapProductionAdmin", () => {
     ]);
     expect(transaction.appUser.create).toHaveBeenCalledTimes(2);
     expect(transaction.adminAuditLog.create).toHaveBeenCalledTimes(1);
+    expect(database.adminAuditLog.findFirst).toHaveBeenCalledOnce();
   });
 
   it("refuses to create when an active admin appears inside the write transaction", async () => {
@@ -331,9 +428,10 @@ describe("bootstrapProductionAdmin", () => {
 
   it("returns existing when the configured active admin appears during the write transaction", async () => {
     const { database, transaction } = createDatabase();
-    const racedAdmin = adminUser();
+    const racedAdmin = bootstrapWinner();
     database.appUser.count.mockResolvedValue(0);
     database.appUser.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(racedAdmin);
+    database.adminAuditLog.findFirst.mockResolvedValue(bootstrapAudit(racedAdmin.id));
     transaction.appUser.findUnique.mockResolvedValue(null);
     transaction.appUser.count.mockResolvedValue(1);
 
@@ -343,13 +441,82 @@ describe("bootstrapProductionAdmin", () => {
 
     expect(transaction.appUser.create).not.toHaveBeenCalled();
     expect(transaction.adminAuditLog.create).not.toHaveBeenCalled();
+    expect(database.adminAuditLog.findFirst).toHaveBeenCalledOnce();
+  });
+
+  it("accepts an in-transaction winner only with exact initial state and bootstrap audit", async () => {
+    const { database, transaction } = createDatabase();
+    const racedAdmin = bootstrapWinner();
+    database.appUser.count.mockResolvedValue(0);
+    database.appUser.findUnique.mockResolvedValue(null);
+    transaction.appUser.findUnique.mockResolvedValue(racedAdmin);
+    transaction.adminAuditLog.findFirst.mockResolvedValue(bootstrapAudit(racedAdmin.id));
+
+    await expect(bootstrapProductionAdmin(configuredEnv(), database)).resolves.toEqual({
+      status: "existing",
+    });
+
+    expect(transaction.appUser.create).not.toHaveBeenCalled();
+    expect(transaction.adminAuditLog.findFirst).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["full name", { fullName: "Unrelated Admin" }],
+    ["password-change state", { mustChangePassword: false }],
+    ["2FA enabled state", { twoFactorEnabled: true }],
+    ["2FA secret", { twoFactorSecret: "unrelated-secret" }],
+    ["backup hashes", { twoFactorBackupCodes: ["unrelated-backup-hash"] }],
+    ["activation", { isActive: false }],
+  ])("rejects a post-miss winner with mismatched %s", async (_label, userOverride) => {
+    const { database, transaction } = createDatabase();
+    const racedAdmin = bootstrapWinner(userOverride);
+    database.appUser.count.mockResolvedValue(0);
+    database.appUser.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(racedAdmin);
+    database.adminAuditLog.findFirst.mockResolvedValue(bootstrapAudit(racedAdmin.id));
+    transaction.appUser.findUnique.mockResolvedValue(null);
+    transaction.appUser.count.mockResolvedValue(0);
+    transaction.appUser.create.mockRejectedValue({
+      code: "P2002",
+      meta: { target: ["email"] },
+    });
+
+    await expect(bootstrapProductionAdmin(configuredEnv(), database)).rejects.toBeInstanceOf(
+      ProductionAdminBootstrapError,
+    );
+
+    expect(transaction.adminAuditLog.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a missing audit", null],
+    ["a user actor", bootstrapAudit("admin-1", { actorId: "admin-1" })],
+    ["unsanitized metadata", bootstrapAudit("admin-1", { meta: { source: "other" } })],
+  ])("rejects a post-miss winner with %s", async (_label, audit) => {
+    const { database, transaction } = createDatabase();
+    const racedAdmin = bootstrapWinner();
+    database.appUser.count.mockResolvedValue(0);
+    database.appUser.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(racedAdmin);
+    database.adminAuditLog.findFirst.mockResolvedValue(audit);
+    transaction.appUser.findUnique.mockResolvedValue(null);
+    transaction.appUser.count.mockResolvedValue(0);
+    transaction.appUser.create.mockRejectedValue({
+      code: "P2002",
+      meta: { target: ["email"] },
+    });
+
+    await expect(bootstrapProductionAdmin(configuredEnv(), database)).rejects.toBeInstanceOf(
+      ProductionAdminBootstrapError,
+    );
+
+    expect(transaction.adminAuditLog.create).not.toHaveBeenCalled();
   });
 
   it("recovers a serializable conflict only when the configured active admin wins", async () => {
     const { database, transaction } = createDatabase();
-    const racedAdmin = adminUser();
+    const racedAdmin = bootstrapWinner();
     database.appUser.count.mockResolvedValue(0);
     database.appUser.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(racedAdmin);
+    database.adminAuditLog.findFirst.mockResolvedValue(bootstrapAudit(racedAdmin.id));
     transaction.appUser.findUnique.mockResolvedValue(null);
     transaction.appUser.count.mockResolvedValue(0);
     transaction.appUser.create.mockRejectedValue({ code: "P2034" });
@@ -358,6 +525,27 @@ describe("bootstrapProductionAdmin", () => {
       status: "existing",
     });
 
+    expect(transaction.adminAuditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("does not convert an unrelated P2034 into success for a same-email admin", async () => {
+    const { database, transaction } = createDatabase();
+    const conflict = { code: "P2034", message: "sensitive database detail" };
+    const unrelatedAdmin = bootstrapWinner();
+    database.appUser.count.mockResolvedValue(0);
+    database.appUser.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(unrelatedAdmin);
+    database.adminAuditLog.findFirst.mockResolvedValue(null);
+    transaction.appUser.findUnique.mockResolvedValue(null);
+    transaction.appUser.count.mockResolvedValue(0);
+    transaction.appUser.create.mockRejectedValue(conflict);
+
+    const error = await bootstrapProductionAdmin(configuredEnv(), database).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(ProductionAdminBootstrapError);
+    expect(error).not.toBe(conflict);
+    expect(JSON.stringify(error)).not.toContain("sensitive database detail");
     expect(transaction.adminAuditLog.create).not.toHaveBeenCalled();
   });
 
@@ -370,19 +558,34 @@ describe("bootstrapProductionAdmin", () => {
     transaction.appUser.count.mockResolvedValue(0);
     transaction.appUser.create.mockRejectedValue(conflict);
 
-    await expect(bootstrapProductionAdmin(configuredEnv(), database)).rejects.toBe(conflict);
+    const error = await bootstrapProductionAdmin(configuredEnv(), database).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(ProductionAdminBootstrapError);
+    expect(error).not.toBe(conflict);
 
     expect(transaction.adminAuditLog.create).not.toHaveBeenCalled();
   });
 
   it("rethrows unrelated Prisma failures instead of treating them as a race", async () => {
     const { database, transaction } = createDatabase();
-    const failure = { code: "P1001", message: "database unavailable" };
+    const failure = {
+      code: "P1001",
+      message: "database unavailable for BootstrapPassword123! sensitive-password-hash",
+    };
     database.appUser.count.mockResolvedValue(0);
     database.appUser.findUnique.mockResolvedValue(null);
     transaction.appUser.create.mockRejectedValue(failure);
 
-    await expect(bootstrapProductionAdmin(configuredEnv(), database)).rejects.toBe(failure);
+    const error = await bootstrapProductionAdmin(configuredEnv(), database).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(ProductionAdminBootstrapError);
+    expect(error).not.toBe(failure);
+    expect(JSON.stringify(error)).not.toContain("BootstrapPassword123!");
+    expect(JSON.stringify(error)).not.toContain("sensitive-password-hash");
 
     expect(transaction.adminAuditLog.create).not.toHaveBeenCalled();
   });

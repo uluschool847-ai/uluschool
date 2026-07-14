@@ -31,6 +31,9 @@ describe("runProductionAdminBootstrap", () => {
     expect(logger.log).toHaveBeenCalledWith("Production admin created.");
     expect(logger.error).not.toHaveBeenCalled();
     expect(database.$disconnect).toHaveBeenCalledOnce();
+    expect(database.$disconnect.mock.invocationCallOrder[0]).toBeLessThan(
+      logger.log.mock.invocationCallOrder[0],
+    );
   });
 
   it("logs the exact existing message and disconnects", async () => {
@@ -70,7 +73,7 @@ describe("runProductionAdminBootstrap", () => {
 
     await expect(runProductionAdminBootstrap({}, database, logger)).resolves.toBeUndefined();
 
-    expect(logger.log).toHaveBeenCalledWith("Production admin already exists.");
+    expect(logger.log).not.toHaveBeenCalled();
     expect(logger.error).toHaveBeenCalledTimes(1);
     expect(logger.error).toHaveBeenCalledWith("Production admin bootstrap failed.");
     expect(process.exitCode).toBe(1);

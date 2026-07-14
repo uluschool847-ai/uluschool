@@ -26,6 +26,9 @@ function databaseWithoutExistingAdmins(): ProductionAdminDatabase {
       count: async () => 0,
       findUnique: (args) => prisma.appUser.findUnique(args),
     },
+    adminAuditLog: {
+      findFirst: (args) => prisma.adminAuditLog.findFirst(args),
+    },
     $transaction: (callback, options) =>
       prisma.$transaction(
         (transaction) =>
@@ -36,6 +39,7 @@ function databaseWithoutExistingAdmins(): ProductionAdminDatabase {
               create: (args) => transaction.appUser.create(args),
             },
             adminAuditLog: {
+              findFirst: (args) => transaction.adminAuditLog.findFirst(args),
               create: (args) => transaction.adminAuditLog.create(args),
             },
           }),
@@ -124,24 +128,23 @@ suite("production admin bootstrap PostgreSQL", { timeout: 60_000 }, () => {
     const functionName = `a8_reject_bootstrap_audit_${suffix}`;
     const triggerName = `a8_reject_bootstrap_audit_trigger_${suffix}`;
 
-    await prisma.$executeRawUnsafe(`
-      CREATE FUNCTION "${functionName}"() RETURNS trigger AS $$
-      BEGIN
-        IF NEW."action" = 'PRODUCTION_ADMIN_BOOTSTRAPPED'
-          AND NEW."actorId" = 'system:production-bootstrap' THEN
-          RAISE EXCEPTION 'A8 forced bootstrap audit failure';
-        END IF;
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
-    `);
-    await prisma.$executeRawUnsafe(`
-      CREATE TRIGGER "${triggerName}"
-      BEFORE INSERT ON "AdminAuditLog"
-      FOR EACH ROW EXECUTE FUNCTION "${functionName}"();
-    `);
-
     try {
+      await prisma.$executeRawUnsafe(`
+        CREATE FUNCTION "${functionName}"() RETURNS trigger AS $$
+        BEGIN
+          IF NEW."action" = 'PRODUCTION_ADMIN_BOOTSTRAPPED'
+            AND NEW."actorId" = 'system:production-bootstrap' THEN
+            RAISE EXCEPTION 'A8 forced bootstrap audit failure';
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE TRIGGER "${triggerName}"
+        BEFORE INSERT ON "AdminAuditLog"
+        FOR EACH ROW EXECUTE FUNCTION "${functionName}"();
+      `);
       await expect(bootstrapProductionAdmin(environment, database)).rejects.toThrow();
     } finally {
       await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "${triggerName}" ON "AdminAuditLog";`);

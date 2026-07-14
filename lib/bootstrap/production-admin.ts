@@ -17,13 +17,24 @@ const productionAdminEnvironmentSchema = z
   })
   .strict();
 
-type ProductionAdminEnvironment = Record<string, string | undefined>;
+const productionAdminEnvironmentBoundarySchema = z
+  .object({
+    BOOTSTRAP_ADMIN_EMAIL: z.string().optional(),
+    BOOTSTRAP_ADMIN_NAME: z.string().optional(),
+    BOOTSTRAP_ADMIN_PASSWORD: z.string().optional(),
+  })
+  .passthrough();
 
 type ExistingUser = {
   id: string;
   email: string;
+  fullName: string;
   role: UserRole;
   isActive: boolean;
+  mustChangePassword: boolean;
+  twoFactorEnabled: boolean;
+  twoFactorSecret: string | null;
+  twoFactorBackupCodes: string[];
 };
 
 type CreatedUser = {
@@ -31,13 +42,60 @@ type CreatedUser = {
   email: string;
 };
 
+type BootstrapAudit = {
+  adminUserId: string | null;
+  actorId: string;
+  actorEmail: string | null;
+  actorFullName: string | null;
+  actorRole: string | null;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  before: unknown;
+  after: unknown;
+  meta: unknown;
+};
+
+type BootstrapAuditFindArgs = {
+  where: {
+    targetId: string;
+    action: string;
+    actorId: string;
+  };
+  select: {
+    adminUserId: true;
+    actorId: true;
+    actorEmail: true;
+    actorFullName: true;
+    actorRole: true;
+    action: true;
+    targetType: true;
+    targetId: true;
+    before: true;
+    after: true;
+    meta: true;
+  };
+};
+
+type BootstrapUserFindArgs = {
+  where: { email: string };
+  select: {
+    id: true;
+    email: true;
+    fullName: true;
+    role: true;
+    isActive: true;
+    mustChangePassword: true;
+    twoFactorEnabled: true;
+    twoFactorSecret: true;
+    twoFactorBackupCodes: true;
+  };
+};
+
 type ProductionAdminTransaction = {
   appUser: {
     count(args: { where: { role: UserRole; isActive: true } }): Promise<number>;
-    findUnique(args: {
-      where: { email: string };
-      select: { id: true; email: true; role: true; isActive: true };
-    }): Promise<ExistingUser | null>;
+    findUnique(args: BootstrapUserFindArgs): Promise<ExistingUser | null>;
     create(args: {
       data: {
         email: string;
@@ -51,6 +109,7 @@ type ProductionAdminTransaction = {
     }): Promise<CreatedUser>;
   };
   adminAuditLog: {
+    findFirst(args: BootstrapAuditFindArgs): Promise<BootstrapAudit | null>;
     create(args: {
       data: {
         adminUserId: null;
@@ -70,10 +129,10 @@ type ProductionAdminTransaction = {
 export type ProductionAdminDatabase = {
   appUser: {
     count(args: { where: { role: UserRole; isActive: true } }): Promise<number>;
-    findUnique(args: {
-      where: { email: string };
-      select: { id: true; email: true; role: true; isActive: true };
-    }): Promise<ExistingUser | null>;
+    findUnique(args: BootstrapUserFindArgs): Promise<ExistingUser | null>;
+  };
+  adminAuditLog: {
+    findFirst(args: BootstrapAuditFindArgs): Promise<BootstrapAudit | null>;
   };
   $transaction<T>(
     callback: (transaction: ProductionAdminTransaction) => Promise<T>,
@@ -107,11 +166,16 @@ function normalizeEnvironmentValue(value: string | undefined) {
   return value;
 }
 
-function parseConfiguredEnvironment(environment: ProductionAdminEnvironment) {
+function parseConfiguredEnvironment(environment: unknown) {
+  const boundary = productionAdminEnvironmentBoundarySchema.safeParse(environment);
+  if (!boundary.success) {
+    throw new ProductionAdminBootstrapError();
+  }
+
   const raw = {
-    BOOTSTRAP_ADMIN_EMAIL: normalizeEnvironmentValue(environment.BOOTSTRAP_ADMIN_EMAIL),
-    BOOTSTRAP_ADMIN_NAME: normalizeEnvironmentValue(environment.BOOTSTRAP_ADMIN_NAME),
-    BOOTSTRAP_ADMIN_PASSWORD: normalizeEnvironmentValue(environment.BOOTSTRAP_ADMIN_PASSWORD),
+    BOOTSTRAP_ADMIN_EMAIL: normalizeEnvironmentValue(boundary.data.BOOTSTRAP_ADMIN_EMAIL),
+    BOOTSTRAP_ADMIN_NAME: normalizeEnvironmentValue(boundary.data.BOOTSTRAP_ADMIN_NAME),
+    BOOTSTRAP_ADMIN_PASSWORD: normalizeEnvironmentValue(boundary.data.BOOTSTRAP_ADMIN_PASSWORD),
   };
   const configuredCount = Object.values(raw).filter((value) => value !== undefined).length;
 
@@ -139,6 +203,93 @@ function isActiveAdmin(user: ExistingUser | null): user is ExistingUser {
   return user?.role === UserRole.ADMIN && user.isActive;
 }
 
+function hasExactBootstrapMetadata(metadata: unknown) {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    return false;
+  }
+
+  const entries = Object.entries(metadata);
+  return (
+    entries.length === 1 &&
+    entries[0]?.[0] === "source" &&
+    entries[0]?.[1] === "production-bootstrap"
+  );
+}
+
+function isExpectedBootstrapAudit(audit: BootstrapAudit | null, targetId: string) {
+  return (
+    audit?.adminUserId === null &&
+    audit.actorId === SYSTEM_ACTOR_ID &&
+    audit.actorEmail === null &&
+    audit.actorFullName === null &&
+    audit.actorRole === "SYSTEM" &&
+    audit.action === PRODUCTION_ADMIN_AUDIT_ACTION &&
+    audit.targetType === "AppUser" &&
+    audit.targetId === targetId &&
+    audit.before === null &&
+    audit.after === null &&
+    hasExactBootstrapMetadata(audit.meta)
+  );
+}
+
+function isExpectedBootstrapWinner(
+  user: ExistingUser | null,
+  audit: BootstrapAudit | null,
+  configured: { email: string; fullName: string },
+): user is ExistingUser {
+  return (
+    user?.email === configured.email &&
+    user.fullName === configured.fullName &&
+    user.role === UserRole.ADMIN &&
+    user.isActive &&
+    user.mustChangePassword &&
+    !user.twoFactorEnabled &&
+    user.twoFactorSecret === null &&
+    user.twoFactorBackupCodes.length === 0 &&
+    isExpectedBootstrapAudit(audit, user.id)
+  );
+}
+
+const bootstrapUserSelect = {
+  id: true,
+  email: true,
+  fullName: true,
+  role: true,
+  isActive: true,
+  mustChangePassword: true,
+  twoFactorEnabled: true,
+  twoFactorSecret: true,
+  twoFactorBackupCodes: true,
+} as const;
+
+const bootstrapAuditSelect = {
+  adminUserId: true,
+  actorId: true,
+  actorEmail: true,
+  actorFullName: true,
+  actorRole: true,
+  action: true,
+  targetType: true,
+  targetId: true,
+  before: true,
+  after: true,
+  meta: true,
+} as const;
+
+async function findBootstrapAudit(
+  database: Pick<ProductionAdminDatabase, "adminAuditLog"> | ProductionAdminTransaction,
+  targetId: string,
+) {
+  return database.adminAuditLog.findFirst({
+    where: {
+      targetId,
+      action: PRODUCTION_ADMIN_AUDIT_ACTION,
+      actorId: SYSTEM_ACTOR_ID,
+    },
+    select: bootstrapAuditSelect,
+  });
+}
+
 function isExpectedEmailUniqueViolation(error: unknown) {
   if (typeof error !== "object" || error === null || !("code" in error)) {
     return false;
@@ -156,14 +307,13 @@ function isSerializableTransactionConflict(error: unknown) {
   return typeof error === "object" && error !== null && "code" in error && error.code === "P2034";
 }
 
-export async function bootstrapProductionAdmin(
-  environment: ProductionAdminEnvironment,
+async function executeProductionAdminBootstrap(
+  configured: ReturnType<typeof parseConfiguredEnvironment>,
   database: ProductionAdminDatabase,
 ): Promise<ProductionAdminBootstrapResult> {
   const activeAdminCount = await database.appUser.count({
     where: { role: UserRole.ADMIN, isActive: true },
   });
-  const configured = parseConfiguredEnvironment(environment);
 
   if (!configured) {
     if (activeAdminCount > 0) {
@@ -175,7 +325,7 @@ export async function bootstrapProductionAdmin(
 
   const existing = await database.appUser.findUnique({
     where: { email: configured.email },
-    select: { id: true, email: true, role: true, isActive: true },
+    select: bootstrapUserSelect,
   });
 
   if (existing) {
@@ -197,11 +347,12 @@ export async function bootstrapProductionAdmin(
       async (transaction) => {
         const existingInTransaction = await transaction.appUser.findUnique({
           where: { email: configured.email },
-          select: { id: true, email: true, role: true, isActive: true },
+          select: bootstrapUserSelect,
         });
 
         if (existingInTransaction) {
-          if (isActiveAdmin(existingInTransaction)) {
+          const audit = await findBootstrapAudit(transaction, existingInTransaction.id);
+          if (isExpectedBootstrapWinner(existingInTransaction, audit, configured)) {
             return { status: "existing" } as const;
           }
 
@@ -254,10 +405,11 @@ export async function bootstrapProductionAdmin(
 
     const racedUser = await database.appUser.findUnique({
       where: { email: configured.email },
-      select: { id: true, email: true, role: true, isActive: true },
+      select: bootstrapUserSelect,
     });
+    const audit = racedUser ? await findBootstrapAudit(database, racedUser.id) : null;
 
-    if (isActiveAdmin(racedUser)) {
+    if (isExpectedBootstrapWinner(racedUser, audit, configured)) {
       return { status: "existing" };
     }
 
@@ -265,6 +417,18 @@ export async function bootstrapProductionAdmin(
       throw error;
     }
 
+    throw new ProductionAdminBootstrapError();
+  }
+}
+
+export async function bootstrapProductionAdmin(
+  environment: unknown,
+  database: ProductionAdminDatabase,
+): Promise<ProductionAdminBootstrapResult> {
+  try {
+    const configured = parseConfiguredEnvironment(environment);
+    return await executeProductionAdminBootstrap(configured, database);
+  } catch {
     throw new ProductionAdminBootstrapError();
   }
 }
