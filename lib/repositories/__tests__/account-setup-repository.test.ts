@@ -5,6 +5,7 @@ const findUserForInitialSetupMock = vi.hoisted(() => vi.fn());
 const verifyPasswordMock = vi.hoisted(() => vi.fn());
 const hashPasswordMock = vi.hoisted(() => vi.fn());
 const isPasswordHashMock = vi.hoisted(() => vi.fn());
+const getBackupCodeHashFingerprintMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const transactionUserFindMock = vi.hoisted(() => vi.fn());
 const appUserUpdateMock = vi.hoisted(() => vi.fn());
@@ -24,6 +25,7 @@ vi.mock("@/lib/auth/password", () => ({
   verifyPassword: verifyPasswordMock,
   hashPassword: hashPasswordMock,
   isPasswordHash: isPasswordHashMock,
+  getBackupCodeHashFingerprint: getBackupCodeHashFingerprintMock,
 }));
 
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
@@ -247,6 +249,9 @@ describe("initial admin two-factor enrollment", () => {
     createAdminAuditLogMock.mockResolvedValue(undefined);
     isPasswordHashMock.mockImplementation(
       (value: unknown) => typeof value === "string" && /^[a-f0-9]{32}:[a-f0-9]{128}$/.test(value),
+    );
+    getBackupCodeHashFingerprintMock.mockImplementation(async (hashes: string[]) =>
+      hashes[0]?.[0]?.repeat(64),
     );
     transactionMock.mockImplementation(
       async (callback: (tx: typeof transactionClient) => unknown) => callback(transactionClient),
@@ -505,13 +510,34 @@ describe("initial admin two-factor enrollment", () => {
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
   });
 
-  it("rotates valid hashes for a signed-setup handoff recovery with a sanitized audit", async () => {
-    transactionUserFindMock.mockResolvedValueOnce(adminUser({ twoFactorEnabled: true }));
-    const backupCodeHashes = validBackupCodeHashes("2");
+  it("loads only the enabled admin state matching the signed backup-hash fingerprint", async () => {
+    const committedHashes = validBackupCodeHashes("2");
+    findUserForInitialSetupMock.mockResolvedValueOnce(
+      adminUser({ twoFactorEnabled: true, twoFactorBackupCodes: committedHashes }),
+    );
+    const { getInitialAdminTwoFactorHandoff } = await loadRepository();
+
+    const result = await getInitialAdminTwoFactorHandoff({
+      userId: "admin-1",
+      expectedBackupCodeHashFingerprint: "2".repeat(64),
+    });
+
+    expect(result).toMatchObject({ id: "admin-1", twoFactorEnabled: true });
+    expect(getBackupCodeHashFingerprintMock).toHaveBeenCalledWith(committedHashes);
+    expect(transactionMock).not.toHaveBeenCalled();
+  });
+
+  it("rotates valid hashes only when the transaction still matches the signed fingerprint", async () => {
+    const committedHashes = validBackupCodeHashes("2");
+    const backupCodeHashes = validBackupCodeHashes("3");
+    transactionUserFindMock.mockResolvedValueOnce(
+      adminUser({ twoFactorEnabled: true, twoFactorBackupCodes: committedHashes }),
+    );
     const { recoverInitialAdminTwoFactorHandoff } = await loadRepository();
 
     const result = await recoverInitialAdminTwoFactorHandoff({
-      ...identity,
+      userId: "admin-1",
+      expectedBackupCodeHashFingerprint: "2".repeat(64),
       backupCodeHashes,
     });
 
@@ -537,15 +563,72 @@ describe("initial admin two-factor enrollment", () => {
     );
   });
 
-  it("rejects malformed handoff lookup identity before persistence access", async () => {
+  it.each([
+    ["blank uid", { userId: "  ", expectedBackupCodeHashFingerprint: "2".repeat(64) }],
+    [
+      "oversized uid",
+      { userId: "x".repeat(192), expectedBackupCodeHashFingerprint: "2".repeat(64) },
+    ],
+    ["malformed fingerprint", { userId: "admin-1", expectedBackupCodeHashFingerprint: "signed" }],
+    [
+      "client identity fields",
+      {
+        userId: "admin-1",
+        expectedBackupCodeHashFingerprint: "2".repeat(64),
+        email: "attacker@example.com",
+      },
+    ],
+  ])("rejects handoff authorization with %s before persistence access", async (_label, input) => {
     const { getInitialAdminTwoFactorHandoff } = await loadRepository();
 
-    await expect(
-      getInitialAdminTwoFactorHandoff({ ...identity, userId: " ".repeat(2) }),
-    ).rejects.toMatchObject({ code: "INVALID_SETUP" });
+    await expect(getInitialAdminTwoFactorHandoff(input)).rejects.toMatchObject({
+      code: "INVALID_SETUP",
+    });
 
     expect(findUserForInitialSetupMock).not.toHaveBeenCalled();
     expect(transactionMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a different user", adminUser({ id: "admin-2", twoFactorEnabled: true })],
+    ["disabled 2FA", adminUser({ twoFactorEnabled: false })],
+    ["an inactive admin", adminUser({ isActive: false, twoFactorEnabled: true })],
+    ["a changed role", adminUser({ role: UserRole.TEACHER, twoFactorEnabled: true })],
+  ])("rejects %s for handoff without mutation", async (_label, user) => {
+    findUserForInitialSetupMock.mockResolvedValueOnce(user);
+    const { getInitialAdminTwoFactorHandoff } = await loadRepository();
+
+    await expect(
+      getInitialAdminTwoFactorHandoff({
+        userId: "admin-1",
+        expectedBackupCodeHashFingerprint: "2".repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_SETUP" });
+
+    expect(transactionMock).not.toHaveBeenCalled();
+    expect(appUserUpdateMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects replay after the first recovery changed the persisted hash fingerprint", async () => {
+    transactionUserFindMock.mockResolvedValueOnce(
+      adminUser({
+        twoFactorEnabled: true,
+        twoFactorBackupCodes: validBackupCodeHashes("3"),
+      }),
+    );
+    const { recoverInitialAdminTwoFactorHandoff } = await loadRepository();
+
+    await expect(
+      recoverInitialAdminTwoFactorHandoff({
+        userId: "admin-1",
+        expectedBackupCodeHashFingerprint: "2".repeat(64),
+        backupCodeHashes: validBackupCodeHashes("4"),
+      }),
+    ).rejects.toMatchObject({ code: "HANDOFF_CHANGED" });
+
+    expect(appUserUpdateMock).not.toHaveBeenCalled();
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
   });
 
@@ -554,7 +637,8 @@ describe("initial admin two-factor enrollment", () => {
 
     await expect(
       recoverInitialAdminTwoFactorHandoff({
-        ...identity,
+        userId: "admin-1",
+        expectedBackupCodeHashFingerprint: "2".repeat(64),
         backupCodeHashes: Array.from({ length: 8 }, (_, index) => `PLAINTEXT-${index}`),
       }),
     ).rejects.toMatchObject({ code: "INVALID_BACKUP_CODES" });

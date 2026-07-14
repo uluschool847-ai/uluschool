@@ -7,6 +7,7 @@ const beginActionMock = vi.hoisted(() => vi.fn());
 const confirmActionMock = vi.hoisted(() => vi.fn());
 const recoverActionMock = vi.hoisted(() => vi.fn());
 const writeTextMock = vi.hoisted(() => vi.fn());
+const fetchMock = vi.hoisted(() => vi.fn());
 
 vi.mock("react", async () => {
   const actual = await vi.importActual<typeof import("react")>("react");
@@ -28,11 +29,14 @@ import { InitialTwoFactorForm } from "@/components/auth/InitialTwoFactorForm";
 
 const idleState = { phase: "idle", success: false, message: "" };
 
-function mockActionStates(setupState: unknown, confirmState: unknown) {
-  useActionStateMock.mockImplementation((action: unknown) => {
-    if (action === beginActionMock) return [setupState, beginActionMock];
-    if (action === confirmActionMock) return [confirmState, confirmActionMock];
-    return [idleState, recoverActionMock];
+function mockActionStates(setupState: unknown, confirmState: unknown, recoveryState = idleState) {
+  let call = 0;
+  useActionStateMock.mockImplementation(() => {
+    const position = call % 3;
+    call += 1;
+    if (position === 0) return [setupState, beginActionMock];
+    if (position === 1) return [confirmState, confirmActionMock];
+    return [recoveryState, recoverActionMock];
   });
 }
 
@@ -41,6 +45,13 @@ describe("InitialTwoFactorForm", () => {
     vi.clearAllMocks();
     useFormStatusMock.mockReturnValue({ pending: false });
     writeTextMock.mockResolvedValue(undefined);
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(idleState), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText: writeTextMock },
@@ -195,9 +206,12 @@ describe("InitialTwoFactorForm", () => {
       success: false,
       message: "Your two-factor setup changed. Start setup again.",
     };
-    useActionStateMock.mockImplementation((action: unknown) => {
-      if (action === beginActionMock) return [setupState, beginActionMock];
-      if (action === confirmActionMock) return [restartState, confirmActionMock];
+    let actionCall = 0;
+    useActionStateMock.mockImplementation(() => {
+      const position = actionCall % 3;
+      actionCall += 1;
+      if (position === 0) return [setupState, beginActionMock];
+      if (position === 1) return [restartState, confirmActionMock];
       return [idleState, recoverActionMock];
     });
     const { rerender } = render(<InitialTwoFactorForm />);
@@ -217,6 +231,7 @@ describe("InitialTwoFactorForm", () => {
     expect(screen.getByText("FRESH-MANUAL-SECRET")).toBeTruthy();
     expect(screen.queryByText("STALE-MANUAL-SECRET")).toBeNull();
     expect(screen.getByLabelText(/authenticator code/i)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("offers a recovery command when enrollment committed without completing handoff", () => {
@@ -226,12 +241,18 @@ describe("InitialTwoFactorForm", () => {
       success: true,
       message:
         "Two-factor authentication is enabled, but secure sign-in and backup-code delivery still need to be completed.",
+      handoffCapability: "SIGNED-HANDOFF-CAPABILITY",
     });
 
     render(<InitialTwoFactorForm />);
 
     expect(screen.getByRole("status").textContent).toMatch(/still need to be completed/i);
     expect(screen.getByRole("button", { name: /finish secure sign-in/i })).toBeTruthy();
+    expect(document.querySelector('input[name="handoffCapability"]')).toHaveAttribute(
+      "value",
+      "SIGNED-HANDOFF-CAPABILITY",
+    );
+    expect(document.querySelector('input[name="userId"]')).toBeNull();
     expect(screen.queryByLabelText(/authenticator code/i)).toBeNull();
   });
 
@@ -243,6 +264,7 @@ describe("InitialTwoFactorForm", () => {
         success: true,
         message:
           "Two-factor authentication is enabled, but secure sign-in and backup-code delivery still need to be completed.",
+        handoffCapability: "SIGNED-HANDOFF-CAPABILITY",
       },
       {
         phase: "restart-required",
@@ -255,25 +277,6 @@ describe("InitialTwoFactorForm", () => {
 
     expect(screen.getByRole("button", { name: /finish secure sign-in/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /start setup again/i })).toBeNull();
-  });
-
-  it("starts in recoverable handoff mode for an enabled admin with a valid setup session", () => {
-    render(<InitialTwoFactorForm requiresHandoff />);
-
-    expect(screen.getByRole("button", { name: /finish secure sign-in/i })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /set up authenticator/i })).toBeNull();
-  });
-
-  it("shows no credentials after refresh with only the verified normal session", () => {
-    render(<InitialTwoFactorForm completedHref="/admin" />);
-
-    expect(screen.getByRole("heading", { name: /two-factor setup complete/i })).toBeTruthy();
-    expect(screen.getByRole("link", { name: /continue to admin/i })).toHaveAttribute(
-      "href",
-      "/admin",
-    );
-    expect(screen.queryByRole("list", { name: /backup codes/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /set up authenticator/i })).toBeNull();
   });
 
   it("copies setup and backup credentials only through explicit in-memory controls", async () => {
@@ -315,6 +318,38 @@ describe("InitialTwoFactorForm", () => {
     expect(screen.getByRole("status").textContent).toMatch(/backup codes copied/i);
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
+  });
+
+  it("submits confirmation through the same-origin handoff route without a page action refresh", async () => {
+    render(<InitialTwoFactorForm />);
+    const clientConfirmationAction = useActionStateMock.mock.calls[1][0] as (
+      state: typeof idleState,
+      formData: FormData,
+    ) => Promise<unknown>;
+    const formData = new FormData();
+    formData.set("code", "123456");
+    formData.set("setupCapability", "SIGNED-SETUP-CAPABILITY");
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ phase: "error", success: false, message: "Invalid authenticator code." }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    const result = await clientConfirmationAction(idleState, formData);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/portal/setup/2fa/handoff",
+      expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
+    );
+    const submitted = fetchMock.mock.calls[0][1].body as FormData;
+    expect(submitted.get("operation")).toBe("confirm");
+    expect(submitted.get("setupCapability")).toBe("SIGNED-SETUP-CAPABILITY");
+    expect(result).toEqual({
+      phase: "error",
+      success: false,
+      message: "Invalid authenticator code.",
+    });
   });
 
   it("exposes pending progress and disables the active command", () => {

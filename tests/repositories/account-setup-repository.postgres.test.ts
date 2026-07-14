@@ -1,11 +1,12 @@
 import { UserRole } from "@prisma/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { getBackupCodeHashFingerprint, hashPassword, verifyPassword } from "@/lib/auth/password";
 import { prisma } from "@/lib/prisma";
 import {
   beginInitialAdminTwoFactorEnrollment,
   confirmInitialAdminTwoFactorEnrollment,
+  recoverInitialAdminTwoFactorHandoff,
 } from "@/lib/repositories/account-setup-repository";
 
 const runPostgres = process.env.RUN_A7_POSTGRES_INTEGRATION === "1";
@@ -189,5 +190,44 @@ suite("initial admin 2FA PostgreSQL concurrency", { timeout: 60_000 }, () => {
     expect(current.twoFactorEnabled).toBe(false);
     expect(current.twoFactorBackupCodes).toEqual([]);
     expect(auditCount).toBe(0);
+  });
+
+  it("consumes a handoff fingerprint once and rejects replay after rotation", async () => {
+    const secret = "JBSWY3DPEHPK3PXP";
+    const user = await createAdmin(secret);
+    const [committedCodes, recoveredCodes, replayCodes] = await Promise.all([
+      hashCodes("HANDOFF-COMMITTED"),
+      hashCodes("HANDOFF-RECOVERED"),
+      hashCodes("HANDOFF-REPLAY"),
+    ]);
+    await confirmInitialAdminTwoFactorEnrollment({
+      ...identity(user),
+      expectedSecret: secret,
+      backupCodeHashes: committedCodes.hashed,
+    });
+    const expectedBackupCodeHashFingerprint = await getBackupCodeHashFingerprint(
+      committedCodes.hashed,
+    );
+
+    await recoverInitialAdminTwoFactorHandoff({
+      userId: user.id,
+      expectedBackupCodeHashFingerprint,
+      backupCodeHashes: recoveredCodes.hashed,
+    });
+    await expect(
+      recoverInitialAdminTwoFactorHandoff({
+        userId: user.id,
+        expectedBackupCodeHashFingerprint,
+        backupCodeHashes: replayCodes.hashed,
+      }),
+    ).rejects.toMatchObject({ code: "HANDOFF_CHANGED" });
+
+    const current = await prisma.appUser.findUniqueOrThrow({ where: { id: user.id } });
+    expect(current.twoFactorBackupCodes).toEqual(recoveredCodes.hashed);
+    expect(
+      await prisma.adminAuditLog.count({
+        where: { targetId: user.id, action: "ADMIN_2FA_BACKUP_CREDENTIALS_ROTATED" },
+      }),
+    ).toBe(1);
   });
 });

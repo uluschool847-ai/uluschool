@@ -1,10 +1,12 @@
 import { UserRole } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sessionMocks = vi.hoisted(() => ({
   getInitialSetupSession: vi.fn(),
   createSetupCapability: vi.fn(),
   readSetupCapability: vi.fn(),
+  createHandoffCapability: vi.fn(),
+  readHandoffCapability: vi.fn(),
   getSecretFingerprint: vi.fn(),
   prepareSessionCookie: vi.fn(),
   replaceAuthCookieFamily: vi.fn(),
@@ -35,6 +37,8 @@ vi.mock("@/lib/auth/session", () => ({
   getInitialSetupSession: sessionMocks.getInitialSetupSession,
   createInitialTwoFactorSetupCapability: sessionMocks.createSetupCapability,
   readInitialTwoFactorSetupCapability: sessionMocks.readSetupCapability,
+  createInitialTwoFactorHandoffCapability: sessionMocks.createHandoffCapability,
+  readInitialTwoFactorHandoffCapability: sessionMocks.readHandoffCapability,
   getInitialTwoFactorSecretFingerprint: sessionMocks.getSecretFingerprint,
   prepareSessionCookie: sessionMocks.prepareSessionCookie,
   replaceAuthCookieFamilyWithSession: sessionMocks.replaceAuthCookieFamily,
@@ -98,6 +102,12 @@ function emptyForm() {
   return new FormData();
 }
 
+function handoffForm(capability: FormDataEntryValue = "SIGNED-HANDOFF-CAPABILITY") {
+  const formData = new FormData();
+  formData.set("handoffCapability", capability);
+  return formData;
+}
+
 describe("restricted initial admin 2FA actions", () => {
   const plainCodes = Array.from({ length: 8 }, (_, index) => `PLAIN-${index + 1}`);
   const hashedCodes = Array.from(
@@ -109,6 +119,7 @@ describe("restricted initial admin 2FA actions", () => {
     value: "SIGNED-NORMAL-SESSION",
     options: { httpOnly: true },
   };
+  const committedHashFingerprint = "f".repeat(64);
 
   beforeEach(() => {
     vi.resetModules();
@@ -122,6 +133,14 @@ describe("restricted initial admin 2FA actions", () => {
       exp: Date.now() + 60_000,
     });
     sessionMocks.getSecretFingerprint.mockResolvedValue("CURRENT-FINGERPRINT");
+    sessionMocks.createHandoffCapability.mockResolvedValue("SIGNED-HANDOFF-CAPABILITY");
+    sessionMocks.readHandoffCapability.mockResolvedValue({
+      purpose: "INITIAL_2FA_HANDOFF",
+      uid: "admin-1",
+      backupCodeHashFingerprint: committedHashFingerprint,
+      iat: Date.now(),
+      exp: Date.now() + 10 * 60_000,
+    });
     sessionMocks.prepareSessionCookie.mockResolvedValue(preparedSession);
     sessionMocks.replaceAuthCookieFamily.mockResolvedValue(undefined);
     sessionMocks.getPortalRedirectPath.mockReturnValue("/admin/classes");
@@ -142,6 +161,10 @@ describe("restricted initial admin 2FA actions", () => {
     repositoryMocks.recoverHandoff.mockResolvedValue(
       adminEnrollment({ twoFactorEnabled: true, twoFactorSecret: undefined }),
     );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("runtime-narrows begin FormData before setup or secret work", async () => {
@@ -297,6 +320,13 @@ describe("restricted initial admin 2FA actions", () => {
     expect(sessionMocks.prepareSessionCookie.mock.invocationCallOrder[0]).toBeLessThan(
       repositoryMocks.confirmEnrollment.mock.invocationCallOrder[0],
     );
+    expect(sessionMocks.createHandoffCapability).toHaveBeenCalledWith({
+      uid: "admin-1",
+      backupCodeHashes: hashedCodes,
+    });
+    expect(sessionMocks.createHandoffCapability.mock.invocationCallOrder[0]).toBeLessThan(
+      repositoryMocks.confirmEnrollment.mock.invocationCallOrder[0],
+    );
     expect(repositoryMocks.confirmEnrollment).toHaveBeenCalledWith({
       userId: "admin-1",
       email: "admin@example.com",
@@ -366,6 +396,7 @@ describe("restricted initial admin 2FA actions", () => {
       success: true,
       message:
         "Two-factor authentication is enabled, but secure sign-in and backup-code delivery still need to be completed.",
+      handoffCapability: "SIGNED-HANDOFF-CAPABILITY",
     });
     expect(JSON.stringify(result)).not.toMatch(/PLAIN-1|[0-9]{32}:[0-9]{128}|sensitive/);
   });
@@ -374,16 +405,25 @@ describe("restricted initial admin 2FA actions", () => {
     const { recoverInitialTwoFactorHandoffAction } = await loadActions();
 
     const result = await recoverInitialTwoFactorHandoffAction(
-      { phase: "handoff-required", success: true, message: "Recovery required." },
-      emptyForm(),
+      {
+        phase: "handoff-required",
+        success: true,
+        message: "Recovery required.",
+        handoffCapability: "SIGNED-HANDOFF-CAPABILITY",
+      },
+      handoffForm(),
     );
 
+    expect(repositoryMocks.getHandoff).toHaveBeenCalledWith({
+      userId: "admin-1",
+      expectedBackupCodeHashFingerprint: committedHashFingerprint,
+    });
     expect(repositoryMocks.recoverHandoff).toHaveBeenCalledWith({
       userId: "admin-1",
-      email: "admin@example.com",
-      role: UserRole.ADMIN,
+      expectedBackupCodeHashFingerprint: committedHashFingerprint,
       backupCodeHashes: hashedCodes,
     });
+    expect(sessionMocks.getInitialSetupSession).not.toHaveBeenCalled();
     expect(sessionMocks.replaceAuthCookieFamily).toHaveBeenCalledWith(preparedSession);
     expect(result).toMatchObject({
       phase: "complete",
@@ -398,12 +438,111 @@ describe("restricted initial admin 2FA actions", () => {
     const { recoverInitialTwoFactorHandoffAction } = await loadActions();
 
     const result = await recoverInitialTwoFactorHandoffAction(
-      { phase: "handoff-required", success: true, message: "Recovery required." },
-      emptyForm(),
+      {
+        phase: "handoff-required",
+        success: true,
+        message: "Recovery required.",
+        handoffCapability: "SIGNED-HANDOFF-CAPABILITY",
+      },
+      handoffForm(),
     );
 
     expect(repositoryMocks.recoverHandoff).toHaveBeenCalledOnce();
-    expect(result).toMatchObject({ phase: "handoff-required", success: true });
+    expect(result).toMatchObject({
+      phase: "handoff-required",
+      success: true,
+      handoffCapability: "SIGNED-HANDOFF-CAPABILITY",
+    });
     expect(JSON.stringify(result)).not.toMatch(/PLAIN-1|cookie failure/);
+  });
+
+  it("recovers a delivered handoff after the original setup session expires", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-14T10:14:59.000Z"));
+    const rotatedPlainCodes = Array.from({ length: 8 }, (_, index) => `ROTATED-${index + 1}`);
+    const rotatedHashes = Array.from(
+      { length: 8 },
+      (_, index) => `${(index + 2).toString().repeat(32)}:${(index + 2).toString().repeat(128)}`,
+    );
+    sessionMocks.getInitialSetupSession.mockResolvedValueOnce(
+      setupSession({ exp: Date.now() + 1_000 }),
+    );
+    sessionMocks.createHandoffCapability
+      .mockResolvedValueOnce("SIGNED-HANDOFF-CAPABILITY")
+      .mockResolvedValueOnce("SIGNED-NEXT-HANDOFF-CAPABILITY");
+    sessionMocks.replaceAuthCookieFamily
+      .mockRejectedValueOnce(new Error("cookie write failed"))
+      .mockResolvedValueOnce(undefined);
+    generateBackupCodesMock
+      .mockResolvedValueOnce({ plain: plainCodes, hashed: hashedCodes })
+      .mockResolvedValueOnce({ plain: rotatedPlainCodes, hashed: rotatedHashes });
+    const { confirmInitialTwoFactorSetupAction, recoverInitialTwoFactorHandoffAction } =
+      await loadActions();
+
+    const committed = await confirmInitialTwoFactorSetupAction(
+      { phase: "idle", success: false, message: "" },
+      confirmationForm(),
+    );
+    vi.advanceTimersByTime(2_000);
+    sessionMocks.getInitialSetupSession.mockResolvedValue(null);
+    const recovered = await recoverInitialTwoFactorHandoffAction(
+      committed,
+      handoffForm("SIGNED-HANDOFF-CAPABILITY"),
+    );
+
+    expect(committed).toMatchObject({
+      phase: "handoff-required",
+      handoffCapability: "SIGNED-HANDOFF-CAPABILITY",
+    });
+    expect(recovered).toMatchObject({
+      phase: "complete",
+      backupCodes: rotatedPlainCodes,
+    });
+    expect(sessionMocks.getInitialSetupSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds malformed, expired, and wrong-state handoff capability failures", async () => {
+    sessionMocks.readHandoffCapability.mockResolvedValueOnce(null);
+    const { recoverInitialTwoFactorHandoffAction } = await loadActions();
+    const opaqueCapability = "SIGNED-BUT-EXPIRED-HANDOFF";
+
+    const malformed = await recoverInitialTwoFactorHandoffAction(
+      {
+        phase: "handoff-required",
+        success: true,
+        message: "Recovery required.",
+        handoffCapability: opaqueCapability,
+      },
+      handoffForm(opaqueCapability),
+    );
+
+    expect(malformed).toMatchObject({ phase: "error", success: false });
+    expect(malformed.message).not.toContain(opaqueCapability);
+    expect(repositoryMocks.getHandoff).not.toHaveBeenCalled();
+    expect(sessionMocks.getInitialSetupSession).not.toHaveBeenCalled();
+
+    sessionMocks.readHandoffCapability.mockResolvedValueOnce({
+      purpose: "INITIAL_2FA_HANDOFF",
+      uid: "other-admin",
+      backupCodeHashFingerprint: "e".repeat(64),
+      iat: Date.now(),
+      exp: Date.now() + 60_000,
+    });
+    repositoryMocks.getHandoff.mockRejectedValueOnce(
+      new repositoryMocks.InitialAdminTwoFactorEnrollmentError("HANDOFF_CHANGED"),
+    );
+    const wrongState = await recoverInitialTwoFactorHandoffAction(
+      {
+        phase: "handoff-required",
+        success: true,
+        message: "Recovery required.",
+        handoffCapability: "WRONG-STATE-CAPABILITY",
+      },
+      handoffForm("WRONG-STATE-CAPABILITY"),
+    );
+
+    expect(wrongState).toMatchObject({ phase: "error", success: false });
+    expect(wrongState.message).not.toContain("WRONG-STATE-CAPABILITY");
+    expect(repositoryMocks.recoverHandoff).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,12 @@
 import { Prisma, UserRole } from "@prisma/client";
 import { z } from "zod";
 
-import { hashPassword, isPasswordHash, verifyPassword } from "@/lib/auth/password";
+import {
+  getBackupCodeHashFingerprint,
+  hashPassword,
+  isPasswordHash,
+  verifyPassword,
+} from "@/lib/auth/password";
 import { prisma } from "@/lib/prisma";
 import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 import { findUserForInitialSetup } from "@/lib/repositories/user-repository";
@@ -30,7 +35,8 @@ export type InitialAdminTwoFactorEnrollmentErrorCode =
   | "INVALID_SETUP"
   | "ALREADY_ENABLED"
   | "SECRET_CHANGED"
-  | "INVALID_BACKUP_CODES";
+  | "INVALID_BACKUP_CODES"
+  | "HANDOFF_CHANGED";
 
 export class InitialAdminTwoFactorEnrollmentError extends Error {
   constructor(public readonly code: InitialAdminTwoFactorEnrollmentErrorCode) {
@@ -74,13 +80,29 @@ const confirmEnrollmentSchema = initialAdminIdentitySchema
     backupCodeHashes: backupCodeHashesSchema,
   })
   .strict();
-const recoverHandoffSchema = initialAdminIdentitySchema
+const handoffAuthorizationSchema = z
+  .object({
+    userId: z
+      .string()
+      .min(1)
+      .max(191)
+      .refine((value) => value === value.trim()),
+    expectedBackupCodeHashFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  })
+  .strict();
+const recoverHandoffSchema = handoffAuthorizationSchema
   .extend({ backupCodeHashes: backupCodeHashesSchema })
   .strict();
 
 type InitialAdminTwoFactorUser = SafeInitialSetupUser & {
   twoFactorSecret: string | null;
 };
+
+type InitialAdminTwoFactorPersistenceUser = InitialAdminTwoFactorUser & {
+  twoFactorBackupCodes: string[];
+};
+
+type InitialAdminTwoFactorHandoffAuthorization = z.infer<typeof handoffAuthorizationSchema>;
 
 const initialAdminTwoFactorSelect = {
   id: true,
@@ -91,6 +113,7 @@ const initialAdminTwoFactorSelect = {
   isActive: true,
   twoFactorEnabled: true,
   twoFactorSecret: true,
+  twoFactorBackupCodes: true,
 } as const;
 
 function requireEligibleInitialAdmin<
@@ -119,25 +142,48 @@ function requireEligibleInitialAdmin<
 }
 
 function requireEligibleInitialAdminHandoff<
-  T extends InitialAdminTwoFactorUser & {
+  T extends InitialAdminTwoFactorPersistenceUser & {
     isActive: boolean;
     mustChangePassword: boolean;
   },
->(user: T | null, identity: InitialAdminSetupIdentity): T {
+>(user: T | null, userId: string): T {
   if (
     !user?.isActive ||
     user.mustChangePassword ||
     !user.twoFactorEnabled ||
-    identity.role !== UserRole.ADMIN ||
-    user.id !== identity.userId ||
-    user.email !== identity.email ||
-    user.role !== UserRole.ADMIN ||
-    user.role !== identity.role
+    user.id !== userId ||
+    user.role !== UserRole.ADMIN
   ) {
     throw new InitialAdminTwoFactorEnrollmentError("INVALID_SETUP");
   }
 
   return user;
+}
+
+function parseInitialAdminHandoffAuthorization(
+  input: unknown,
+): InitialAdminTwoFactorHandoffAuthorization {
+  const parsed = handoffAuthorizationSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new InitialAdminTwoFactorEnrollmentError("INVALID_SETUP");
+  }
+  return parsed.data;
+}
+
+async function requireMatchingBackupCodeHashFingerprint(
+  hashes: unknown,
+  expectedFingerprint: string,
+) {
+  let actualFingerprint: string;
+  try {
+    actualFingerprint = await getBackupCodeHashFingerprint(hashes);
+  } catch {
+    throw new InitialAdminTwoFactorEnrollmentError("HANDOFF_CHANGED");
+  }
+
+  if (actualFingerprint !== expectedFingerprint) {
+    throw new InitialAdminTwoFactorEnrollmentError("HANDOFF_CHANGED");
+  }
 }
 
 function parseInitialAdminIdentity(input: unknown): InitialAdminSetupIdentity {
@@ -265,12 +311,16 @@ export async function getInitialAdminTwoFactorEnrollment(
 }
 
 export async function getInitialAdminTwoFactorHandoff(
-  identity: InitialAdminSetupIdentity,
+  authorization: InitialAdminTwoFactorHandoffAuthorization,
 ): Promise<InitialAdminTwoFactorUser> {
-  const parsedIdentity = parseInitialAdminIdentity(identity);
+  const parsed = parseInitialAdminHandoffAuthorization(authorization);
   const user = requireEligibleInitialAdminHandoff(
-    await findUserForInitialSetup(parsedIdentity.userId),
-    parsedIdentity,
+    await findUserForInitialSetup(parsed.userId),
+    parsed.userId,
+  );
+  await requireMatchingBackupCodeHashFingerprint(
+    user.twoFactorBackupCodes,
+    parsed.expectedBackupCodeHashFingerprint,
   );
 
   return toInitialAdminTwoFactorUser(user);
@@ -386,17 +436,16 @@ export async function confirmInitialAdminTwoFactorEnrollment(
 }
 
 export async function recoverInitialAdminTwoFactorHandoff(
-  input: InitialAdminSetupIdentity & { backupCodeHashes: string[] },
+  input: InitialAdminTwoFactorHandoffAuthorization & { backupCodeHashes: string[] },
 ): Promise<SafeInitialSetupUser> {
   const parsed = recoverHandoffSchema.safeParse(input);
   if (!parsed.success) {
-    const identityValid = initialAdminIdentitySchema.safeParse({
+    const authorizationValid = handoffAuthorizationSchema.safeParse({
       userId: input?.userId,
-      email: input?.email,
-      role: input?.role,
+      expectedBackupCodeHashFingerprint: input?.expectedBackupCodeHashFingerprint,
     }).success;
     throw new InitialAdminTwoFactorEnrollmentError(
-      identityValid ? "INVALID_BACKUP_CODES" : "INVALID_SETUP",
+      authorizationValid ? "INVALID_BACKUP_CODES" : "INVALID_SETUP",
     );
   }
 
@@ -407,7 +456,11 @@ export async function recoverInitialAdminTwoFactorHandoff(
           where: { id: parsed.data.userId },
           select: initialAdminTwoFactorSelect,
         }),
-        parsed.data,
+        parsed.data.userId,
+      );
+      await requireMatchingBackupCodeHashFingerprint(
+        currentUser.twoFactorBackupCodes,
+        parsed.data.expectedBackupCodeHashFingerprint,
       );
 
       await transaction.appUser.update({

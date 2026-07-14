@@ -5,11 +5,13 @@ import { z } from "zod";
 
 import {
   type PreparedSessionCookie,
+  createInitialTwoFactorHandoffCapability,
   createInitialTwoFactorSetupCapability,
   getInitialSetupSession,
   getInitialTwoFactorSecretFingerprint,
   getPortalRedirectPath,
   prepareSessionCookie,
+  readInitialTwoFactorHandoffCapability,
   readInitialTwoFactorSetupCapability,
   replaceAuthCookieFamilyWithSession,
 } from "@/lib/auth/session";
@@ -59,6 +61,7 @@ type HandoffRequiredState = {
   phase: "handoff-required";
   success: true;
   message: string;
+  handoffCapability: string;
 };
 
 type CompleteState = {
@@ -81,6 +84,9 @@ const confirmationSchema = z.object({
   code: z.string().regex(/^\d{6}$/),
   setupCapability: z.string().min(1).max(1024),
 });
+const handoffSchema = z.object({
+  handoffCapability: z.string().min(1).max(1024),
+});
 
 const messages = {
   invalidInput: "Invalid input.",
@@ -92,6 +98,7 @@ const messages = {
   beginFailed: "Unable to start two-factor setup. Please try again.",
   confirmFailed: "Unable to enable two-factor authentication. Please try again.",
   recoverFailed: "Unable to complete secure sign-in. Please try again.",
+  handoffInvalid: "Secure sign-in recovery is no longer valid. Please sign in again.",
   handoffRequired:
     "Two-factor authentication is enabled, but secure sign-in and backup-code delivery still need to be completed.",
 } as const;
@@ -104,18 +111,20 @@ function restartRequiredState(): RestartRequiredState {
   return { phase: "restart-required", success: false, message: messages.setupChanged };
 }
 
-function handoffRequiredState(): HandoffRequiredState {
-  return { phase: "handoff-required", success: true, message: messages.handoffRequired };
+function handoffRequiredState(handoffCapability: string): HandoffRequiredState {
+  return {
+    phase: "handoff-required",
+    success: true,
+    message: messages.handoffRequired,
+    handoffCapability,
+  };
 }
 
 function getSetupIdentity(setup: { uid: string; email: string; role: UserRole }) {
   return { userId: setup.uid, email: setup.email, role: setup.role };
 }
 
-function mapEnrollmentError(
-  error: unknown,
-  fallback: string,
-): ErrorState | RestartRequiredState | HandoffRequiredState {
+function mapEnrollmentError(error: unknown, fallback: string): ErrorState | RestartRequiredState {
   if (!(error instanceof InitialAdminTwoFactorEnrollmentError)) {
     return errorState(fallback);
   }
@@ -124,7 +133,10 @@ function mapEnrollmentError(
     return restartRequiredState();
   }
   if (error.code === "ALREADY_ENABLED") {
-    return handoffRequiredState();
+    return errorState(messages.setupInvalid);
+  }
+  if (error.code === "HANDOFF_CHANGED") {
+    return errorState(messages.handoffInvalid);
   }
 
   const message = {
@@ -147,11 +159,12 @@ async function finishHandoff(input: {
   preparedSession: PreparedSessionCookie;
   backupCodes: string[];
   continueHref: string;
+  handoffCapability: string;
 }): Promise<CompleteState | HandoffRequiredState> {
   try {
     await replaceAuthCookieFamilyWithSession(input.preparedSession);
   } catch {
-    return handoffRequiredState();
+    return handoffRequiredState(input.handoffCapability);
   }
 
   return {
@@ -259,14 +272,20 @@ export async function confirmInitialTwoFactorSetupAction(
     }
 
     const continueHref = getPortalRedirectPath(UserRole.ADMIN, setup.nextPath);
-    const preparedSession = await prepareSessionCookie({
-      uid: currentAdmin.id,
-      role: UserRole.ADMIN,
-      email: currentAdmin.email,
-      fullName: currentAdmin.fullName,
-      mfaVerified: true,
-      authMethod: "password",
-    });
+    const [preparedSession, handoffCapability] = await Promise.all([
+      prepareSessionCookie({
+        uid: currentAdmin.id,
+        role: UserRole.ADMIN,
+        email: currentAdmin.email,
+        fullName: currentAdmin.fullName,
+        mfaVerified: true,
+        authMethod: "password",
+      }),
+      createInitialTwoFactorHandoffCapability({
+        uid: currentAdmin.id,
+        backupCodeHashes: backupCodes.hashed,
+      }),
+    ]);
     const admin = await confirmInitialAdminTwoFactorEnrollment({
       ...identity,
       expectedSecret: currentAdmin.twoFactorSecret,
@@ -279,13 +298,14 @@ export async function confirmInitialTwoFactorSetupAction(
       admin.role !== UserRole.ADMIN ||
       !admin.twoFactorEnabled
     ) {
-      return handoffRequiredState();
+      return handoffRequiredState(handoffCapability);
     }
 
     return finishHandoff({
       preparedSession,
       backupCodes: backupCodes.plain,
       continueHref,
+      handoffCapability,
     });
   } catch (error) {
     return mapEnrollmentError(error, messages.confirmFailed);
@@ -298,44 +318,58 @@ export async function recoverInitialTwoFactorHandoffAction(
 ): Promise<InitialTwoFactorActionState> {
   if (!(formData instanceof FormData)) return errorState(messages.invalidInput);
 
-  try {
-    const setup = await getInitialSetupSession();
-    if (!setup) return errorState(messages.setupExpired);
-    if (setup.role !== UserRole.ADMIN) return errorState(messages.setupInvalid);
+  const parsed = handoffSchema.safeParse({
+    handoffCapability: formData.get("handoffCapability"),
+  });
+  if (!parsed.success) return errorState(messages.handoffInvalid);
 
-    const identity = getSetupIdentity(setup);
-    const currentAdmin = await getInitialAdminTwoFactorHandoff(identity);
+  try {
+    const capability = await readInitialTwoFactorHandoffCapability(parsed.data.handoffCapability);
+    if (!capability) return errorState(messages.handoffInvalid);
+
+    const authorization = {
+      userId: capability.uid,
+      expectedBackupCodeHashFingerprint: capability.backupCodeHashFingerprint,
+    };
+    const currentAdmin = await getInitialAdminTwoFactorHandoff(authorization);
     const backupCodes = await generateBackupCodes();
     if (!hasEightUniqueStrings(backupCodes.plain) || !hasEightUniqueStrings(backupCodes.hashed)) {
       return errorState(messages.recoverFailed);
     }
 
-    const continueHref = getPortalRedirectPath(UserRole.ADMIN, setup.nextPath);
-    const preparedSession = await prepareSessionCookie({
-      uid: currentAdmin.id,
-      role: UserRole.ADMIN,
-      email: currentAdmin.email,
-      fullName: currentAdmin.fullName,
-      mfaVerified: true,
-      authMethod: "password",
-    });
+    const continueHref = getPortalRedirectPath(UserRole.ADMIN);
+    const [preparedSession, nextHandoffCapability] = await Promise.all([
+      prepareSessionCookie({
+        uid: currentAdmin.id,
+        role: UserRole.ADMIN,
+        email: currentAdmin.email,
+        fullName: currentAdmin.fullName,
+        mfaVerified: true,
+        authMethod: "password",
+      }),
+      createInitialTwoFactorHandoffCapability({
+        uid: currentAdmin.id,
+        backupCodeHashes: backupCodes.hashed,
+      }),
+    ]);
     const admin = await recoverInitialAdminTwoFactorHandoff({
-      ...identity,
+      ...authorization,
       backupCodeHashes: backupCodes.hashed,
     });
     if (
-      admin.id !== setup.uid ||
-      admin.email !== setup.email ||
+      admin.id !== capability.uid ||
+      admin.email !== currentAdmin.email ||
       admin.role !== UserRole.ADMIN ||
       !admin.twoFactorEnabled
     ) {
-      return handoffRequiredState();
+      return handoffRequiredState(nextHandoffCapability);
     }
 
     return finishHandoff({
       preparedSession,
       backupCodes: backupCodes.plain,
       continueHref,
+      handoffCapability: nextHandoffCapability,
     });
   } catch (error) {
     return mapEnrollmentError(error, messages.recoverFailed);

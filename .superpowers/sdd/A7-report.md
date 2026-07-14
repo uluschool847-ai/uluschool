@@ -225,3 +225,126 @@ Browser workflow record:
 - Reviewed the A7-only diff for identity trust, secret/code/hash leakage, repository pre-transaction validation, audit atomicity, stale capability integrity, cookie-family exclusivity, one-time response state, and compatibility with normal TOTP login.
 - Fixed one self-review finding where a begin action returning `handoff-required` during a stale restart was hidden behind the older restart state; added RED/GREEN component coverage.
 - No unrelated domain, Prisma model, migration, generated artifact, or dependency change is included.
+
+## A7 Re-review Correction Plan
+
+1. Add RED auth/action/repository tests for a separately expiring signed handoff capability, recovery after the original setup cookie expires, bounded malformed capability handling, wrong-user/state rejection, and replay rejection after backup-hash rotation.
+2. Add RED page/component/E2E assertions for unconditional `/portal/login` redirect without the setup cookie, one-time backup-code disappearance at that destination, and suppression of the obsolete restart alert after a distinct fresh setup capability arrives.
+3. Implement a short-lived purpose-bound handoff capability containing only a signed server-derived uid, issued-at/expiry bounds, and the fingerprint of the eight committed backup-code hashes; carry it only in typed action state and hidden form data.
+4. Change recovery to authorize from that capability, precompute the next retry capability, and transactionally require the currently persisted enabled ADMIN backup-hash fingerprint before rotating hashes and writing the sanitized audit. No client user id, URL/cookie/database/audit capability persistence, or browser storage is introduced.
+5. Restore the absent-setup redirect, make the stale UI state self-clearing when a fresh capability is rendered, then run focused A7 suites, the PostgreSQL recovery slice if required, Playwright, lint, typecheck, build, and staged self-review before committing.
+
+## A7 Re-review Correction Results
+
+### Files Changed
+
+- `.superpowers/sdd/A7-report.md`
+- `app/portal/setup/2fa/actions.ts`
+- `app/portal/setup/2fa/page.tsx`
+- `app/portal/setup/2fa/handoff/route.ts`
+- `app/portal/setup/2fa/__tests__/actions.test.ts`
+- `app/portal/setup/2fa/__tests__/page.test.tsx`
+- `app/portal/setup/2fa/handoff/__tests__/route.test.ts`
+- `components/auth/InitialTwoFactorForm.tsx`
+- `components/auth/__tests__/InitialTwoFactorForm.test.tsx`
+- `e2e/portals/initial-admin-2fa.spec.ts`
+- `lib/auth/backup-code-hash.ts`
+- `lib/auth/password.ts`
+- `lib/auth/session.ts`
+- `lib/auth/__tests__/password-hash.test.ts`
+- `lib/auth/__tests__/session-handoff.test.ts`
+- `lib/repositories/account-setup-repository.ts`
+- `lib/repositories/__tests__/account-setup-repository.test.ts`
+- `tests/repositories/account-setup-repository.postgres.test.ts`
+
+No Prisma schema, migration, dependency, or unrelated domain file changed.
+
+### RED Evidence
+
+Initial focused RED:
+
+```powershell
+npx vitest run lib/auth/__tests__/password-hash.test.ts lib/auth/__tests__/session-handoff.test.ts lib/repositories/__tests__/account-setup-repository.test.ts app/portal/setup/2fa/__tests__/actions.test.ts app/portal/setup/2fa/__tests__/page.test.tsx components/auth/__tests__/InitialTwoFactorForm.test.tsx
+```
+
+Result: expected RED, 6 failed files with 17 failed and 99 passed tests. Failures were the missing handoff-capability lifetime/fingerprint API, setup-cookie-independent recovery and replay contracts, unconditional page redirect, and stale-alert suppression. After correcting one omitted page-test mock export, the isolated page test remained behaviorally RED with 2 failed and 12 passed.
+
+Browser RED after restoring the required page redirect:
+
+```powershell
+npm run test:e2e -- e2e/portals/initial-admin-2fa.spec.ts --retries=0 --reporter=line
+```
+
+Result: expected workflow RED after 82 seconds. The backup-code heading was absent because a successful Server Action cookie mutation caused an RSC refresh; the now-correct setup page redirect ran before the one-time action result could mount. This drove the same-origin no-store POST handoff route used by the client for confirmation/recovery.
+
+Route/client RED:
+
+```powershell
+npx vitest run app/portal/setup/2fa/handoff/__tests__/route.test.ts components/auth/__tests__/InitialTwoFactorForm.test.tsx
+```
+
+Result: expected RED, 2 failed files with 1 failed and 10 passed tests: the route module did not exist and the component did not issue the bounded same-origin request.
+
+### GREEN Evidence
+
+Final focused A7 GREEN:
+
+```powershell
+npx vitest run lib/auth/__tests__/password-hash.test.ts lib/auth/__tests__/session-handoff.test.ts lib/repositories/__tests__/account-setup-repository.test.ts app/portal/setup/2fa/__tests__/actions.test.ts app/portal/setup/2fa/__tests__/page.test.tsx components/auth/__tests__/InitialTwoFactorForm.test.tsx app/portal/setup/2fa/handoff/__tests__/route.test.ts
+```
+
+Result: 7 files and 120 tests passed.
+
+Adjacent auth/session GREEN:
+
+```powershell
+npx vitest run lib/auth/__tests__/two-factor.test.ts app/portal/login/verify-2fa app/portal/login/__tests__/login-2fa-actions.test.ts lib/__tests__/session-expiry.test.ts tests/middleware.test.ts tests/middleware-session-expiry.integration.test.ts 'app/(admin)/admin/security/__tests__/actions.test.ts'
+```
+
+Result: 6 files and 86 tests passed. The full unit suite was not rerun because this correction adds a purpose-specific capability without changing the existing session or normal TOTP contracts, as requested.
+
+PostgreSQL integration GREEN:
+
+```powershell
+$env:RUN_A7_POSTGRES_INTEGRATION='1'; npx vitest run tests/repositories/account-setup-repository.postgres.test.ts
+```
+
+Result: 1 file and 5 tests passed against the configured PostgreSQL database. Existing begin/begin, begin/confirm, confirm/confirm, and forced-audit rollback coverage remained green; the added test consumes a committed backup-hash fingerprint once, rejects replay after rotation with `HANDOFF_CHANGED`, retains the first rotation, and writes exactly one sanitized rotation audit.
+
+Browser GREEN:
+
+```powershell
+npm run test:e2e -- e2e/portals/initial-admin-2fa.spec.ts --retries=0 --reporter=line
+```
+
+Result: 1 test passed in 1.4 minutes. It covers invalid TOTP, stale rotation/restart with the obsolete alert removed, successful one-time eight-code display, mutually exclusive cookie families, direct refresh redirect to `/portal/login` with no backup codes, and subsequent normal password plus TOTP login to `/admin`.
+
+Static verification GREEN:
+
+```powershell
+npm run lint
+npm run typecheck
+npm run build
+```
+
+Results: lint passed with 781 files checked; typecheck passed; Next.js 15.5.10 production build passed in 121.8 seconds, generated 88 static pages, and included dynamic `/portal/setup/2fa` and `/portal/setup/2fa/handoff` routes plus middleware.
+
+### Security And Concurrency Reasoning
+
+- Confirmation precomputes both session-cookie material and a separate ten-minute `INITIAL_2FA_HANDOFF` capability before the enrollment transaction. Its `iat` begins at confirmation, so a delivered `handoff-required` state remains usable after the earlier fifteen-minute setup cookie expires.
+- The signed capability has a strict purpose and exact runtime keys, a bounded server-derived uid, a SHA-256 fingerprint of exactly eight unique password-hash-formatted persisted entries, safe integer `iat`/`exp`, a maximum ten-minute lifetime, and a maximum encoded input size of 1024 bytes. Recovery does not read or accept a client user id or require the initial setup cookie.
+- Recovery requires the signed uid to identify an active ADMIN with password setup complete and 2FA enabled. It checks the current backup-hash fingerprint before work and again inside a serializable transaction immediately before rotation and audit. The first rotation changes the fingerprint, making the delivered capability one-time and replay-resistant; malformed, expired, wrong-user, wrong-state, and replay failures are bounded and never echo the capability.
+- A fresh successor capability is precomputed with the fresh hashes before each recovery transaction. If its response cookie replacement fails after rotation, the returned state remains honest and retryable against the new persisted fingerprint.
+- The capability is carried only in the no-store POST response action state and a hidden form field. It is not placed in a URL, cookie, browser storage, database row, audit event, or log. Plain backup codes remain only in process memory and the single successful response; persistence and audits contain neither codes, code hashes, nor the capability.
+- Confirmation/recovery POSTs use a strict same-origin route and bounded response-state parser. This avoids the RSC page refresh that would otherwise execute the required absent-setup-cookie redirect before the one-time codes render. A direct page refresh still redirects unconditionally to `/portal/login`, including when a verified normal ADMIN session exists.
+- Focused PostgreSQL evidence retains the original enrollment races and audit rollback and adds real persisted fingerprint consumption/replay behavior. Unit tests also assert invalid repository boundary input starts no transaction and writes no update or audit.
+
+### Residual Transport Limit
+
+A delivered `handoff-required` response is now recoverable for ten minutes from confirmation even after setup-cookie expiry. A completely lost HTTP response after the database commit is still outside application observability: if neither the response state nor usable cookie headers reach the browser, the browser cannot possess the new handoff capability. Literal response truncation and partially applied deployment-runtime cookie headers still require a staging fault-injection proxy; the local suite proves operation-level cookie faults, not transport delivery. The full workflow also still needs the security-addendum staging gate.
+
+### Self-Review
+
+- Reviewed the complete A7 diff against every re-review finding, identity/role eligibility, capability shape/lifetime, hash validation, replay behavior, transaction/audit atomicity, cookie-family exclusivity, response-state secrecy, direct-refresh behavior, and later normal TOTP compatibility.
+- The browser RED exposed an interaction between Server Action cookie mutation and the required page redirect. The focused same-origin route is intentionally limited to confirmation/recovery and delegates to the same hardened actions; setup begin/restart remains a Server Action.
+- Scanned the A7 implementation for `localStorage`, `sessionStorage`, URL construction, logs, and capability persistence. Capability references are limited to signed helper/action state, the hidden POST field, and focused tests. `git diff --check` passed before final verification.

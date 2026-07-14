@@ -2,6 +2,7 @@ import { UserRole } from "@prisma/client";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { getBackupCodeHashFingerprint } from "@/lib/auth/backup-code-hash";
 import { findUserById } from "@/lib/repositories/user-repository";
 
 const SESSION_COOKIE = "ulu_session";
@@ -10,6 +11,7 @@ const INITIAL_SETUP_COOKIE = "ulu_initial_setup";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
 const ADMIN_PENDING_2FA_DURATION_MS = 1000 * 60 * 10;
 const INITIAL_SETUP_DURATION_MS = 1000 * 60 * 15;
+const INITIAL_TWO_FACTOR_HANDOFF_DURATION_MS = 1000 * 60 * 10;
 const MAX_INITIAL_SETUP_NEXT_PATH_LENGTH = 2048;
 const MAX_INITIAL_TWO_FACTOR_CAPABILITY_LENGTH = 1024;
 
@@ -40,6 +42,14 @@ type InitialTwoFactorSetupCapability = {
   purpose: "INITIAL_2FA_SETUP";
   uid: string;
   secretFingerprint: string;
+  exp: number;
+};
+
+export type InitialTwoFactorHandoffCapability = {
+  purpose: "INITIAL_2FA_HANDOFF";
+  uid: string;
+  backupCodeHashFingerprint: string;
+  iat: number;
   exp: number;
 };
 
@@ -321,6 +331,33 @@ function isInitialTwoFactorSetupCapability(
   );
 }
 
+function isInitialTwoFactorHandoffCapability(
+  payload: unknown,
+): payload is InitialTwoFactorHandoffCapability {
+  return Boolean(
+    isRecord(payload) &&
+      hasOnlyKeys(payload, ["purpose", "uid", "backupCodeHashFingerprint", "iat", "exp"]) &&
+      payload.purpose === "INITIAL_2FA_HANDOFF" &&
+      isNonEmptyString(payload.uid) &&
+      payload.uid === payload.uid.trim() &&
+      payload.uid.length <= 191 &&
+      typeof payload.backupCodeHashFingerprint === "string" &&
+      /^[a-f0-9]{64}$/.test(payload.backupCodeHashFingerprint) &&
+      isValidExpiry(payload.iat) &&
+      isValidExpiry(payload.exp),
+  );
+}
+
+function hasValidInitialTwoFactorHandoffLifetime(payload: InitialTwoFactorHandoffCapability) {
+  const now = Date.now();
+  return (
+    payload.iat <= now &&
+    payload.exp > now &&
+    payload.exp > payload.iat &&
+    payload.exp - payload.iat <= INITIAL_TWO_FACTOR_HANDOFF_DURATION_MS
+  );
+}
+
 export async function getInitialTwoFactorSecretFingerprint(secret: string) {
   if (!/^[A-Z2-7]{16,128}$/.test(secret)) {
     throw new Error("Invalid two-factor setup secret");
@@ -355,6 +392,46 @@ export async function readInitialTwoFactorSetupCapability(
 
   const payload = await decodeSignedPayload(token);
   if (!isInitialTwoFactorSetupCapability(payload) || !isNotExpired(payload.exp)) {
+    return null;
+  }
+
+  return payload;
+}
+
+export async function createInitialTwoFactorHandoffCapability(input: {
+  uid: string;
+  backupCodeHashes: unknown;
+}) {
+  if (!input.uid || input.uid !== input.uid.trim() || input.uid.length > 191) {
+    throw new Error("Invalid initial two-factor handoff identity");
+  }
+
+  const iat = Date.now();
+  return encodeSignedPayload({
+    purpose: "INITIAL_2FA_HANDOFF",
+    uid: input.uid,
+    backupCodeHashFingerprint: await getBackupCodeHashFingerprint(input.backupCodeHashes),
+    iat,
+    exp: iat + INITIAL_TWO_FACTOR_HANDOFF_DURATION_MS,
+  } satisfies InitialTwoFactorHandoffCapability);
+}
+
+export async function readInitialTwoFactorHandoffCapability(
+  token: unknown,
+): Promise<InitialTwoFactorHandoffCapability | null> {
+  if (
+    typeof token !== "string" ||
+    !token ||
+    token.length > MAX_INITIAL_TWO_FACTOR_CAPABILITY_LENGTH
+  ) {
+    return null;
+  }
+
+  const payload = await decodeSignedPayload(token);
+  if (
+    !isInitialTwoFactorHandoffCapability(payload) ||
+    !hasValidInitialTwoFactorHandoffLifetime(payload)
+  ) {
     return null;
   }
 
@@ -426,7 +503,7 @@ export async function replaceAuthCookieFamilyWithSession(prepared: PreparedSessi
     try {
       cookieStore?.delete(SESSION_COOKIE);
     } catch {
-      // Recovery remains authorized by the short-lived signed setup cookie when it survives.
+      // A delivered handoff result carries separate short-lived recovery authorization.
     }
     throw new AuthCookieReplacementError();
   }

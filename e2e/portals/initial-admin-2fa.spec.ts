@@ -75,6 +75,7 @@ test.describe("initial administrator 2FA enrollment", () => {
 
     const currentSecret = (await page.getByTestId("initial-2fa-manual-key").textContent())?.trim();
     expect(currentSecret).toBeTruthy();
+    await expect(page.locator('p[role="alert"]')).toHaveCount(0);
     await page.getByLabel(/authenticator code/i).fill(authenticator.generate(currentSecret ?? ""));
     await page.getByRole("button", { name: /confirm and enable/i }).click();
 
@@ -88,8 +89,7 @@ test.describe("initial administrator 2FA enrollment", () => {
     expect(cookies.some((cookie) => cookie.name === "ulu_admin_2fa_pending")).toBe(false);
 
     await page.reload();
-    await expect(page).toHaveURL(/\/portal\/setup\/2fa/);
-    await expect(page.getByRole("heading", { name: /two-factor setup complete/i })).toBeVisible();
+    await expect(page).toHaveURL(/\/portal\/login(?:\?|$)/);
     await expect(page.getByRole("list", { name: /backup codes/i })).toHaveCount(0);
 
     await page.context().clearCookies();

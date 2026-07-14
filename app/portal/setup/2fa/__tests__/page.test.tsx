@@ -22,21 +22,7 @@ vi.mock("@/lib/repositories/user-repository", () => ({
   findUserForInitialSetup: findUserForInitialSetupMock,
 }));
 vi.mock("@/components/auth/InitialTwoFactorForm", () => ({
-  InitialTwoFactorForm: ({
-    requiresHandoff = false,
-    completedHref,
-  }: {
-    requiresHandoff?: boolean;
-    completedHref?: string;
-  }) => (
-    <div
-      data-completed-href={completedHref}
-      data-handoff={String(requiresHandoff)}
-      data-testid="initial-two-factor-form"
-    >
-      2FA form
-    </div>
-  ),
+  InitialTwoFactorForm: () => <div data-testid="initial-two-factor-form">2FA form</div>,
 }));
 
 type PageModule = typeof import("@/app/portal/setup/2fa/page");
@@ -77,8 +63,6 @@ describe("restricted initial admin 2FA page", () => {
     vi.resetModules();
     vi.clearAllMocks();
     getInitialSetupSessionMock.mockResolvedValue(setupSession());
-    getSessionMock.mockResolvedValue(null);
-    getPortalRedirectPathMock.mockReturnValue("/admin");
     findUserForInitialSetupMock.mockResolvedValue(adminUser());
   });
 
@@ -98,7 +82,7 @@ describe("restricted initial admin 2FA page", () => {
     expect(findUserForInitialSetupMock).not.toHaveBeenCalled();
   });
 
-  it("renders a code-free completion shell for the newly verified normal admin session", async () => {
+  it("redirects a verified normal admin session when the setup cookie is absent", async () => {
     getInitialSetupSessionMock.mockResolvedValueOnce(null);
     getSessionMock.mockResolvedValueOnce({
       purpose: "SESSION",
@@ -111,12 +95,8 @@ describe("restricted initial admin 2FA page", () => {
     });
     const { default: Page } = await loadPage();
 
-    render(await Page());
-
-    expect(screen.getByTestId("initial-two-factor-form")).toHaveAttribute(
-      "data-completed-href",
-      "/admin",
-    );
+    await expect(Page()).rejects.toThrow("REDIRECT:/portal/login");
+    expect(getSessionMock).not.toHaveBeenCalled();
     expect(findUserForInitialSetupMock).not.toHaveBeenCalled();
   });
 
@@ -157,14 +137,11 @@ describe("restricted initial admin 2FA page", () => {
     await expect(Page()).rejects.toThrow("REDIRECT:/portal/setup/password");
   });
 
-  it("renders an explicit recovery handoff for an already-enabled admin with valid setup identity", async () => {
+  it("redirects an already-enabled admin with valid setup identity to login", async () => {
     findUserForInitialSetupMock.mockResolvedValueOnce(adminUser({ twoFactorEnabled: true }));
     const { default: Page } = await loadPage();
 
-    render(await Page());
-
-    expect(screen.getByTestId("initial-two-factor-form")).toHaveAttribute("data-handoff", "true");
-    expect(document.body.textContent).not.toMatch(/server-only-secret|server-only-backup-hash/);
+    await expect(Page()).rejects.toThrow("REDIRECT:/portal/login");
   });
 
   it("renders only the restricted form for the eligible cookie admin", async () => {
@@ -177,7 +154,6 @@ describe("restricted initial admin 2FA page", () => {
       screen.getByRole("heading", { name: /secure your administrator account/i }),
     ).toBeTruthy();
     expect(screen.getByTestId("initial-two-factor-form")).toBeTruthy();
-    expect(screen.getByTestId("initial-two-factor-form")).toHaveAttribute("data-handoff", "false");
     expect(document.body.textContent).not.toMatch(/server-only-secret|server-only-backup-hash/);
   });
 });

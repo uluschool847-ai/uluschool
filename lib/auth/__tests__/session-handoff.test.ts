@@ -1,5 +1,5 @@
 import { UserRole } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const cookieSetMock = vi.hoisted(() => vi.fn());
 const cookieDeleteMock = vi.hoisted(() => vi.fn());
@@ -13,6 +13,13 @@ type SessionModule = typeof import("@/lib/auth/session");
 
 async function loadSession() {
   return import("@/lib/auth/session") as Promise<SessionModule>;
+}
+
+function validBackupCodeHashes(marker: string) {
+  return Array.from({ length: 8 }, (_, index) => {
+    const nibble = ((index % 9) + 1).toString();
+    return `${marker.repeat(31)}${nibble}:${nibble.repeat(128)}`;
+  });
 }
 
 describe("initial 2FA signed setup capability", () => {
@@ -52,6 +59,77 @@ describe("initial 2FA signed setup capability", () => {
       readInitialTwoFactorSetupCapability(`${tamperedPayload}.${signature}`),
     ).resolves.toBeNull();
     await expect(readInitialTwoFactorSetupCapability("x".repeat(1025))).resolves.toBeNull();
+  });
+});
+
+describe("initial 2FA post-commit handoff capability", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-14T10:00:00.000Z"));
+    cookiesMock.mockResolvedValue({ set: cookieSetMock, delete: cookieDeleteMock });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("starts a separate bounded lifetime at confirmation and outlives near-expiry setup", async () => {
+    const {
+      createInitialTwoFactorHandoffCapability,
+      createInitialTwoFactorSetupCapability,
+      readInitialTwoFactorHandoffCapability,
+      readInitialTwoFactorSetupCapability,
+    } = await loadSession();
+    const setupCapability = await createInitialTwoFactorSetupCapability({
+      uid: "admin-1",
+      secret: "JBSWY3DPEHPK3PXP",
+    });
+
+    vi.advanceTimersByTime(14 * 60_000 + 59_000);
+    const handoffCapability = await createInitialTwoFactorHandoffCapability({
+      uid: "admin-1",
+      backupCodeHashes: validBackupCodeHashes("a"),
+    });
+    vi.advanceTimersByTime(2_000);
+
+    await expect(readInitialTwoFactorSetupCapability(setupCapability)).resolves.toBeNull();
+    const handoff = await readInitialTwoFactorHandoffCapability(handoffCapability);
+    expect(handoff).toMatchObject({
+      purpose: "INITIAL_2FA_HANDOFF",
+      uid: "admin-1",
+      backupCodeHashFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(handoffCapability.length).toBeLessThanOrEqual(1024);
+    expect((handoff?.exp ?? 0) - (handoff?.iat ?? 0)).toBeLessThanOrEqual(10 * 60_000);
+  });
+
+  it("rejects expired, wrong-purpose, tampered, oversized, and malformed handoff input", async () => {
+    const {
+      createInitialTwoFactorHandoffCapability,
+      createInitialTwoFactorSetupCapability,
+      readInitialTwoFactorHandoffCapability,
+    } = await loadSession();
+    const capability = await createInitialTwoFactorHandoffCapability({
+      uid: "admin-1",
+      backupCodeHashes: validBackupCodeHashes("b"),
+    });
+    const setupCapability = await createInitialTwoFactorSetupCapability({
+      uid: "admin-1",
+      secret: "JBSWY3DPEHPK3PXP",
+    });
+    const [payload, signature] = capability.split(".");
+
+    await expect(
+      readInitialTwoFactorHandoffCapability(`${payload.slice(0, -2)}AA.${signature}`),
+    ).resolves.toBeNull();
+    await expect(readInitialTwoFactorHandoffCapability(setupCapability)).resolves.toBeNull();
+    await expect(readInitialTwoFactorHandoffCapability("x".repeat(1025))).resolves.toBeNull();
+    await expect(readInitialTwoFactorHandoffCapability("not-signed")).resolves.toBeNull();
+
+    vi.advanceTimersByTime(10 * 60_000 + 1);
+    await expect(readInitialTwoFactorHandoffCapability(capability)).resolves.toBeNull();
   });
 });
 

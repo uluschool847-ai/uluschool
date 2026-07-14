@@ -8,8 +8,6 @@ import { useFormStatus } from "react-dom";
 import {
   type InitialTwoFactorActionState,
   beginInitialTwoFactorSetupAction,
-  confirmInitialTwoFactorSetupAction,
-  recoverInitialTwoFactorHandoffAction,
 } from "@/app/portal/setup/2fa/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +24,102 @@ type CopyFeedback = {
   value: string;
   status: "copied" | "error";
 };
+
+type HandoffOperation = "confirm" | "recover";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isBoundedString(value: unknown, maxLength: number): value is string {
+  return typeof value === "string" && value.length <= maxLength;
+}
+
+function isInitialTwoFactorActionState(value: unknown): value is InitialTwoFactorActionState {
+  if (
+    !isRecord(value) ||
+    !isBoundedString(value.message, 500) ||
+    typeof value.phase !== "string" ||
+    typeof value.success !== "boolean"
+  ) {
+    return false;
+  }
+
+  switch (value.phase) {
+    case "idle":
+      return value.success === false && value.message === "";
+    case "error":
+    case "restart-required":
+      return value.success === false;
+    case "setup":
+      return (
+        value.success === true &&
+        isBoundedString(value.setupSecret, 128) &&
+        isBoundedString(value.otpAuthUrl, 2048) &&
+        isBoundedString(value.setupCapability, 1024)
+      );
+    case "handoff-required":
+      return value.success === true && isBoundedString(value.handoffCapability, 1024);
+    case "complete":
+      return (
+        value.success === true &&
+        Array.isArray(value.backupCodes) &&
+        value.backupCodes.length === 8 &&
+        value.backupCodes.every((code) => isBoundedString(code, 128) && code.length > 0) &&
+        new Set(value.backupCodes).size === value.backupCodes.length &&
+        isBoundedString(value.continueHref, 2048) &&
+        value.continueHref.startsWith("/") &&
+        !value.continueHref.startsWith("//")
+      );
+    default:
+      return false;
+  }
+}
+
+async function submitHandoffOperation(
+  operation: HandoffOperation,
+  _previousState: InitialTwoFactorActionState,
+  formData: FormData,
+): Promise<InitialTwoFactorActionState> {
+  const requestBody = new FormData();
+  for (const [key, value] of formData.entries()) {
+    requestBody.append(key, value);
+  }
+  requestBody.set("operation", operation);
+
+  try {
+    const response = await fetch("/portal/setup/2fa/handoff", {
+      method: "POST",
+      body: requestBody,
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      return { phase: "error", success: false, message: "Unable to continue securely." };
+    }
+
+    const state: unknown = await response.json();
+    return isInitialTwoFactorActionState(state)
+      ? state
+      : { phase: "error", success: false, message: "Unable to continue securely." };
+  } catch {
+    return { phase: "error", success: false, message: "Unable to continue securely." };
+  }
+}
+
+function confirmInitialTwoFactorSetup(
+  previousState: InitialTwoFactorActionState,
+  formData: FormData,
+) {
+  return submitHandoffOperation("confirm", previousState, formData);
+}
+
+function recoverInitialTwoFactorHandoff(
+  previousState: InitialTwoFactorActionState,
+  formData: FormData,
+) {
+  return submitHandoffOperation("recover", previousState, formData);
+}
 
 function SubmitButton({ label, pendingLabel }: { label: string; pendingLabel: string }) {
   const { pending } = useFormStatus();
@@ -74,20 +168,11 @@ function CopyButton({ label, onCopy }: { label: string; onCopy: () => void }) {
   );
 }
 
-export function InitialTwoFactorForm({
-  requiresHandoff = false,
-  completedHref,
-}: {
-  requiresHandoff?: boolean;
-  completedHref?: string;
-}) {
+export function InitialTwoFactorForm() {
   const [setupState, beginSetup] = useActionState(beginInitialTwoFactorSetupAction, initialState);
-  const [confirmState, confirmSetup] = useActionState(
-    confirmInitialTwoFactorSetupAction,
-    initialState,
-  );
+  const [confirmState, confirmSetup] = useActionState(confirmInitialTwoFactorSetup, initialState);
   const [recoveryState, recoverHandoff] = useActionState(
-    recoverInitialTwoFactorHandoffAction,
+    recoverInitialTwoFactorHandoff,
     initialState,
   );
   const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
@@ -166,18 +251,12 @@ export function InitialTwoFactorForm({
         ? confirmState
         : setupState.phase === "handoff-required"
           ? setupState
-          : requiresHandoff
-            ? ({
-                phase: "handoff-required",
-                success: true,
-                message:
-                  "Two-factor authentication is enabled, but secure sign-in and backup-code delivery still need to be completed.",
-              } satisfies InitialTwoFactorActionState)
-            : null;
+          : null;
 
   if (handoffState) {
     return (
       <form action={recoverHandoff} className="grid gap-3">
+        <input type="hidden" name="handoffCapability" value={handoffState.handoffCapability} />
         <ActionMessage state={handoffState} />
         <SubmitButton label="Finish secure sign-in" pendingLabel="Finishing secure sign-in..." />
       </form>
@@ -198,20 +277,6 @@ export function InitialTwoFactorForm({
         <ActionMessage state={confirmState} />
         <SubmitButton label="Start setup again" pendingLabel="Restarting setup..." />
       </form>
-    );
-  }
-
-  if (completedHref) {
-    return (
-      <div className="grid gap-4">
-        <h2 className="font-heading text-lg font-semibold">Two-Factor Setup Complete</h2>
-        <p className="text-sm text-muted-foreground">
-          Backup codes are shown only once. Continue with the verified administrator session.
-        </p>
-        <Button asChild className="w-fit">
-          <Link href={completedHref}>Continue to admin</Link>
-        </Button>
-      </div>
     );
   }
 
@@ -274,7 +339,7 @@ export function InitialTwoFactorForm({
               />
             </div>
             <SubmitButton label="Confirm and enable" pendingLabel="Enabling..." />
-            <ActionMessage state={confirmState} />
+            {!hasFreshRestartSetup && <ActionMessage state={confirmState} />}
           </form>
         </div>
       )}
