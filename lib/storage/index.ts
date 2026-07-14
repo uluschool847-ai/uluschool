@@ -14,7 +14,7 @@ function resolveStorageDriver() {
 
 export function createStorageService(): StorageService {
   const driver = resolveStorageDriver();
-  if (driver === "local" && process.env.NODE_ENV === "production") {
+  if (driver === "local" && (process.env.NODE_ENV ?? "development") === "production") {
     throw new Error("Local storage is unavailable in production without authorized delivery");
   }
   const cached = serviceCache.get(driver);
