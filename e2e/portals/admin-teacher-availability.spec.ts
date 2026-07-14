@@ -1,7 +1,6 @@
+import { createSessionToken } from "@/e2e/helpers/session";
 import { type Page, expect, test } from "@playwright/test";
 import { ClassGroupStatus, PrismaClient, UserRole } from "@prisma/client";
-
-const AUTH_SECRET = process.env.AUTH_SESSION_SECRET ?? "dev-only-auth-session-secret-please-change";
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 const COOKIE_DOMAIN = new URL(BASE_URL).hostname;
 const prisma = new PrismaClient();
@@ -54,49 +53,6 @@ function datePart(date: Date) {
 
 function utcDateTimeInput(date: Date, hour: number, minute = 0) {
   return `${datePart(date)}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-}
-
-function toBase64Url(input: string) {
-  return Buffer.from(input, "binary")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-async function signPayload(payloadBase64: string) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(AUTH_SECRET),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payloadBase64));
-  const signatureString = Array.from(new Uint8Array(signature))
-    .map((byte) => String.fromCharCode(byte))
-    .join("");
-  return toBase64Url(signatureString);
-}
-
-async function createSessionToken(input: {
-  uid: string;
-  role: UserRole;
-  email: string;
-  fullName: string;
-}) {
-  const payloadBase64 = toBase64Url(
-    JSON.stringify({
-      authMethod: "password",
-      email: input.email,
-      exp: Date.now() + 1000 * 60 * 60,
-      fullName: input.fullName,
-      mfaVerified: true,
-      role: input.role,
-      uid: input.uid,
-    }),
-  );
-  return `${payloadBase64}.${await signPayload(payloadBase64)}`;
 }
 
 async function setPortalSession(

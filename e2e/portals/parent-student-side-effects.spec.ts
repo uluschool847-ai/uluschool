@@ -1,10 +1,9 @@
 import { type BrowserContext, expect, test } from "@playwright/test";
 import { StudentLearningStatus, UserRole } from "@prisma/client";
 
+import { createSessionToken } from "@/e2e/helpers/session";
 import { hashPassword } from "@/lib/auth/password";
 import { prisma } from "@/lib/prisma";
-
-const AUTH_SECRET = process.env.AUTH_SESSION_SECRET ?? "dev-only-auth-session-secret-please-change";
 const PASSWORD =
   process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 const USER_EMAIL_PREFIX = "qa.portal-side-effects.";
@@ -12,49 +11,6 @@ const CLASS_TITLE_PREFIX = "QA Portal Side Effects";
 
 function testMeetUrl(path: string) {
   return `https://meet.example.com/${path}`;
-}
-
-function toBase64Url(input: string) {
-  return Buffer.from(input, "binary")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-async function signPayload(payloadBase64: string) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(AUTH_SECRET),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payloadBase64));
-  const signatureString = Array.from(new Uint8Array(signature))
-    .map((byte) => String.fromCharCode(byte))
-    .join("");
-  return toBase64Url(signatureString);
-}
-
-async function createSessionToken(input: {
-  uid: string;
-  role: UserRole;
-  email: string;
-  fullName: string;
-}) {
-  const payloadBase64 = toBase64Url(
-    JSON.stringify({
-      uid: input.uid,
-      role: input.role,
-      email: input.email,
-      fullName: input.fullName,
-      exp: Date.now() + 1000 * 60 * 60,
-      mfaVerified: true,
-      authMethod: "password",
-    }),
-  );
-  return `${payloadBase64}.${await signPayload(payloadBase64)}`;
 }
 
 async function setPortalSession(
