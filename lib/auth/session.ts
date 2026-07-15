@@ -9,6 +9,7 @@ const SESSION_COOKIE = "ulu_session";
 const ADMIN_PENDING_2FA_COOKIE = "ulu_admin_2fa_pending";
 const INITIAL_SETUP_COOKIE = "ulu_initial_setup";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
+const SESSION_SECURITY_VERSION = 2 as const;
 const INITIAL_SETUP_DURATION_MS = 1000 * 60 * 15;
 const INITIAL_TWO_FACTOR_HANDOFF_DURATION_MS = 1000 * 60 * 10;
 const MAX_INITIAL_SETUP_NEXT_PATH_LENGTH = 2048;
@@ -61,6 +62,7 @@ export class AuthCookieReplacementError extends Error {
 
 export type SessionPayload = {
   purpose: "SESSION";
+  version: typeof SESSION_SECURITY_VERSION;
   uid: string;
   role: UserRole;
   email: string;
@@ -266,6 +268,7 @@ function isSessionPayload(payload: unknown): payload is SessionPayload {
     isRecord(payload) &&
       hasOnlyKeys(payload, [
         "purpose",
+        "version",
         "uid",
         "role",
         "email",
@@ -275,6 +278,7 @@ function isSessionPayload(payload: unknown): payload is SessionPayload {
         "authMethod",
       ]) &&
       payload.purpose === "SESSION" &&
+      payload.version === SESSION_SECURITY_VERSION &&
       isNonEmptyString(payload.uid) &&
       isUserRole(payload.role) &&
       isNonEmptyString(payload.email) &&
@@ -468,6 +472,7 @@ export function getPortalRedirectPath(role: UserRole, nextPath?: string | null) 
 export async function prepareSessionCookie(input: SessionInput): Promise<PreparedSessionCookie> {
   const payload: SessionPayload = {
     purpose: "SESSION",
+    version: SESSION_SECURITY_VERSION,
     uid: input.uid,
     role: input.role,
     email: input.email,
@@ -566,14 +571,6 @@ export async function clearInitialSetupSession() {
   cookieStore.delete(INITIAL_SETUP_COOKIE);
 }
 
-function deleteSessionCookieIfWritable(cookieStore: Awaited<ReturnType<typeof cookies>>) {
-  try {
-    cookieStore.delete(SESSION_COOKIE);
-  } catch {
-    // Layouts and other Server Component reads can detect invalid sessions but cannot mutate cookies.
-  }
-}
-
 async function revalidateSessionPayload(payload: SessionPayload): Promise<SessionPayload | null> {
   const dbUser = await findUserById(payload.uid);
   if (!dbUser?.isActive || dbUser.role !== payload.role) {
@@ -597,18 +594,15 @@ async function readSessionFromCookie(): Promise<SessionReadResult> {
 
   const payload = await decodeSignedPayload(token);
   if (!isSessionPayload(payload)) {
-    deleteSessionCookieIfWritable(cookieStore);
     return { session: null, reason: "invalid" };
   }
 
   if (!isNotExpired(payload.exp)) {
-    deleteSessionCookieIfWritable(cookieStore);
     return { session: null, reason: "expired" };
   }
 
   const session = await revalidateSessionPayload(payload);
   if (!session) {
-    deleteSessionCookieIfWritable(cookieStore);
     return { session: null, reason: "invalid" };
   }
 
@@ -698,13 +692,16 @@ export async function createAdminPendingTwoFactor(input: {
 export async function getAdminPendingTwoFactor(): Promise<PendingTwoFactorPayload | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(ADMIN_PENDING_2FA_COOKIE)?.value;
-  if (!token) {
-    return null;
-  }
+  return verifyAdminPendingTwoFactorToken(token);
+}
 
+/** Lightweight pending-token verification for Middleware (Edge Runtime). */
+export async function verifyAdminPendingTwoFactorToken(
+  token: string | undefined,
+): Promise<PendingTwoFactorPayload | null> {
+  if (!token) return null;
   const payload = await decodeSignedPayload(token);
   if (!isPendingTwoFactorPayload(payload) || !isNotExpired(payload.exp)) {
-    cookieStore.delete(ADMIN_PENDING_2FA_COOKIE);
     return null;
   }
   return payload;

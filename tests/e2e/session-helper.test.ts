@@ -1,7 +1,7 @@
 import { UserRole } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createSessionToken } from "@/e2e/helpers/session";
+import { createLegacySessionToken, createSessionToken } from "@/e2e/helpers/session";
 import { validateSession, verifySessionToken } from "@/lib/auth/session";
 
 const TEST_SECRET = "test-auth-session-secret-at-least-32-chars";
@@ -30,6 +30,7 @@ describe("E2E session helper", () => {
 
     await expect(verifySessionToken(token)).resolves.toEqual({
       purpose: "SESSION",
+      version: 2,
       uid: "teacher-1",
       role: UserRole.TEACHER,
       email: "teacher@example.com",
@@ -39,6 +40,25 @@ describe("E2E session helper", () => {
       authMethod: "password",
     });
   });
+
+  it.each([
+    ["password", UserRole.TEACHER],
+    ["sso", UserRole.ADMIN],
+  ] as const)(
+    "rejects a signed legacy %s session without the security version",
+    async (authMethod, role) => {
+      const token = await createLegacySessionToken({
+        uid: role === UserRole.ADMIN ? "admin-1" : "teacher-1",
+        role,
+        email: role === UserRole.ADMIN ? "admin@example.com" : "teacher@example.com",
+        fullName: role === UserRole.ADMIN ? "Admin One" : "Teacher One",
+        mfaVerified: true,
+        authMethod,
+      });
+
+      await expect(verifySessionToken(token)).resolves.toBeNull();
+    },
+  );
 
   it("is rejected by server validation at exact expiry while middleware can classify it", async () => {
     const token = await createSessionToken({

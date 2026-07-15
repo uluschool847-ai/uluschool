@@ -8,6 +8,7 @@ import { requireRole } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 import { createUser, toggleUserStatus, updateUserRole } from "@/lib/repositories/portal-repository";
+import { MAX_MAILBOX_ADDRESS_LENGTH } from "@/lib/validations/auth";
 
 function safeAppUserSnapshot(user: {
   id: string;
@@ -26,7 +27,7 @@ function safeAppUserSnapshot(user: {
 }
 
 const createUserInputSchema = z.object({
-  email: z.string().trim().email(),
+  email: z.string().trim().max(MAX_MAILBOX_ADDRESS_LENGTH).email(),
   fullName: z.string().trim().min(2).max(120),
   role: z.nativeEnum(UserRole),
   phoneWhatsapp: z.string().trim().min(7).max(32).optional().or(z.literal("")),

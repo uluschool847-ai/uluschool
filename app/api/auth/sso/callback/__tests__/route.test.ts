@@ -26,7 +26,7 @@ vi.mock("@/lib/repositories/admin-two-factor-challenge-repository", () => ({
   startAdminTwoFactorChallenge: startAdminTwoFactorChallengeMock,
 }));
 
-import { GET } from "./route";
+import { GET } from "../route";
 
 const SSO_SECRET = "local-sso-shared-secret";
 const ADMIN_EMAIL = "sso.admin@example.com";
@@ -232,6 +232,10 @@ describe("admin SSO callback route", () => {
       action: "ADMIN_SSO_LOGIN_PENDING_2FA",
       targetType: "Auth",
       targetId: "admin-1",
+      meta: {
+        authMethod: "sso",
+        authenticationStage: "pending_two_factor",
+      },
     });
     expect(JSON.stringify(createAdminAuditLogMock.mock.calls)).not.toMatch(
       /shared|secret|sig|signature|token/i,

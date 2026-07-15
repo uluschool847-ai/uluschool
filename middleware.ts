@@ -1,7 +1,12 @@
 import { UserRole } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { getPortalDashboardPath, getPortalLoginPath, verifySessionToken } from "./lib/auth/session";
+import {
+  getPortalDashboardPath,
+  getPortalLoginPath,
+  verifyAdminPendingTwoFactorToken,
+  verifySessionToken,
+} from "./lib/auth/session";
 
 const SESSION_COOKIE = "ulu_session";
 const ADMIN_PENDING_2FA_COOKIE = "ulu_admin_2fa_pending";
@@ -89,6 +94,11 @@ export async function middleware(request: NextRequest) {
 
   const response = NextResponse.next();
   setAttributionCookies(request, response);
+  const pendingAdminTwoFactorToken = request.cookies.get(ADMIN_PENDING_2FA_COOKIE)?.value;
+  const pendingAdminTwoFactor = await verifyAdminPendingTwoFactorToken(pendingAdminTwoFactorToken);
+  if (pendingAdminTwoFactorToken && !pendingAdminTwoFactor) {
+    response.cookies.delete(ADMIN_PENDING_2FA_COOKIE);
+  }
 
   // Define active route policies
   const isPortalLoginPath = matchesPrefix(pathname, "/portal/login");
@@ -131,9 +141,7 @@ export async function middleware(request: NextRequest) {
     }
     if (status === 401) {
       if (isAdminPath) {
-        const hasPendingAdminTwoFactor = Boolean(
-          request.cookies.get(ADMIN_PENDING_2FA_COOKIE)?.value,
-        );
+        const hasPendingAdminTwoFactor = Boolean(pendingAdminTwoFactor);
         if (hasPendingAdminTwoFactor) {
           const nextPath = `${pathname}${request.nextUrl.search}`;
           const nextParam = nextPath ? `?next=${encodeURIComponent(nextPath)}` : "";

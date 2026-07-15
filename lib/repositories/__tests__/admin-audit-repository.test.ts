@@ -212,6 +212,43 @@ describe("admin-audit-repository", () => {
     );
   });
 
+  it("centrally bounds auth identifiers, user agents, and nested string metadata", async () => {
+    const longIdentifier = "i".repeat(400);
+    const longUserAgent = "u".repeat(400);
+    const longMetadata = "m".repeat(400);
+    prismaMock.adminAuditLog.create.mockResolvedValueOnce({
+      id: "audit-bounded",
+      adminUserId: "admin-1",
+      action: "ADMIN_LOGIN_PASSWORD_VERIFIED",
+      targetType: "AUTH",
+      targetId: null,
+      meta: {},
+      createdAt: new Date("2026-07-15T10:00:00.000Z"),
+    });
+
+    const { createLog } = await loadAuditRepository();
+    await createLog({
+      actorId: "admin-1",
+      actionType: "ADMIN_LOGIN_PASSWORD_VERIFIED",
+      entityType: "AUTH",
+      metadata: {
+        identifier: longIdentifier,
+        userAgent: longUserAgent,
+        nested: { authenticationStage: longMetadata },
+      },
+    });
+
+    expect(prismaMock.adminAuditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        meta: {
+          identifier: longIdentifier.slice(0, 256),
+          userAgent: longUserAgent.slice(0, 256),
+          nested: { authenticationStage: longMetadata.slice(0, 256) },
+        },
+      }),
+    });
+  });
+
   it("createLog allows empty metadata for simple audit events", async () => {
     prismaMock.adminAuditLog.create.mockResolvedValueOnce({
       id: "audit-2",

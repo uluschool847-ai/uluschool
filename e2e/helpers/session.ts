@@ -10,6 +10,11 @@ export type E2ESessionInput = {
   mfaVerified?: boolean;
 };
 
+export type E2ELegacySessionInput = E2ESessionInput & {
+  authMethod: "password" | "sso";
+  version?: 1;
+};
+
 function toBase64Url(value: string) {
   return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
@@ -33,18 +38,48 @@ async function signPayload(payloadBase64: string) {
   return toBase64Url(signatureString);
 }
 
-export async function createSessionToken(input: E2ESessionInput): Promise<string> {
-  const payloadBase64 = toBase64Url(
-    JSON.stringify({
-      purpose: "SESSION",
-      uid: input.uid,
-      role: input.role,
-      email: input.email,
-      fullName: input.fullName,
-      exp: Date.now() + SESSION_DURATION_MS,
-      mfaVerified: input.mfaVerified ?? true,
-      authMethod: "password",
-    }),
-  );
+async function createSignedToken(payload: Record<string, unknown>) {
+  const payloadBase64 = toBase64Url(JSON.stringify(payload));
   return `${payloadBase64}.${await signPayload(payloadBase64)}`;
+}
+
+export async function createSessionToken(input: E2ESessionInput): Promise<string> {
+  return createSignedToken({
+    purpose: "SESSION",
+    version: 2,
+    uid: input.uid,
+    role: input.role,
+    email: input.email,
+    fullName: input.fullName,
+    exp: Date.now() + SESSION_DURATION_MS,
+    mfaVerified: input.mfaVerified ?? true,
+    authMethod: "password",
+  });
+}
+
+export async function createLegacySessionToken(input: E2ELegacySessionInput): Promise<string> {
+  return createSignedToken({
+    purpose: "SESSION",
+    ...(input.version !== undefined ? { version: input.version } : {}),
+    uid: input.uid,
+    role: input.role,
+    email: input.email,
+    fullName: input.fullName,
+    exp: Date.now() + SESSION_DURATION_MS,
+    mfaVerified: input.mfaVerified ?? true,
+    authMethod: input.authMethod,
+  });
+}
+
+export async function createAdminPendingTwoFactorToken(input: {
+  exp: number;
+  legacy?: boolean;
+}): Promise<string> {
+  return createSignedToken({
+    purpose: "ADMIN_PENDING_2FA",
+    uid: "admin-legacy",
+    email: "admin-legacy@example.com",
+    ...(!input.legacy ? { challengeId: "challenge-legacy", authMethod: "password" } : {}),
+    exp: input.exp,
+  });
 }

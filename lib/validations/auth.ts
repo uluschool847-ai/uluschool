@@ -1,7 +1,12 @@
 import { z } from "zod";
 
+export const MAX_MAILBOX_ADDRESS_LENGTH = 254;
+
 export const loginSchema = z.object({
-  email: z.string().email("Enter a valid email address."),
+  email: z
+    .string()
+    .max(MAX_MAILBOX_ADDRESS_LENGTH, "Email address is too long.")
+    .email("Enter a valid email address."),
   password: z.string().min(8, "Password is required."),
 });
 

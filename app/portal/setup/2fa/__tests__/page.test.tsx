@@ -86,6 +86,7 @@ describe("restricted initial admin 2FA page", () => {
     getInitialSetupSessionMock.mockResolvedValueOnce(null);
     getSessionMock.mockResolvedValueOnce({
       purpose: "SESSION",
+      version: 2,
       uid: "admin-1",
       email: "admin@example.com",
       role: UserRole.ADMIN,

@@ -374,9 +374,45 @@ describe("session validation and expiry handling", () => {
       const token = await createSignedSessionToken({ uid: "teacher-1", role: UserRole.TEACHER });
 
       await expect(sessionModule.verifySessionToken(token)).resolves.toEqual(
-        expect.objectContaining({ purpose: "SESSION", uid: "teacher-1" }),
+        expect.objectContaining({ purpose: "SESSION", version: 2, uid: "teacher-1" }),
       );
     });
+
+    it.each([
+      ["legacy password session", UserRole.TEACHER, "password", undefined],
+      ["legacy SSO MFA-bypass session", UserRole.ADMIN, "sso", undefined],
+      ["older versioned password session", UserRole.TEACHER, "password", 1],
+    ] as const)(
+      "rejects a signed %s in backend and lightweight readers",
+      async (_case, role, authMethod, version) => {
+        const uid = role === UserRole.ADMIN ? "admin-1" : "teacher-1";
+        const email = role === UserRole.ADMIN ? "admin@example.com" : "teacher@example.com";
+        const token = await createSignedTestPayload({
+          purpose: "SESSION",
+          ...(version !== undefined ? { version } : {}),
+          uid,
+          role,
+          email,
+          fullName: null,
+          exp: Date.now() + 60_000,
+          mfaVerified: true,
+          authMethod,
+        });
+        setDbUser(makeDbUser({ id: uid, email, role }));
+        cookieGetMock.mockImplementation((name: string) =>
+          name === "ulu_session" ? { value: token } : undefined,
+        );
+
+        await expect(sessionModule.getSession()).resolves.toBeNull();
+        await expect(sessionModule.verifySessionToken(token)).resolves.toBeNull();
+        await expect(sessionModule.validateSession(token)).resolves.toEqual({
+          valid: false,
+          expired: false,
+          reason: "Invalid session",
+        });
+        expect(findUserByIdMock).not.toHaveBeenCalled();
+      },
+    );
 
     it("rejects a setup token in every normal-session reader before DB revalidation", async () => {
       setDbUser(makeDbUser());
@@ -400,8 +436,12 @@ describe("session validation and expiry handling", () => {
       cookieGetMock.mockImplementation((name: string) =>
         name === "ulu_admin_2fa_pending" ? { value: token } : undefined,
       );
+      cookieDeleteMock.mockImplementation(() => {
+        throw new Error("Server Component cookies are read-only");
+      });
 
       await expect(sessionModule.getAdminPendingTwoFactor()).resolves.toBeNull();
+      expect(cookieDeleteMock).not.toHaveBeenCalled();
     });
 
     it("purpose-binds pending-admin tokens and rejects them as normal or setup sessions", async () => {
@@ -459,10 +499,13 @@ describe("session validation and expiry handling", () => {
       vi.setSystemTime(new Date("2026-07-14T10:00:00.000Z"));
       const token = await createSignedPendingTwoFactorToken();
       cookieGetMock.mockReturnValue({ value: token });
+      cookieDeleteMock.mockImplementation(() => {
+        throw new Error("Server Component cookies are read-only");
+      });
       vi.advanceTimersByTime(10 * 60 * 1000);
 
       await expect(sessionModule.getAdminPendingTwoFactor()).resolves.toBeNull();
-      expect(cookieDeleteMock).toHaveBeenCalledWith("ulu_admin_2fa_pending");
+      expect(cookieDeleteMock).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -478,6 +521,7 @@ describe("session validation and expiry handling", () => {
     ])("rejects a signed normal-session payload with %s", async (_case, overrides) => {
       const token = await createSignedTestPayload({
         purpose: "SESSION",
+        version: 2,
         uid: "teacher-1",
         role: UserRole.TEACHER,
         email: "teacher@example.com",
@@ -620,29 +664,18 @@ describe("session validation and expiry handling", () => {
     );
   });
 
-  it("clears ulu_session for an invalid protected session", async () => {
+  it("does not mutate ulu_session while reading an invalid protected session", async () => {
     const dbUser = makeDbUser({ isActive: false });
     setDbUser(dbUser);
     const token = await createSignedSessionToken({ uid: dbUser.id, role: UserRole.TEACHER });
     cookieGetMock.mockReturnValue({ value: token });
+    cookieDeleteMock.mockImplementation(() => {
+      throw new Error("Server Component cookies are read-only");
+    });
 
     await expect(sessionModule.requireRole([UserRole.TEACHER])).rejects.toThrow();
 
-    expect(cookieDeleteMock).toHaveBeenCalledWith("ulu_session");
-  });
-
-  it("still redirects invalid sessions when the current render context cannot clear cookies", async () => {
-    const dbUser = makeDbUser({ isActive: false });
-    setDbUser(dbUser);
-    const token = await createSignedSessionToken({ uid: dbUser.id, role: UserRole.TEACHER });
-    cookieGetMock.mockReturnValue({ value: token });
-    cookieDeleteMock.mockImplementationOnce(() => {
-      throw new Error("Cookies can only be modified in a Server Action or Route Handler.");
-    });
-
-    await expect(sessionModule.requireRole([UserRole.TEACHER])).rejects.toThrow(
-      "REDIRECT:/portal/login?reason=invalid",
-    );
+    expect(cookieDeleteMock).not.toHaveBeenCalled();
   });
 
   it("redirects invalid protected sessions to the invalid-session login reason", async () => {

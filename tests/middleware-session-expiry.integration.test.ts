@@ -2,6 +2,8 @@ import { UserRole } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createLegacySessionToken } from "@/e2e/helpers/session";
+
 const cookieSetMock = vi.hoisted(() => vi.fn());
 
 vi.mock("next/headers", () => ({
@@ -23,8 +25,8 @@ vi.mock("next/server", () => ({
 import { createSession, verifySessionToken } from "@/lib/auth/session";
 import { middleware } from "../middleware";
 
-function createProtectedRequest(token: string): NextRequest {
-  const url = new URL("https://school.test/portal/teacher");
+function createProtectedRequest(token: string, path = "/portal/teacher"): NextRequest {
+  const url = new URL(path, "https://school.test");
   return {
     nextUrl: url,
     url: url.href,
@@ -68,4 +70,28 @@ describe("middleware signed-session expiry integration", () => {
     expect(redirectUrl.searchParams.get("reason")).toBe("expired");
     expect(redirectUrl.searchParams.get("reason")).not.toBe("invalid");
   });
+
+  it.each([
+    ["password", UserRole.TEACHER, "/portal/teacher"],
+    ["sso", UserRole.ADMIN, "/admin/security"],
+  ] as const)(
+    "rejects a signed legacy %s session in middleware",
+    async (authMethod, role, path) => {
+      const token = await createLegacySessionToken({
+        uid: role === UserRole.ADMIN ? "admin-1" : "teacher-1",
+        role,
+        email: role === UserRole.ADMIN ? "admin@example.com" : "teacher@example.com",
+        fullName: role === UserRole.ADMIN ? "Admin One" : "Teacher One",
+        mfaVerified: true,
+        authMethod,
+      });
+
+      const response = await middleware(createProtectedRequest(token, path));
+
+      expect(response).toEqual(expect.objectContaining({ type: "redirect" }));
+      const redirectUrl = new URL((response as { url: string }).url);
+      expect(redirectUrl.pathname).toBe("/portal/login");
+      expect(redirectUrl.searchParams.get("reason")).toBe("invalid");
+    },
+  );
 });

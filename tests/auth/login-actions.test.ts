@@ -214,6 +214,24 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
     },
   );
 
+  it("rejects a mailbox identifier longer than 254 characters before authentication", async () => {
+    const oversizedEmail = `${"a".repeat(243)}@example.com`;
+    expect(oversizedEmail).toHaveLength(255);
+    const { loginAction } = await import("@/app/portal/login/actions");
+    const formData = new FormData();
+    formData.set("email", oversizedEmail);
+    formData.set("password", "ValidPass123!");
+
+    await expect(loginAction({ success: false, message: "" }, formData)).resolves.toEqual(
+      expect.objectContaining({ success: false, message: "Invalid input" }),
+    );
+
+    expect(findUserByEmailMock).not.toHaveBeenCalled();
+    expect(verifyPasswordMock).not.toHaveBeenCalled();
+    expect(clearSessionMock).not.toHaveBeenCalled();
+    expect(createSessionMock).not.toHaveBeenCalled();
+  });
+
   it("omits a File-valued next parameter from the temporary-password setup session", async () => {
     findUserByEmailMock.mockResolvedValueOnce({
       id: "user-1",

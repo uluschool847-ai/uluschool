@@ -120,6 +120,19 @@ contact details before launch.
 Render supplies `PORT` and its platform marker. Do not add a fixed `PORT`. Do not define a shared
 portal-password variable or `SEED_PORTAL_PASSWORD` in staging or production.
 
+## Regular-session version 2 cutover
+
+The administrator authentication hardening release raises only the regular `ulu_session` payload
+to security version 2. On the first staging and production deploy containing this change, every
+existing signed-in user is intentionally logged out once, including users with older password or
+SSO sessions, and must sign in again. Short-lived initial-setup, 2FA setup/handoff, and pending-2FA
+tokens are not versioned or invalidated by this cutover.
+
+Notify users before the deploy and record the cutover window in the private launch record. Keep the
+configured `AUTH_SESSION_SECRET` unchanged for this version cutover and never copy its value into
+the launch record, logs, screenshots, tickets, or this repository. After deployment, verify that an
+older regular session redirects to login and that a fresh password/TOTP login creates working access.
+
 ## First administrator bootstrap
 
 The pre-deploy command is idempotent. For a new database with no active administrator, set all

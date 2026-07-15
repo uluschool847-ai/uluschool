@@ -14,6 +14,7 @@ type AuditLogDateRange = {
 };
 
 type AuditDatabase = typeof prisma | Prisma.TransactionClient;
+const MAX_AUDIT_STRING_LENGTH = 256;
 
 const SENSITIVE_AUDIT_KEY_PATTERNS = [
   "password",
@@ -104,7 +105,9 @@ function sanitizeAuditValue(value: unknown): unknown {
   }
 
   if (typeof value === "string") {
-    return SENSITIVE_AUDIT_VALUES.includes(value) ? "[REDACTED]" : value;
+    return SENSITIVE_AUDIT_VALUES.includes(value)
+      ? "[REDACTED]"
+      : value.slice(0, MAX_AUDIT_STRING_LENGTH);
   }
 
   if (typeof value === "number" || typeof value === "boolean") {

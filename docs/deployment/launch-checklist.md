@@ -27,6 +27,12 @@ links in the private launch record. Never record credentials.
 
 - [ ] Merge the approved branch to `main` only after CI and staging evidence are complete.
 - [ ] Verify Render deploys that exact `main` commit with `APP_ENV=production`.
+- [ ] Notify users that the regular-session version 2 cutover logs out every existing user once,
+      including users holding older password or SSO sessions.
+- [ ] Keep `AUTH_SESSION_SECRET` unchanged for this cutover and keep its value out of all launch
+      evidence, logs, screenshots, tickets, and repository files.
+- [ ] Confirm an older `ulu_session` is rejected and redirected to login, then prove a fresh
+      password/TOTP login works with the deployed release.
 - [ ] Complete smoke and role checks on the production `onrender.com` URL before changing DNS.
 - [ ] Confirm the previous healthy deploy and the database recovery decision are identifiable.
 

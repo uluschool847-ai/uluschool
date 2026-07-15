@@ -239,6 +239,14 @@ describe("Admin user management actions audit coverage", () => {
       input: { email: "not-an-email", fullName: "Teacher Portal", role: "TEACHER" },
     },
     {
+      name: "mailbox longer than 254 characters",
+      input: {
+        email: `${"a".repeat(243)}@example.com`,
+        fullName: "Teacher Portal",
+        role: "TEACHER",
+      },
+    },
+    {
       name: "empty full name",
       input: { email: "teacher.portal@example.com", fullName: "", role: "TEACHER" },
     },

@@ -1,18 +1,23 @@
 import { UserRole } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { verifySessionToken } from "../lib/auth/session";
+import { verifyAdminPendingTwoFactorToken, verifySessionToken } from "../lib/auth/session";
 import { middleware } from "../middleware";
 
 // Mock the auth session module
 vi.mock("../lib/auth/session", () => ({
+  verifyAdminPendingTwoFactorToken: vi.fn(),
   verifySessionToken: vi.fn(),
   getPortalLoginPath: vi.fn((path) => `/portal/login?next=${encodeURIComponent(path)}`),
   getPortalDashboardPath: vi.fn((role: UserRole) => `/portal/${role.toLowerCase()}`),
 }));
 
 // Spies for NextResponse
-const nextMock = vi.fn(() => ({ cookies: { set: vi.fn() } }));
+const responseCookieSetMock = vi.fn();
+const responseCookieDeleteMock = vi.fn();
+const nextMock = vi.fn(() => ({
+  cookies: { set: responseCookieSetMock, delete: responseCookieDeleteMock },
+}));
 const redirectMock = vi.fn((url: string | URL) => ({ type: "redirect", url: url.toString() }));
 const rewriteMock = vi.fn((url: string | URL) => ({ type: "rewrite", url: url.toString() }));
 const jsonMock = vi.fn((body: unknown, init?: { status: number }) => ({
@@ -35,7 +40,7 @@ vi.mock("next/server", () => {
 });
 
 // Helper to construct a mock request without requiring full Edge Request setup
-function createMockRequest(path: string, token?: string, bucket?: string) {
+function createMockRequest(path: string, token?: string, bucket?: string, pendingToken?: string) {
   const url = new URL(`http://localhost${path}`);
   return {
     nextUrl: url,
@@ -43,6 +48,7 @@ function createMockRequest(path: string, token?: string, bucket?: string) {
     cookies: {
       get: (name: string) => {
         if (name === "ulu_session" && token) return { value: token };
+        if (name === "ulu_admin_2fa_pending" && pendingToken) return { value: pendingToken };
         if (name === "ab_pricing_bucket" && bucket) return { value: bucket };
         return undefined;
       },
@@ -147,6 +153,22 @@ describe("Middleware Routing and Access Control", () => {
       expect(redirectMock).not.toHaveBeenCalled();
       expect(jsonMock).not.toHaveBeenCalled();
     });
+
+    it.each(["/portal/login", "/portal/login/verify-2fa"])(
+      "clears a rejected pending-admin cookie before returning %s",
+      async (path) => {
+        vi.mocked(verifyAdminPendingTwoFactorToken).mockResolvedValue(null);
+
+        const response = await middleware(
+          createMockRequest(path, undefined, undefined, "rejected-pending-token"),
+        );
+
+        expect(verifyAdminPendingTwoFactorToken).toHaveBeenCalledWith("rejected-pending-token");
+        expect(responseCookieDeleteMock).toHaveBeenCalledWith("ulu_admin_2fa_pending");
+        expect(response).toEqual(expect.objectContaining({ cookies: expect.any(Object) }));
+        expect(redirectMock).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe("Rewrite Rules - The /pricing fix", () => {

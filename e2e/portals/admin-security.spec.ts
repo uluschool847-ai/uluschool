@@ -2,7 +2,7 @@ import { type Page, expect, test } from "@playwright/test";
 import { UserRole } from "@prisma/client";
 import { authenticator } from "otplib";
 
-import { createSessionToken } from "@/e2e/helpers/session";
+import { createAdminPendingTwoFactorToken, createSessionToken } from "@/e2e/helpers/session";
 import { hashPassword } from "@/lib/auth/password";
 import { prisma } from "@/lib/prisma";
 const PASSWORD =
@@ -106,6 +106,21 @@ async function loginWithPassword(page: Page, email: string) {
   await page.getByRole("button", { name: /login|sign in/i }).click();
 }
 
+async function setPendingAdminTwoFactorCookie(page: Page, value: string) {
+  await page.context().clearCookies();
+  await page.context().addCookies([
+    {
+      name: "ulu_admin_2fa_pending",
+      value,
+      domain: "localhost",
+      path: "/",
+      httpOnly: true,
+      sameSite: "Lax",
+      expires: Math.floor(Date.now() / 1000) + 3600,
+    },
+  ]);
+}
+
 test.describe("Admin Security", () => {
   test.describe.configure({ timeout: 180000, mode: "serial" });
 
@@ -117,6 +132,51 @@ test.describe("Admin Security", () => {
   test.afterAll(async () => {
     await cleanupQaSecurityData();
     await prisma.$disconnect();
+  });
+
+  test("direct login GETs reject malformed, expired, and legacy pending cookies without a 500", async ({
+    page,
+  }) => {
+    const rejectedTokens = [
+      { name: "malformed", value: "not-a-signed-pending-token" },
+      {
+        name: "expired",
+        value: await createAdminPendingTwoFactorToken({ exp: Date.now() - 60_000 }),
+      },
+      {
+        name: "pre-migration",
+        value: await createAdminPendingTwoFactorToken({
+          exp: Date.now() + 60_000,
+          legacy: true,
+        }),
+      },
+    ];
+
+    for (const rejectedToken of rejectedTokens) {
+      for (const path of ["/portal/login", "/portal/login/verify-2fa"]) {
+        await test.step(`${rejectedToken.name} token on ${path}`, async () => {
+          await setPendingAdminTwoFactorCookie(page, rejectedToken.value);
+
+          const response = await page.goto(path);
+
+          expect(response?.status()).toBe(200);
+          if (path === "/portal/login") {
+            await expect(page.getByRole("heading", { name: "Login", exact: true })).toBeVisible();
+            await expect(page.getByText(/Admin 2FA verification is pending/i)).toHaveCount(0);
+          } else {
+            await expect(page.getByText(/2FA session is missing or expired/i)).toBeVisible();
+            await expect(page.getByLabel(/authenticator code/i)).toHaveCount(0);
+          }
+          await expect
+            .poll(async () =>
+              (await page.context().cookies()).some(
+                (cookie) => cookie.name === "ulu_admin_2fa_pending",
+              ),
+            )
+            .toBe(false);
+        });
+      }
+    }
   });
 
   test("admin can enable and verify-login with TOTP without exposing self-service disablement", async ({
