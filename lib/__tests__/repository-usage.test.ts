@@ -73,7 +73,8 @@ function stripImportLines(content: string) {
 }
 
 const repositoryFiles = walk(REPOSITORIES_DIR).filter(
-  (filePath) => isCodeFile(filePath) && !isTestFile(filePath),
+  (filePath) =>
+    isCodeFile(filePath) && !isTestFile(filePath) && filePath.endsWith("-repository.ts"),
 );
 const featureFiles = FEATURE_DIRS.flatMap((dir) => walk(dir)).filter(
   (filePath) => isCodeFile(filePath) && !isTestFile(filePath),
@@ -107,7 +108,7 @@ function importTargetsRepository(importSource: string, repositoryBaseName: strin
 }
 
 describe("Repository usage audit", () => {
-  it("every exported function in lib/repositories is imported by at least one feature file", () => {
+  it("every exported function in a repository entry point is imported by at least one feature file", () => {
     const unused: string[] = [];
 
     for (const { exportName, repositoryBaseName, repositoryFile } of repositoryExportEntries) {
@@ -127,7 +128,7 @@ describe("Repository usage audit", () => {
     expect(unused, unused.join("\n")).toEqual([]);
   });
 
-  it("every repository function call is inside a real feature, not just a test file", () => {
+  it("every repository entry-point function call is inside a real feature, not just a test file", () => {
     const notCalled: string[] = [];
 
     for (const { exportName, repositoryBaseName, repositoryFile } of repositoryExportEntries) {

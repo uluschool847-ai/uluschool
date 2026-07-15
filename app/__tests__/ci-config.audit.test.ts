@@ -6,6 +6,9 @@ import { parse } from "yaml";
 const root = process.cwd();
 const workflowPath = join(root, ".github/workflows/ci.yml");
 const workflow = readFileSync(workflowPath, "utf8");
+const seedTest = readFileSync(join(root, "prisma/__tests__/seed.test.ts"), "utf8");
+const seedIntegrationFlag = "RUN_SEED_DB_INTEGRATION";
+const storagePostgresIntegrationFlag = "RUN_S3_POSTGRES_INTEGRATION";
 const requiredRunCommands = [
   "npm ci",
   "npx prisma generate",
@@ -110,6 +113,19 @@ function assertPostgresHealthOptions(options: unknown) {
   }
 }
 
+function assertSeedTestGate(seedTestSource: string) {
+  if (!seedTestSource.includes(`process.env.${seedIntegrationFlag} === "1"`)) {
+    throw new Error(`seed integration suite must require ${seedIntegrationFlag}=1`);
+  }
+
+  if (
+    !seedTestSource.includes("const suite = describe.skipIf(!runSeedDbIntegration);") ||
+    !seedTestSource.includes('suite("Seed data - Teacher records"')
+  ) {
+    throw new Error("seed integration suite must be skipped unless its explicit flag is enabled");
+  }
+}
+
 function assertCiWorkflowContract(workflowSource: string) {
   const parsedWorkflow = asRecord(parse(workflowSource), "workflow");
   const jobs = asRecord(parsedWorkflow.jobs, "workflow jobs");
@@ -120,6 +136,8 @@ function assertCiWorkflowContract(workflowSource: string) {
   const postgres = asRecord(services.postgres, "PostgreSQL service");
   const postgresEnv = asRecord(postgres.env, "PostgreSQL service environment");
   const environment = asRecord(verify.env, "verify job environment");
+  const workflowEnvironment =
+    parsedWorkflow.env === undefined ? {} : asRecord(parsedWorkflow.env, "workflow environment");
 
   const nodeSetup = steps.find((step) => step.uses === "actions/setup-node@v4");
   if (!nodeSetup) {
@@ -144,6 +162,13 @@ function assertCiWorkflowContract(workflowSource: string) {
   assertDatabaseUrl(environment.DATABASE_URL, "DATABASE_URL");
   assertDatabaseUrl(environment.DIRECT_URL, "DIRECT_URL");
 
+  if (
+    Object.hasOwn(workflowEnvironment, seedIntegrationFlag) ||
+    Object.hasOwn(environment, seedIntegrationFlag)
+  ) {
+    throw new Error(`${seedIntegrationFlag} must be enabled only on the post-seed test step`);
+  }
+
   const runCommands = steps.flatMap((step) => (typeof step.run === "string" ? [step.run] : []));
   const commandIndexes = requiredRunCommands.map((command) => {
     const index = runCommands.indexOf(command);
@@ -159,6 +184,25 @@ function assertCiWorkflowContract(workflowSource: string) {
       throw new Error("verify job run commands must remain in the required order");
     }
   }
+
+  const testStep = steps.find((step) => step.run === "npm run test");
+  if (!testStep) {
+    throw new Error("verify job must include the full test step");
+  }
+  const testEnvironment = asRecord(testStep.env, "full test step environment");
+  assertEqual(
+    testEnvironment[seedIntegrationFlag],
+    "1",
+    `full test step must enable ${seedIntegrationFlag}`,
+  );
+
+  for (const step of steps) {
+    if (step === testStep || step.env === undefined) continue;
+    const stepEnvironment = asRecord(step.env, "verify step environment");
+    if (Object.hasOwn(stepEnvironment, seedIntegrationFlag)) {
+      throw new Error(`${seedIntegrationFlag} must be enabled only on the post-seed test step`);
+    }
+  }
 }
 
 describe("GitHub CI production-readiness contract", () => {
@@ -166,7 +210,40 @@ describe("GitHub CI production-readiness contract", () => {
     const nvmrc = readFileSync(join(root, ".nvmrc"), "utf8").trim();
 
     expect(nvmrc).toBe("22");
+    expect(() => assertSeedTestGate(seedTest)).not.toThrow();
     expect(() => assertCiWorkflowContract(workflow)).not.toThrow();
+  });
+
+  it("rejects enabling seed integration before deterministic seeding", () => {
+    const earlySeedIntegration = workflow.replace(
+      "permissions:\n",
+      `env:\n  ${seedIntegrationFlag}: "1"\n\npermissions:\n`,
+    );
+
+    expect(earlySeedIntegration).not.toBe(workflow);
+    expect(() => assertCiWorkflowContract(earlySeedIntegration)).toThrow(/post-seed test step/i);
+  });
+
+  it("enables the file-access PostgreSQL IDOR matrix only on the post-seed test step", () => {
+    const parsedWorkflow = asRecord(parse(workflow), "workflow");
+    const verify = asRecord(asRecord(parsedWorkflow.jobs, "workflow jobs").verify, "verify job");
+    const steps = asSteps(verify.steps);
+    const testStep = steps.find((step) => step.run === "npm run test");
+
+    expect(testStep).toBeDefined();
+    expect(
+      asRecord(testStep?.env, "full test step environment")[storagePostgresIntegrationFlag],
+    ).toBe("1");
+    expect(asRecord(verify.env, "verify job environment")).not.toHaveProperty(
+      storagePostgresIntegrationFlag,
+    );
+    expect(
+      steps
+        .filter((step) => step !== testStep)
+        .map((step) => asRecord(step.env ?? {}, "verify step environment")),
+    ).not.toContainEqual(
+      expect.objectContaining({ [storagePostgresIntegrationFlag]: expect.anything() }),
+    );
   });
 
   it("rejects an expression-backed database URL", () => {

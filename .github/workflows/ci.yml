@@ -67,6 +67,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
       - name: Test
+        env:
+          RUN_SEED_DB_INTEGRATION: "1"
+          RUN_S3_POSTGRES_INTEGRATION: "1"
         run: npm run test
       - name: Build
         run: npm run build

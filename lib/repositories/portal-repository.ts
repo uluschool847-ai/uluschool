@@ -1664,7 +1664,7 @@ export async function getTeacherDashboardData(teacherId: string): Promise<Teache
     return {
       id: submission.id,
       contentUrl: preferredStoredFileHref(
-        submission.attachments[0]?.storageKey,
+        submission.attachments?.[0]?.storageKey,
         submission.contentUrl,
       ),
       submittedAt: submission.submittedAt,

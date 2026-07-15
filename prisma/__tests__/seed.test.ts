@@ -2,11 +2,12 @@ import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const prisma = new PrismaClient();
+const runSeedDbIntegration = process.env.RUN_SEED_DB_INTEGRATION === "1";
+const suite = describe.skipIf(!runSeedDbIntegration);
 
-describe("Seed data - Teacher records", () => {
+suite("Seed data - Teacher records", () => {
   beforeAll(async () => {
-    // This suite intentionally queries the real local database.
-    // It assumes `npm run db:seed` has already been executed.
+    // This suite intentionally queries a disposable, deterministically seeded database.
     await prisma.$connect();
   });
 
