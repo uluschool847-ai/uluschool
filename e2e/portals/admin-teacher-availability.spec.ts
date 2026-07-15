@@ -51,7 +51,7 @@ function datePart(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-function utcDateTimeInput(date: Date, hour: number, minute = 0) {
+function nairobiDateTimeInput(date: Date, hour: number, minute = 0) {
   return `${datePart(date)}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
@@ -131,41 +131,41 @@ test.describe("Admin Teacher Availability", () => {
     });
 
     await createLesson(page, {
-      endAt: utcDateTimeInput(BASE_MONDAY, 7),
+      endAt: nairobiDateTimeInput(BASE_MONDAY, 10),
       title: availableLessonTitle,
-      startAt: utcDateTimeInput(BASE_MONDAY, 6),
+      startAt: nairobiDateTimeInput(BASE_MONDAY, 9),
     });
     await expect(page.getByText(/lesson created/i)).toBeVisible({ timeout: 30000 });
 
     await createLesson(page, {
-      endAt: utcDateTimeInput(BASE_MONDAY, 16),
+      endAt: nairobiDateTimeInput(BASE_MONDAY, 16),
       title: outsideLessonTitle,
-      startAt: utcDateTimeInput(BASE_MONDAY, 15),
+      startAt: nairobiDateTimeInput(BASE_MONDAY, 15),
     });
     await expect(page.getByText(/teacher is not available|outside availability/i)).toBeVisible({
       timeout: 30000,
     });
 
     await page.goto(`${BASE_URL}/admin/teachers/${teacherUserId}/availability`);
-    await page.getByLabel(/unavailable start/i).fill(utcDateTimeInput(BLOCKED_MONDAY, 9, 30));
-    await page.getByLabel(/unavailable end/i).fill(utcDateTimeInput(BLOCKED_MONDAY, 10, 30));
+    await page.getByLabel(/unavailable start/i).fill(nairobiDateTimeInput(BLOCKED_MONDAY, 9, 30));
+    await page.getByLabel(/unavailable end/i).fill(nairobiDateTimeInput(BLOCKED_MONDAY, 10, 30));
     await page.getByLabel(/reason/i).fill("Placement interview");
     await submitUnavailablePeriod(page);
     await expectUnavailablePeriodFeedback(page);
 
     await createLesson(page, {
-      endAt: utcDateTimeInput(BLOCKED_MONDAY, 7),
+      endAt: nairobiDateTimeInput(BLOCKED_MONDAY, 10),
       title: blockedLessonTitle,
-      startAt: utcDateTimeInput(BLOCKED_MONDAY, 6),
+      startAt: nairobiDateTimeInput(BLOCKED_MONDAY, 9),
     });
     await expect(page.getByText(/teacher is not available|unavailable period/i)).toBeVisible({
       timeout: 30000,
     });
 
     await createLesson(page, {
-      endAt: utcDateTimeInput(BASE_MONDAY, 6, 30),
+      endAt: nairobiDateTimeInput(BASE_MONDAY, 9, 30),
       title: overlappingLessonTitle,
-      startAt: utcDateTimeInput(BASE_MONDAY, 6, 15),
+      startAt: nairobiDateTimeInput(BASE_MONDAY, 9, 15),
     });
     await expect(page.getByText(/already booked|overlap|teacher is not available/i)).toBeVisible({
       timeout: 30000,
@@ -185,15 +185,15 @@ test.describe("Admin Teacher Availability", () => {
     await expect(page.getByText(/12:00/)).toBeVisible();
     await expect(page.getByText(/placement interview/i)).toBeVisible();
 
-    await page.getByLabel(/start/i).fill(utcDateTimeInput(TEACHER_BLOCK_MONDAY, 9));
-    await page.getByLabel(/end/i).fill(utcDateTimeInput(TEACHER_BLOCK_MONDAY, 10));
+    await page.getByLabel(/start/i).fill(nairobiDateTimeInput(TEACHER_BLOCK_MONDAY, 9));
+    await page.getByLabel(/end/i).fill(nairobiDateTimeInput(TEACHER_BLOCK_MONDAY, 10));
     await page.getByLabel(/reason/i).fill("Teacher self-blocked time");
     await submitUnavailablePeriod(page);
     await expectUnavailablePeriodFeedback(page);
 
     await page.goto(`${BASE_URL}/portal/teacher/availability?teacherId=${otherTeacherUserId}`);
-    await page.getByLabel(/start/i).fill(utcDateTimeInput(OTHER_TEACHER_BLOCK_TUESDAY, 9));
-    await page.getByLabel(/end/i).fill(utcDateTimeInput(OTHER_TEACHER_BLOCK_TUESDAY, 10));
+    await page.getByLabel(/start/i).fill(nairobiDateTimeInput(OTHER_TEACHER_BLOCK_TUESDAY, 9));
+    await page.getByLabel(/end/i).fill(nairobiDateTimeInput(OTHER_TEACHER_BLOCK_TUESDAY, 10));
     await submitUnavailablePeriod(page);
     await expectUnavailablePeriodFeedback(page);
   });
