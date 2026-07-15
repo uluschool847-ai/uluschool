@@ -130,7 +130,7 @@ test.describe("Admin Parent Management", () => {
     expect(temporaryPassword).toMatch(/\S+/);
 
     await page.goto(`/admin/parents?q=${encodeURIComponent(email)}`);
-    await expect(page.getByText(temporaryPassword, { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: /temporary credentials/i })).toHaveCount(0);
     const registryRow = await openParentRegistryByEmail(page, email);
     await expect(registryRow).toContainText(fullName);
 

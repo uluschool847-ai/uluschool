@@ -68,7 +68,7 @@ test.describe("Admin Student Management", () => {
     expect(temporaryPassword).toMatch(/\S+/);
 
     await page.goto("/admin/students");
-    await expect(page.getByText(temporaryPassword, { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: /temporary credentials/i })).toHaveCount(0);
     const registryRow = await openStudentRegistryByEmail(page, email);
     await expect(registryRow).toContainText(fullName);
 

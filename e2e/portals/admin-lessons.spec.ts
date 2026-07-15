@@ -43,6 +43,11 @@ function formatDateTimeInput(date: Date) {
   return `${formatDateInput(date)}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function nairobiWallTimeToUtc(date: Date, hours: number, minutes = 0) {
+  const pad = (value: number) => value.toString().padStart(2, "0");
+  return new Date(`${formatDateInput(date)}T${pad(hours)}:${pad(minutes)}:00+03:00`);
+}
+
 function formatMonthQuery(date: Date) {
   return formatDateInput(date).slice(0, 7);
 }
@@ -236,8 +241,11 @@ test.describe("Admin Scheduled Lessons Management", () => {
     const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const recurringStartDate = nextWeekday(addDays(new Date(), 14), 2);
     const recurringEndDate = addDays(recurringStartDate, 21);
-    const duplicateStartAt = withTime(addDays(recurringStartDate, 7), 10);
-    const duplicateEndAt = withTime(duplicateStartAt, 11);
+    const duplicateDate = addDays(recurringStartDate, 7);
+    const duplicateStartAt = nairobiWallTimeToUtc(duplicateDate, 10);
+    const duplicateEndAt = nairobiWallTimeToUtc(duplicateDate, 11);
+    expect(duplicateStartAt.toISOString()).toBe(`${formatDateInput(duplicateDate)}T07:00:00.000Z`);
+    expect(duplicateEndAt.toISOString()).toBe(`${formatDateInput(duplicateDate)}T08:00:00.000Z`);
     const group = await createLessonClassGroup(suffix, {
       endDate: addDays(recurringEndDate, 180),
       startDate: addDays(recurringStartDate, -7),
