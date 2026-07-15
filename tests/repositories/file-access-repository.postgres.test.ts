@@ -1,5 +1,5 @@
 import { UserRole } from "@prisma/client";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "@/lib/prisma";
 import {
@@ -41,6 +41,111 @@ function user(userId: string, role: UserRole) {
     isActive: true,
   };
 }
+
+type FixtureCleanupStep = {
+  label: string;
+  run: () => Promise<unknown>;
+};
+
+function fixtureCleanupError(label: string, failure: unknown) {
+  const detail = failure instanceof Error ? failure.message : String(failure);
+  return new Error(`${label} failed: ${detail}`, { cause: failure });
+}
+
+async function cleanupPostgresFixture(
+  steps: FixtureCleanupStep[],
+  disconnect: () => Promise<unknown>,
+) {
+  const errors: Error[] = [];
+
+  try {
+    for (const step of steps) {
+      try {
+        await step.run();
+      } catch (error) {
+        errors.push(fixtureCleanupError(`${step.label} cleanup`, error));
+      }
+    }
+  } finally {
+    try {
+      await disconnect();
+    } catch (error) {
+      errors.push(fixtureCleanupError("database disconnect", error));
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new AggregateError(errors, "PostgreSQL fixture cleanup failed");
+  }
+}
+
+describe("file access PostgreSQL fixture cleanup", () => {
+  it("attempts every cleanup step in order and disconnects after delete failures", async () => {
+    const calls: string[] = [];
+    const teacherError = new Error("teacher delete failed");
+    const reportError = new Error("report delete failed");
+    const disconnect = vi.fn(async () => {
+      calls.push("disconnect");
+    });
+
+    const error = await cleanupPostgresFixture(
+      [
+        {
+          label: "teachers",
+          run: async () => {
+            calls.push("teachers");
+            throw teacherError;
+          },
+        },
+        {
+          label: "attachments",
+          run: async () => {
+            calls.push("attachments");
+          },
+        },
+        {
+          label: "report snapshots",
+          run: async () => {
+            calls.push("report snapshots");
+            throw reportError;
+          },
+        },
+      ],
+      disconnect,
+    ).catch((cleanupError: unknown) => cleanupError);
+
+    expect(calls).toEqual(["teachers", "attachments", "report snapshots", "disconnect"]);
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([
+      expect.objectContaining({ message: "teachers cleanup failed: teacher delete failed" }),
+      expect.objectContaining({ message: "report snapshots cleanup failed: report delete failed" }),
+    ]);
+    expect((error as AggregateError).errors.map((item) => item.cause)).toEqual([
+      teacherError,
+      reportError,
+    ]);
+  });
+
+  it("preserves and reports a disconnect failure after successful deletes", async () => {
+    const disconnectError = new Error("disconnect failed");
+    const disconnect = vi.fn(async () => {
+      throw disconnectError;
+    });
+
+    const error = await cleanupPostgresFixture(
+      [{ label: "teachers", run: async () => undefined }],
+      disconnect,
+    ).catch((cleanupError: unknown) => cleanupError);
+
+    expect(disconnect).toHaveBeenCalledOnce();
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([
+      expect.objectContaining({ message: "database disconnect failed: disconnect failed" }),
+    ]);
+    expect((error as AggregateError).errors[0]?.cause).toBe(disconnectError);
+  });
+});
 
 suite("file access PostgreSQL IDOR relations", { timeout: 60_000 }, () => {
   beforeAll(async () => {
@@ -404,16 +509,47 @@ suite("file access PostgreSQL IDOR relations", { timeout: 60_000 }, () => {
 
   afterAll(async () => {
     const fixtureIds = { startsWith: `s3-${runId}-` };
-    await prisma.teacher.deleteMany({ where: { id: fixtureIds } });
-    await prisma.attachment.deleteMany({ where: { id: fixtureIds } });
-    await prisma.reportSnapshot.deleteMany({ where: { id: fixtureIds } });
-    await prisma.academicTerm.deleteMany({ where: { id: fixtureIds } });
-    await prisma.assignment.deleteMany({ where: { id: fixtureIds } });
-    await prisma.courseMaterial.deleteMany({ where: { id: fixtureIds } });
-    await prisma.scheduledClass.deleteMany({ where: { id: fixtureIds } });
-    await prisma.classGroup.deleteMany({ where: { id: fixtureIds } });
-    await prisma.appUser.deleteMany({ where: { id: fixtureIds } });
-    await prisma.$disconnect();
+    await cleanupPostgresFixture(
+      [
+        {
+          label: "teachers",
+          run: () => prisma.teacher.deleteMany({ where: { id: fixtureIds } }),
+        },
+        {
+          label: "attachments",
+          run: () => prisma.attachment.deleteMany({ where: { id: fixtureIds } }),
+        },
+        {
+          label: "report snapshots",
+          run: () => prisma.reportSnapshot.deleteMany({ where: { id: fixtureIds } }),
+        },
+        {
+          label: "academic terms",
+          run: () => prisma.academicTerm.deleteMany({ where: { id: fixtureIds } }),
+        },
+        {
+          label: "assignments",
+          run: () => prisma.assignment.deleteMany({ where: { id: fixtureIds } }),
+        },
+        {
+          label: "course materials",
+          run: () => prisma.courseMaterial.deleteMany({ where: { id: fixtureIds } }),
+        },
+        {
+          label: "scheduled classes",
+          run: () => prisma.scheduledClass.deleteMany({ where: { id: fixtureIds } }),
+        },
+        {
+          label: "class groups",
+          run: () => prisma.classGroup.deleteMany({ where: { id: fixtureIds } }),
+        },
+        {
+          label: "app users",
+          run: () => prisma.appUser.deleteMany({ where: { id: fixtureIds } }),
+        },
+      ],
+      () => prisma.$disconnect(),
+    );
   }, 60_000);
 
   it("allows an admin only referenced attachment and report keys", async () => {

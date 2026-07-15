@@ -7,6 +7,10 @@ const root = process.cwd();
 const workflowPath = join(root, ".github/workflows/ci.yml");
 const workflow = readFileSync(workflowPath, "utf8");
 const seedTest = readFileSync(join(root, "prisma/__tests__/seed.test.ts"), "utf8");
+const storagePostgresTest = readFileSync(
+  join(root, "tests/repositories/file-access-repository.postgres.test.ts"),
+  "utf8",
+);
 const seedIntegrationFlag = "RUN_SEED_DB_INTEGRATION";
 const storagePostgresIntegrationFlag = "RUN_S3_POSTGRES_INTEGRATION";
 const requiredRunCommands = [
@@ -126,7 +130,31 @@ function assertSeedTestGate(seedTestSource: string) {
   }
 }
 
-function assertCiWorkflowContract(workflowSource: string) {
+function assertStoragePostgresTestGate(storagePostgresTestSource: string) {
+  if (
+    !storagePostgresTestSource.includes(
+      `const runPostgres = process.env.${storagePostgresIntegrationFlag} === "1";`,
+    )
+  ) {
+    throw new Error(
+      `file-access PostgreSQL source gate must consume ${storagePostgresIntegrationFlag}=1`,
+    );
+  }
+
+  if (
+    !storagePostgresTestSource.includes("const suite = describe.skipIf(!runPostgres);") ||
+    !storagePostgresTestSource.includes('suite("file access PostgreSQL IDOR relations"')
+  ) {
+    throw new Error("file-access PostgreSQL source gate must skip the integration suite");
+  }
+}
+
+function assertCiWorkflowContract(
+  workflowSource: string,
+  storagePostgresTestSource = storagePostgresTest,
+) {
+  assertSeedTestGate(seedTest);
+  assertStoragePostgresTestGate(storagePostgresTestSource);
   const parsedWorkflow = asRecord(parse(workflowSource), "workflow");
   const jobs = asRecord(parsedWorkflow.jobs, "workflow jobs");
   const verify = asRecord(jobs.verify, "verify job");
@@ -162,11 +190,14 @@ function assertCiWorkflowContract(workflowSource: string) {
   assertDatabaseUrl(environment.DATABASE_URL, "DATABASE_URL");
   assertDatabaseUrl(environment.DIRECT_URL, "DIRECT_URL");
 
-  if (
-    Object.hasOwn(workflowEnvironment, seedIntegrationFlag) ||
-    Object.hasOwn(environment, seedIntegrationFlag)
-  ) {
-    throw new Error(`${seedIntegrationFlag} must be enabled only on the post-seed test step`);
+  const integrationFlags = [seedIntegrationFlag, storagePostgresIntegrationFlag];
+  for (const integrationFlag of integrationFlags) {
+    if (
+      Object.hasOwn(workflowEnvironment, integrationFlag) ||
+      Object.hasOwn(environment, integrationFlag)
+    ) {
+      throw new Error(`${integrationFlag} must be enabled only on the post-seed test step`);
+    }
   }
 
   const runCommands = steps.flatMap((step) => (typeof step.run === "string" ? [step.run] : []));
@@ -190,17 +221,21 @@ function assertCiWorkflowContract(workflowSource: string) {
     throw new Error("verify job must include the full test step");
   }
   const testEnvironment = asRecord(testStep.env, "full test step environment");
-  assertEqual(
-    testEnvironment[seedIntegrationFlag],
-    "1",
-    `full test step must enable ${seedIntegrationFlag}`,
-  );
+  for (const integrationFlag of integrationFlags) {
+    assertEqual(
+      testEnvironment[integrationFlag],
+      "1",
+      `full test step must enable ${integrationFlag}`,
+    );
+  }
 
   for (const step of steps) {
     if (step === testStep || step.env === undefined) continue;
     const stepEnvironment = asRecord(step.env, "verify step environment");
-    if (Object.hasOwn(stepEnvironment, seedIntegrationFlag)) {
-      throw new Error(`${seedIntegrationFlag} must be enabled only on the post-seed test step`);
+    for (const integrationFlag of integrationFlags) {
+      if (Object.hasOwn(stepEnvironment, integrationFlag)) {
+        throw new Error(`${integrationFlag} must be enabled only on the post-seed test step`);
+      }
     }
   }
 }
@@ -210,7 +245,6 @@ describe("GitHub CI production-readiness contract", () => {
     const nvmrc = readFileSync(join(root, ".nvmrc"), "utf8").trim();
 
     expect(nvmrc).toBe("22");
-    expect(() => assertSeedTestGate(seedTest)).not.toThrow();
     expect(() => assertCiWorkflowContract(workflow)).not.toThrow();
   });
 
@@ -245,6 +279,50 @@ describe("GitHub CI production-readiness contract", () => {
       expect.objectContaining({ [storagePostgresIntegrationFlag]: expect.anything() }),
     );
   });
+
+  it.each([
+    [
+      "removed",
+      storagePostgresTest.replace(
+        `const runPostgres = process.env.${storagePostgresIntegrationFlag} === "1";`,
+        "const runPostgres = false;",
+      ),
+    ],
+    ["renamed", storagePostgresTest.replaceAll(storagePostgresIntegrationFlag, "RUN_RENAMED")],
+  ])("rejects a %s file-access PostgreSQL source gate", (_mutation, mutatedSource) => {
+    expect(mutatedSource).not.toBe(storagePostgresTest);
+    expect(() => assertCiWorkflowContract(workflow, mutatedSource)).toThrow(/source gate/i);
+  });
+
+  it.each([
+    [
+      "workflow",
+      workflow.replace(
+        "permissions:\n",
+        `env:\n  ${storagePostgresIntegrationFlag}: "1"\n\npermissions:\n`,
+      ),
+    ],
+    [
+      "verify job",
+      workflow.replace(
+        "    env:\n      DATABASE_URL:",
+        `    env:\n      ${storagePostgresIntegrationFlag}: "1"\n      DATABASE_URL:`,
+      ),
+    ],
+    [
+      "Lint step",
+      workflow.replace(
+        "      - name: Lint\n        run: npm run lint",
+        `      - name: Lint\n        env:\n          ${storagePostgresIntegrationFlag}: "1"\n        run: npm run lint`,
+      ),
+    ],
+  ])(
+    "rejects enabling file-access PostgreSQL integration on the %s",
+    (_location, mutatedWorkflow) => {
+      expect(mutatedWorkflow).not.toBe(workflow);
+      expect(() => assertCiWorkflowContract(mutatedWorkflow)).toThrow(/post-seed test step/i);
+    },
+  );
 
   it("rejects an expression-backed database URL", () => {
     const expressionBackedDatabaseUrl = workflow.replace(
