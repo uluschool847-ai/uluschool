@@ -4,9 +4,22 @@ import { hashPassword } from "../lib/auth/password";
 
 const prisma = new PrismaClient();
 
+function isLoopbackDatabaseUrl(value: string | undefined) {
+  if (!value) return false;
+
+  try {
+    const hostname = new URL(value).hostname;
+    return hostname === "localhost" || hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+}
+
 async function main() {
   const seedPortalPassword = process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
   const passwordHash = await hashPassword(seedPortalPassword);
+  const shouldSeedInitialPasswordFixture = isLoopbackDatabaseUrl(process.env.DATABASE_URL ?? "");
+  const initialPassword = process.env.E2E_INITIAL_PASSWORD ?? "C5InitialStudent123!";
   const adminTwoFactorSecret = (process.env.ADMIN_2FA_SECRET ?? "").trim();
   const seedLiveLessonUrl = process.env.SEED_LIVE_LESSON_URL ?? "https://meet.google.com/";
   const seedHomeworkContentUrl =
@@ -267,6 +280,48 @@ async function main() {
         role: user.role,
         passwordHash,
         isActive: true,
+        twoFactorEnabled: false,
+        twoFactorSecret: null,
+        twoFactorBackupCodes: [],
+      },
+    });
+  }
+
+  if (shouldSeedInitialPasswordFixture) {
+    const initialStudent = {
+      id: "student-initial-setup-123",
+      email: "fixed.initial.student@uluglobalacademy.com",
+      fullName: "Fixed Initial Student",
+    };
+    const initialPasswordHash = await hashPassword(initialPassword);
+    const existingEmailOwner = await prisma.appUser.findUnique({
+      where: { email: initialStudent.email },
+      select: { id: true },
+    });
+
+    if (existingEmailOwner && existingEmailOwner.id !== initialStudent.id) {
+      await prisma.appUser.delete({ where: { id: existingEmailOwner.id } });
+    }
+
+    await prisma.appUser.upsert({
+      where: { id: initialStudent.id },
+      update: {
+        email: initialStudent.email,
+        fullName: initialStudent.fullName,
+        role: UserRole.STUDENT,
+        passwordHash: initialPasswordHash,
+        isActive: true,
+        mustChangePassword: true,
+        twoFactorEnabled: false,
+        twoFactorSecret: null,
+        twoFactorBackupCodes: [],
+      },
+      create: {
+        ...initialStudent,
+        role: UserRole.STUDENT,
+        passwordHash: initialPasswordHash,
+        isActive: true,
+        mustChangePassword: true,
         twoFactorEnabled: false,
         twoFactorSecret: null,
         twoFactorBackupCodes: [],

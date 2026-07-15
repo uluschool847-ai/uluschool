@@ -32,5 +32,9 @@ export default defineConfig({
     timeout: 120000,
     stdout: "pipe",
     stderr: "pipe",
+    env: {
+      ...process.env,
+      ADMIN_REQUIRE_2FA: process.env.E2E_ADMIN_REQUIRE_2FA ?? "false",
+    },
   },
 });

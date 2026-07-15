@@ -13,6 +13,21 @@ function testMeetUrl(path: string) {
   return `https://meet.example.com/${path}`;
 }
 
+function assertLocalDatabase() {
+  const databaseUrl = new URL(process.env.DATABASE_URL ?? "");
+  expect(["localhost", "127.0.0.1"]).toContain(databaseUrl.hostname);
+}
+
+function futureFixtureDates(now = new Date()) {
+  const startAt = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2, 10, 0, 0),
+  );
+  const endAt = new Date(startAt.getTime() + 60 * 60 * 1000);
+  const dueDate = new Date(startAt.getTime() + 24 * 60 * 60 * 1000);
+
+  return { startAt, endAt, dueDate, scheduleMonth: startAt.toISOString().slice(0, 7) };
+}
+
 async function setPortalSession(
   context: BrowserContext,
   input: {
@@ -37,6 +52,7 @@ async function setPortalSession(
 }
 
 async function cleanupTestData() {
+  assertLocalDatabase();
   const users = await prisma.appUser.findMany({
     where: { email: { startsWith: USER_EMAIL_PREFIX } },
     select: { id: true },
@@ -74,6 +90,7 @@ test.describe("Parent and student portal side effects", () => {
     const passwordHash = await hashPassword(PASSWORD);
     const classTitle = `${CLASS_TITLE_PREFIX} Class ${suffix}`;
     const assignmentTitle = `${CLASS_TITLE_PREFIX} Assignment ${suffix}`;
+    const { startAt, endAt, dueDate, scheduleMonth } = futureFixtureDates();
 
     const [teacher, student, parent, subject] = await Promise.all([
       prisma.appUser.create({
@@ -111,8 +128,8 @@ test.describe("Parent and student portal side effects", () => {
       data: {
         title: classTitle,
         description: "Verifies parent and student portal side effects.",
-        startAt: new Date("2026-06-20T10:00:00.000Z"),
-        endAt: new Date("2026-06-20T11:00:00.000Z"),
+        startAt,
+        endAt,
         liveLessonUrl: testMeetUrl("qa-portal-side-effects"),
         teacherId: teacher.id,
         students: { connect: { id: student.id } },
@@ -126,7 +143,7 @@ test.describe("Parent and student portal side effects", () => {
       data: {
         title: assignmentTitle,
         description: "Visible on the linked student portal.",
-        dueDate: new Date("2026-06-21T10:00:00.000Z"),
+        dueDate,
         scheduledClassId: scheduledClass.id,
         teacherId: teacher.id,
         subjectId: subject.id,
@@ -164,7 +181,7 @@ test.describe("Parent and student portal side effects", () => {
       email: student.email,
       fullName: student.fullName,
     });
-    await page.goto("/portal/schedule?month=2026-06");
+    await page.goto(`/portal/schedule?month=${scheduleMonth}`);
     await expect(page.getByRole("heading", { name: "Class Calendar" })).toBeVisible();
     await expect(page.getByText(classTitle)).toBeVisible();
 

@@ -9,6 +9,7 @@
     "dev": "next dev",
     "build": "npm run lint && next build",
     "env:check": "tsx scripts/check-production-env.ts",
+    "smoke:deployment": "tsx scripts/smoke-deployment.ts",
     "prestart": "npm run env:check",
     "start": "next start",
     "test": "vitest run",

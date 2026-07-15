@@ -31,6 +31,7 @@ const env = {
   E2E_ADMIN_EMAIL: process.env.E2E_ADMIN_EMAIL ?? "fixed.admin@uluglobalacademy.com",
   E2E_PORTAL_PASSWORD:
     process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!",
+  ADMIN_REQUIRE_2FA: "false",
   PLAYWRIGHT_BASE_URL: baseUrl,
   PORT: String(port),
 };
