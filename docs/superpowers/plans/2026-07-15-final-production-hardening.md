@@ -104,6 +104,7 @@ git commit -m "test: enforce strict release browser gate"
 - Modify: `lib/auth/session.ts`
 - Modify: `app/portal/login/actions.ts`
 - Modify: `app/portal/login/verify-2fa/actions.ts`
+- Modify: `app/portal/setup/password/actions.ts`
 - Modify: `app/api/auth/sso/callback/route.ts`
 - Modify: `middleware.ts`
 - Modify: `app/(admin)/admin/security/actions.ts`
@@ -111,7 +112,9 @@ git commit -m "test: enforce strict release browser gate"
 - Modify: `lib/config/production-env.ts`
 - Modify: `lib/__tests__/session-expiry.test.ts`
 - Modify: `app/portal/login/__tests__/login-2fa-actions.test.ts`
+- Modify: `app/portal/setup/password/__tests__/actions.test.ts`
 - Modify: `tests/auth/login-actions.test.ts`
+- Modify: `tests/app/student-portal/login-2fa-env.test.ts`
 - Modify: `app/api/auth/sso/callback/route.test.ts`
 - Modify: `tests/middleware.test.ts`
 - Modify: `app/(admin)/admin/security/__tests__/actions.test.ts`
@@ -165,7 +168,7 @@ Backup-code verification must re-read the current hash array inside a serializab
 
 - [ ] **Step 4: Bind the signed cookie to the database challenge**
 
-Extend the pending payload with `challengeId` and `authMethod`. A decoded cookie is only a pointer; the verification repository decides whether it is live. Clear the cookie on expiry, lockout, or successful completion, and create the normal session only after the repository returns a committed success.
+Extend the pending payload with `challengeId` and `authMethod`. A decoded cookie is only a pointer; the verification repository decides whether it is live. Every entry path that currently issues this cookie, including normal password login, post-password-setup handoff, and the defensive SSO callback, must first create a database challenge and bind the cookie to it. Clear the cookie on expiry, lockout, or successful completion, and create the normal session only after the repository returns a committed success.
 
 Remove the `authMethod === "sso"` exemption from middleware and backend role checks.
 
@@ -214,6 +217,8 @@ git commit -m "fix: harden administrator two-factor authentication"
 - Modify: `app/portal/teacher/components/MaterialForm.tsx`
 - Modify: `lib/repositories/course-material-repository.ts`
 - Modify: `lib/repositories/report-repository.ts`
+- Modify: `app/(admin)/admin/teachers/actions.ts`
+- Modify: `app/(admin)/admin/teachers/__tests__/actions.test.ts`
 - Modify: `tests/portal/teacher-material-actions.test.ts`
 - Modify: `e2e/storage/signed-file-delivery.spec.ts`
 - Modify: `docs/deployment/render-production.md`
@@ -252,7 +257,7 @@ After each successful R2/local write, persist a pending row; if persistence fail
 
 - [ ] **Step 5: Make orphan checks alias-aware and cross-table**
 
-Move the report repository's reference pattern into `storage-reference-repository.ts`. Normalize each candidate to its complete alias set and query every persisted reference column before deletion. Any lookup error returns `referenced=true`. Use the shared helper from both report and material cleanup paths.
+Move the report repository's reference pattern into `storage-reference-repository.ts`. Normalize each candidate to its complete alias set and query every persisted reference column before deletion. Any lookup error returns `referenced=true`. Use the shared helper from report, material, and administrator teacher-photo cleanup paths so no direct storage delete can remove an object that another table still references.
 
 - [ ] **Step 6: Expand real-route signed-delivery coverage**
 
