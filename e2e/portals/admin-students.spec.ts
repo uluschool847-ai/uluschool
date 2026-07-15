@@ -55,9 +55,7 @@ test.describe("Admin Student Management", () => {
     await page.getByRole("button", { name: /create student/i }).click();
 
     await expect(page).toHaveURL(/\/admin\/students\/new$/);
-    const credentialsPanel = page
-      .locator("section")
-      .filter({ has: page.getByRole("heading", { name: /temporary credentials/i }) });
+    const credentialsPanel = page.getByRole("region", { name: /^temporary credentials$/i });
     await expect(credentialsPanel).toBeVisible();
     const temporaryPasswordLocator = credentialsPanel
       .locator("dt")

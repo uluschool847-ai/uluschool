@@ -4,6 +4,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 const reuseExistingServer = /^(1|true|yes)$/i.test(
   process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER ?? "",
 );
+const serverCommand = process.env.PLAYWRIGHT_SERVER_COMMAND?.trim() || "npm run dev";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -26,7 +27,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run dev",
+    command: serverCommand,
     url: baseURL,
     reuseExistingServer,
     timeout: 120000,

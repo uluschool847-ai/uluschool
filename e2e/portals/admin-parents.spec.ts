@@ -117,9 +117,7 @@ test.describe("Admin Parent Management", () => {
     await page.getByRole("button", { name: /create parent|create guardian/i }).click();
 
     await expect(page).toHaveURL(/\/admin\/parents\/new$/);
-    const credentialsPanel = page
-      .locator("section")
-      .filter({ has: page.getByRole("heading", { name: /temporary credentials/i }) });
+    const credentialsPanel = page.getByRole("region", { name: /^temporary credentials$/i });
     await expect(credentialsPanel).toBeVisible();
     const temporaryPasswordLocator = credentialsPanel
       .locator("dt")
