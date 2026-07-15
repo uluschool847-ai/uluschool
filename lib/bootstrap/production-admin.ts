@@ -3,15 +3,15 @@ import { z } from "zod";
 
 import { hashPassword } from "@/lib/auth/password";
 import { INITIAL_PASSWORD_MAX_LENGTH } from "@/lib/validations/initial-password";
+import { mailboxSchema } from "@/lib/validations/mailbox";
 
 const SYSTEM_ACTOR_ID = "system:production-bootstrap";
 const PRODUCTION_ADMIN_AUDIT_ACTION = "PRODUCTION_ADMIN_BOOTSTRAPPED";
-const MAX_EMAIL_LENGTH = 320;
 const MAX_NAME_LENGTH = 200;
 
 const productionAdminEnvironmentSchema = z
   .object({
-    BOOTSTRAP_ADMIN_EMAIL: z.string().trim().min(1).max(MAX_EMAIL_LENGTH).email(),
+    BOOTSTRAP_ADMIN_EMAIL: mailboxSchema,
     BOOTSTRAP_ADMIN_NAME: z.string().trim().min(1).max(MAX_NAME_LENGTH),
     BOOTSTRAP_ADMIN_PASSWORD: z.string().min(12).max(INITIAL_PASSWORD_MAX_LENGTH),
   })
@@ -193,7 +193,7 @@ function parseConfiguredEnvironment(environment: unknown) {
   }
 
   return {
-    email: parsed.data.BOOTSTRAP_ADMIN_EMAIL.toLowerCase(),
+    email: parsed.data.BOOTSTRAP_ADMIN_EMAIL,
     fullName: parsed.data.BOOTSTRAP_ADMIN_NAME,
     password: parsed.data.BOOTSTRAP_ADMIN_PASSWORD,
   };

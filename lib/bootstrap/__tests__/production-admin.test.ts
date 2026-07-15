@@ -78,6 +78,14 @@ function configuredEnv(overrides: Record<string, string | undefined> = {}) {
   };
 }
 
+function mailboxAddress(length: 254 | 255) {
+  const address = `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(
+    length === 254 ? 61 : 62,
+  )}`;
+  expect(address).toHaveLength(length);
+  return address;
+}
+
 function createDatabase() {
   const transaction = {
     appUser: {
@@ -232,7 +240,42 @@ describe("bootstrapProductionAdmin", () => {
   });
 
   it.each([
-    ["email", { BOOTSTRAP_ADMIN_EMAIL: `${"e".repeat(310)}@example.com` }],
+    [254, true],
+    [255, false],
+  ] as const)(
+    "accepts 254 and rejects 255 bootstrap mailbox characters before writes: %i / %s",
+    async (length, accepted) => {
+      const email = mailboxAddress(length);
+      const { database, transaction } = createDatabase();
+
+      if (accepted) {
+        database.appUser.count.mockResolvedValue(0);
+        database.appUser.findUnique.mockResolvedValue(null);
+        transaction.appUser.findUnique.mockResolvedValue(null);
+        transaction.appUser.count.mockResolvedValue(0);
+        transaction.appUser.create.mockResolvedValue({ id: "admin-1", email });
+        transaction.adminAuditLog.create.mockResolvedValue({ id: "audit-1" });
+
+        await expect(
+          bootstrapProductionAdmin(configuredEnv({ BOOTSTRAP_ADMIN_EMAIL: email }), database),
+        ).resolves.toEqual({ status: "created", user: { id: "admin-1", email } });
+        expect(transaction.appUser.create).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ email }) }),
+        );
+        return;
+      }
+
+      await expect(
+        bootstrapProductionAdmin(configuredEnv({ BOOTSTRAP_ADMIN_EMAIL: email }), database),
+      ).rejects.toBeInstanceOf(ProductionAdminBootstrapError);
+      expect(database.appUser.count).not.toHaveBeenCalled();
+      expect(hashPasswordMock).not.toHaveBeenCalled();
+      expect(database.$transaction).not.toHaveBeenCalled();
+      expect(transaction.appUser.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
     ["name", { BOOTSTRAP_ADMIN_NAME: "n".repeat(201) }],
     ["password", { BOOTSTRAP_ADMIN_PASSWORD: "p".repeat(257) }],
   ])("rejects an oversized %s before hashing", async (_field, override) => {

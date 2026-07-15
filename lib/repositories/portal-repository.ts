@@ -7,6 +7,7 @@ import { validateLiveLessonUrl } from "@/lib/lessons/live-lesson-url";
 import { prisma } from "@/lib/prisma";
 import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
 import { preferredStoredFileHref } from "@/lib/security/storage-links";
+import { normalizeMailboxAddress } from "@/lib/validations/mailbox";
 
 type PortalDatabase = typeof prisma | Prisma.TransactionClient;
 
@@ -90,7 +91,7 @@ export async function createUser(
   },
   database: PortalDatabase = prisma,
 ) {
-  const email = data.email.trim().toLowerCase();
+  const email = normalizeMailboxAddress(data.email);
   const existingUser = await database.appUser.findUnique({
     where: { email },
     select: { id: true, email: true },
@@ -143,7 +144,7 @@ export async function updateUserProfile(
     throw new Error("User not found");
   }
 
-  const normalizedEmail = input.email.trim().toLowerCase();
+  const normalizedEmail = normalizeMailboxAddress(input.email);
   const existingUserByEmail = await database.appUser.findUnique({
     where: { email: normalizedEmail },
     select: {

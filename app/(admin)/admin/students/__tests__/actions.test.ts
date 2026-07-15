@@ -141,6 +141,14 @@ function buildStudentFormData(options?: {
   return formData;
 }
 
+function mailboxAddress(length: 254 | 255) {
+  const address = `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(
+    length === 254 ? 61 : 62,
+  )}`;
+  expect(address).toHaveLength(length);
+  return address;
+}
+
 function buildStudentLearningStatusFormData(options?: {
   id?: string;
   learningStatus?: string;
@@ -287,6 +295,80 @@ describe("Admin student account actions", () => {
       "UniqueTemporary123_A",
     );
   });
+
+  it.each([
+    ["create", 254, true],
+    ["create", 255, false],
+    ["update", 254, true],
+    ["update", 255, false],
+  ] as const)(
+    "%s accepts 254 and rejects 255 mailbox characters before repository work: %i / %s",
+    async (operation, length, accepted) => {
+      const email = mailboxAddress(length);
+      const { createStudentAction, updateStudentAction } = await loadStudentActions();
+
+      if (operation === "create") {
+        if (accepted) {
+          createUserMock.mockResolvedValueOnce({
+            user: {
+              id: "student-1",
+              email,
+              fullName: "Alice Student",
+              role: UserRole.STUDENT,
+              learningStatus: "ACTIVE",
+              isActive: true,
+            },
+            temporaryPassword: "UniqueTemporary123_A",
+            mustChangePassword: true,
+          });
+        }
+
+        const result = await createStudentAction(buildStudentFormData({ email }));
+
+        expect(result.success).toBe(accepted);
+        if (accepted) {
+          expect(createUserMock).toHaveBeenCalledWith(
+            expect.objectContaining({ email }),
+            transactionClientMock,
+          );
+        } else {
+          expect(createUserMock).not.toHaveBeenCalled();
+          expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+        }
+        return;
+      }
+
+      if (accepted) {
+        findUserByIdMock.mockResolvedValueOnce({
+          id: "student-1",
+          email: "alice.student@example.com",
+          fullName: "Alice Student",
+          role: UserRole.STUDENT,
+          isActive: true,
+        });
+        updateUserProfileMock.mockResolvedValueOnce({
+          id: "student-1",
+          email,
+          fullName: "Alice Student",
+          phoneWhatsapp: "+254700000000",
+        });
+      }
+
+      const result = await updateStudentAction(buildStudentFormData({ id: "student-1", email }));
+
+      expect(result.success).toBe(accepted);
+      if (accepted) {
+        expect(updateUserProfileMock).toHaveBeenCalledWith(
+          expect.objectContaining({ email }),
+          transactionClientMock,
+        );
+      } else {
+        expect(findUserByIdMock).not.toHaveBeenCalled();
+        expect(updateUserProfileMock).not.toHaveBeenCalled();
+        expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it("returns structured validation errors for missing or invalid student fields", async () => {
     const { createStudentAction } = await loadStudentActions();

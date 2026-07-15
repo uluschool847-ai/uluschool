@@ -59,6 +59,14 @@ async function loadUsersActions() {
   return import(/* @vite-ignore */ specifier) as Promise<UsersActionsModule>;
 }
 
+function mailboxAddress(length: 254 | 255) {
+  const address = `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(
+    length === 254 ? 61 : 62,
+  )}`;
+  expect(address).toHaveLength(length);
+  return address;
+}
+
 function auditPayloadFor(action: string) {
   return createAdminAuditLogMock.mock.calls.find(([payload]) => payload?.action === action)?.[0];
 }
@@ -234,17 +242,51 @@ describe("Admin user management actions audit coverage", () => {
   });
 
   it.each([
+    [254, true],
+    [255, false],
+  ] as const)(
+    "accepts 254 and rejects 255 mailbox characters before generic user creation: %i / %s",
+    async (length, accepted) => {
+      const email = mailboxAddress(length);
+      if (accepted) {
+        createUserMock.mockResolvedValueOnce({
+          user: {
+            id: "user-1",
+            email,
+            fullName: "Teacher Portal",
+            role: UserRole.TEACHER,
+            isActive: true,
+          },
+          temporaryPassword: "UniqueTemporary123_A",
+          mustChangePassword: true,
+        });
+      }
+
+      const { createUserAction } = await loadUsersActions();
+      const result = await createUserAction({
+        email,
+        fullName: "Teacher Portal",
+        role: "TEACHER",
+      });
+
+      expect(result.success).toBe(accepted);
+      if (accepted) {
+        expect(createUserMock).toHaveBeenCalledWith(
+          expect.objectContaining({ email }),
+          transactionClientMock,
+        );
+      } else {
+        expect(prismaMock.$transaction).not.toHaveBeenCalled();
+        expect(createUserMock).not.toHaveBeenCalled();
+        expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it.each([
     {
       name: "invalid email",
       input: { email: "not-an-email", fullName: "Teacher Portal", role: "TEACHER" },
-    },
-    {
-      name: "mailbox longer than 254 characters",
-      input: {
-        email: `${"a".repeat(243)}@example.com`,
-        fullName: "Teacher Portal",
-        role: "TEACHER",
-      },
     },
     {
       name: "empty full name",

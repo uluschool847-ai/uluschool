@@ -111,6 +111,14 @@ function buildParentFormData(options?: {
   return formData;
 }
 
+function mailboxAddress(length: 254 | 255) {
+  const address = `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(
+    length === 254 ? 61 : 62,
+  )}`;
+  expect(address).toHaveLength(length);
+  return address;
+}
+
 function buildStudentLinkFormData(options?: {
   parentId?: string;
   studentId?: string;
@@ -221,6 +229,79 @@ describe("Admin parent account actions", () => {
       "UniqueTemporary123_A",
     );
   });
+
+  it.each([
+    ["create", 254, true],
+    ["create", 255, false],
+    ["update", 254, true],
+    ["update", 255, false],
+  ] as const)(
+    "%s accepts 254 and rejects 255 mailbox characters before repository work: %i / %s",
+    async (operation, length, accepted) => {
+      const email = mailboxAddress(length);
+      const { createParentAction, updateParentAction } = await loadParentActions();
+
+      if (operation === "create") {
+        if (accepted) {
+          createUserMock.mockResolvedValueOnce({
+            user: {
+              id: "parent-1",
+              email,
+              fullName: "Mary Parent",
+              role: UserRole.PARENT,
+              isActive: true,
+            },
+            temporaryPassword: "UniqueTemporary123_A",
+            mustChangePassword: true,
+          });
+        }
+
+        const result = await createParentAction(buildParentFormData({ email }));
+
+        expect(result.success).toBe(accepted);
+        if (accepted) {
+          expect(createUserMock).toHaveBeenCalledWith(
+            expect.objectContaining({ email }),
+            transactionClientMock,
+          );
+        } else {
+          expect(createUserMock).not.toHaveBeenCalled();
+          expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+        }
+        return;
+      }
+
+      if (accepted) {
+        findUserByIdMock.mockResolvedValueOnce({
+          id: "parent-1",
+          role: UserRole.PARENT,
+          email: "mary.parent@example.com",
+          fullName: "Mary Parent",
+          isActive: true,
+        });
+        updateUserProfileMock.mockResolvedValueOnce({
+          id: "parent-1",
+          email,
+          fullName: "Mary Parent",
+          phoneWhatsapp: "+254700000001",
+        });
+      }
+
+      const result = await updateParentAction(buildParentFormData({ id: "parent-1", email }));
+
+      expect(result.success).toBe(accepted);
+      if (accepted) {
+        expect(updateUserProfileMock).toHaveBeenCalledWith(
+          expect.objectContaining({ email }),
+          transactionClientMock,
+        );
+      } else {
+        expect(findUserByIdMock).not.toHaveBeenCalled();
+        expect(updateUserProfileMock).not.toHaveBeenCalled();
+        expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it("returns structured validation errors for missing name or invalid email", async () => {
     const { createParentAction } = await loadParentActions();

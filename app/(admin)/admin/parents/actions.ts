@@ -16,6 +16,7 @@ import {
   updateUserProfile,
 } from "@/lib/repositories/portal-repository";
 import { findUserById } from "@/lib/repositories/user-repository";
+import { mailboxSchema } from "@/lib/validations/mailbox";
 
 export type ParentActionState = {
   success: boolean;
@@ -27,7 +28,7 @@ export type ParentActionState = {
 
 const parentProfileSchema = z.object({
   fullName: z.string().trim().min(2, "Full name must be at least 2 characters (min 2)."),
-  email: z.string().trim().min(1, "Email is required.").email("Enter a valid email address."),
+  email: z.string().trim().min(1, "Email is required.").pipe(mailboxSchema),
 });
 
 const parentProfileUpdateSchema = parentProfileSchema.extend({

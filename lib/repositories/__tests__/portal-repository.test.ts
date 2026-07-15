@@ -309,6 +309,14 @@ async function loadPortalRepository() {
   return import(/* @vite-ignore */ specifier) as Promise<PortalRepositoryModule>;
 }
 
+function mailboxAddress(length: 254 | 255) {
+  const address = `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(
+    length === 254 ? 61 : 62,
+  )}`;
+  expect(address).toHaveLength(length);
+  return address;
+}
+
 describe("portal-repository admin user management", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -504,6 +512,44 @@ describe("portal-repository admin user management", () => {
     );
   });
 
+  it.each([
+    [254, true],
+    [255, false],
+  ] as const)(
+    "createUser defensively accepts 254 and rejects 255 mailbox characters: %i / %s",
+    async (length, accepted) => {
+      const email = mailboxAddress(length);
+      if (accepted) {
+        prismaMock.appUser.findUnique.mockResolvedValueOnce(null);
+        prismaMock.appUser.create.mockResolvedValueOnce({
+          id: "student-1",
+          email,
+          fullName: "Student One",
+          role: "STUDENT",
+          isActive: true,
+          learningStatus: "ACTIVE",
+        });
+      }
+
+      const { createUser } = await loadPortalRepository();
+      const operation = createUser({ email, fullName: "Student One", role: "STUDENT" });
+
+      if (accepted) {
+        await expect(operation).resolves.toEqual(
+          expect.objectContaining({ user: expect.objectContaining({ email }) }),
+        );
+        expect(prismaMock.appUser.create).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ email }) }),
+        );
+      } else {
+        await expect(operation).rejects.toThrow(/email|mailbox|invalid/i);
+        expect(prismaMock.appUser.findUnique).not.toHaveBeenCalled();
+        expect(hashPasswordMock).not.toHaveBeenCalled();
+        expect(prismaMock.appUser.create).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it.each(["TEACHER", "ADMIN"] as const)(
     "createUser keeps learningStatus student-only when creating a %s account",
     async (role) => {
@@ -612,6 +658,55 @@ describe("portal-repository admin user management", () => {
       phoneWhatsapp: "+254711111111",
     });
   });
+
+  it.each([
+    [254, true],
+    [255, false],
+  ] as const)(
+    "updateUserProfile defensively accepts 254 and rejects 255 mailbox characters: %i / %s",
+    async (length, accepted) => {
+      const email = mailboxAddress(length);
+      if (accepted) {
+        prismaMock.appUser.findUnique
+          .mockResolvedValueOnce({ id: "student-1", role: "STUDENT" })
+          .mockResolvedValueOnce(null);
+        prismaMock.appUser.update.mockResolvedValueOnce({
+          id: "student-1",
+          email,
+          fullName: "Student One",
+          phoneWhatsapp: null,
+        });
+      } else {
+        prismaMock.appUser.findUnique.mockResolvedValueOnce({
+          id: "student-1",
+          role: "STUDENT",
+        });
+      }
+
+      const { updateUserProfile } = await loadPortalRepository();
+      const operation = updateUserProfile({
+        userId: "student-1",
+        fullName: "Student One",
+        email,
+        phoneWhatsapp: null,
+      });
+
+      if (accepted) {
+        await expect(operation).resolves.toEqual(expect.objectContaining({ email }));
+        expect(prismaMock.appUser.update).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ email }) }),
+        );
+      } else {
+        await expect(operation).rejects.toThrow(/email|mailbox|invalid/i);
+        expect(prismaMock.appUser.findUnique).toHaveBeenCalledTimes(1);
+        expect(prismaMock.appUser.findUnique).toHaveBeenCalledWith({
+          where: { id: "student-1" },
+          select: { id: true, role: true },
+        });
+        expect(prismaMock.appUser.update).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it("updateUserProfile rejects duplicate emails before updating the student profile", async () => {
     prismaMock.appUser.findUnique.mockResolvedValueOnce({

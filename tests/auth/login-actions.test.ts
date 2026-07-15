@@ -81,6 +81,14 @@ function expectAllAuthCookiesClearedBefore(issueMock: ReturnType<typeof vi.fn>) 
   expect(clearInitialSetupSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
 }
 
+function mailboxAddress(length: 254 | 255) {
+  const address = `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(
+    length === 254 ? 61 : 62,
+  )}`;
+  expect(address).toHaveLength(length);
+  return address;
+}
+
 vi.mock("@/lib/auth/two-factor", () => ({
   verifyTotpCode: vi.fn(() => true),
 }));
@@ -214,23 +222,36 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
     },
   );
 
-  it("rejects a mailbox identifier longer than 254 characters before authentication", async () => {
-    const oversizedEmail = `${"a".repeat(243)}@example.com`;
-    expect(oversizedEmail).toHaveLength(255);
-    const { loginAction } = await import("@/app/portal/login/actions");
-    const formData = new FormData();
-    formData.set("email", oversizedEmail);
-    formData.set("password", "ValidPass123!");
+  it.each([
+    [254, true],
+    [255, false],
+  ] as const)(
+    "accepts 254 and rejects 255 mailbox characters before authentication: %i / %s",
+    async (length, accepted) => {
+      const email = mailboxAddress(length);
+      const { loginAction } = await import("@/app/portal/login/actions");
+      const formData = new FormData();
+      formData.set("email", email);
+      formData.set("password", "ValidPass123!");
 
-    await expect(loginAction({ success: false, message: "" }, formData)).resolves.toEqual(
-      expect.objectContaining({ success: false, message: "Invalid input" }),
-    );
+      if (accepted) {
+        await expect(loginAction({ success: false, message: "" }, formData)).rejects.toThrow(
+          "REDIRECT:/portal/student",
+        );
+        expect(findUserByEmailMock).toHaveBeenCalledWith(email);
+        expect(verifyPasswordMock).toHaveBeenCalled();
+        return;
+      }
 
-    expect(findUserByEmailMock).not.toHaveBeenCalled();
-    expect(verifyPasswordMock).not.toHaveBeenCalled();
-    expect(clearSessionMock).not.toHaveBeenCalled();
-    expect(createSessionMock).not.toHaveBeenCalled();
-  });
+      await expect(loginAction({ success: false, message: "" }, formData)).resolves.toEqual(
+        expect.objectContaining({ success: false, message: "Invalid input" }),
+      );
+      expect(findUserByEmailMock).not.toHaveBeenCalled();
+      expect(verifyPasswordMock).not.toHaveBeenCalled();
+      expect(clearSessionMock).not.toHaveBeenCalled();
+      expect(createSessionMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("omits a File-valued next parameter from the temporary-password setup session", async () => {
     findUserByEmailMock.mockResolvedValueOnce({
