@@ -1,3 +1,5 @@
+import { unlink } from "node:fs/promises";
+import path from "node:path";
 import { createSessionToken } from "@/e2e/helpers/session";
 import { type Page, expect, test } from "@playwright/test";
 import {
@@ -20,6 +22,7 @@ const MEETING_HOST = "meet.google.com";
 const SUBJECT_SLUG_PREFIX = "qa-teacher-academics-subject";
 const LEVEL_SLUG_PREFIX = "qa-teacher-academics-level";
 const TERM_PREFIX = "QA Teacher Academics Term";
+const generatedReportUploadKeys: string[] = [];
 type Fixture = {
   activityReason: string;
   classGroupId: string;
@@ -30,6 +33,7 @@ type Fixture = {
   lessonTitle: string;
   notificationTitle: string;
   progressNote: string;
+  reportSnapshotId: string;
   studentId: string;
   studentName: string;
   subjectName: string;
@@ -88,6 +92,7 @@ test.describe("Teacher academics portal", () => {
 
   test.afterAll(async () => {
     await cleanupFixtures();
+    await cleanupGeneratedReportUploads();
     await prisma.$disconnect();
   });
 
@@ -150,7 +155,44 @@ test.describe("Teacher academics portal", () => {
       "href",
       "/uploads/reports/teacher-academics.pdf",
     );
-    await expect(page.getByRole("button", { name: /^export pdf$/i })).toBeEnabled();
+    const pdfGeneratedAtBefore = await prisma.reportSnapshot.findUniqueOrThrow({
+      where: { id: fixture.reportSnapshotId },
+      select: { pdfGeneratedAt: true },
+    });
+    await page.getByRole("button", { name: /^export pdf$/i }).click();
+    let exportedReportStorageKey: string | null = null;
+    await expect
+      .poll(async () => {
+        const snapshot = await prisma.reportSnapshot.findUnique({
+          where: { id: fixture.reportSnapshotId },
+          select: { pdfGeneratedAt: true, pdfStorageKey: true },
+        });
+        exportedReportStorageKey = snapshot?.pdfStorageKey ?? null;
+        return Boolean(
+          snapshot?.pdfGeneratedAt &&
+            pdfGeneratedAtBefore.pdfGeneratedAt &&
+            snapshot.pdfGeneratedAt.getTime() > pdfGeneratedAtBefore.pdfGeneratedAt.getTime() &&
+            exportedReportStorageKey,
+        );
+      })
+      .toBe(true);
+    expect(exportedReportStorageKey).toEqual(
+      expect.stringMatching(new RegExp(`^private/teachers/${fixture.teacherId}/reports/.+\\.pdf$`)),
+    );
+    if (exportedReportStorageKey) {
+      generatedReportUploadKeys.push(exportedReportStorageKey);
+    }
+    await expect
+      .poll(async () =>
+        prisma.adminAuditLog.count({
+          where: {
+            action: "REPORT_PDF_EXPORTED",
+            actorId: fixture.teacherId,
+            targetId: fixture.reportSnapshotId,
+          },
+        }),
+      )
+      .toBeGreaterThan(0);
 
     const foreignReportResponse = await page.goto(
       `${BASE_URL}/portal/teacher/reports/${fixture.foreignSnapshotId}`,
@@ -651,7 +693,7 @@ async function createFixtures(): Promise<Fixture> {
     }),
   ]);
 
-  await prisma.reportSnapshot.create({
+  const reportSnapshot = await prisma.reportSnapshot.create({
     data: {
       academicTermId: term.id,
       classGroupId: classGroup.id,
@@ -703,6 +745,7 @@ async function createFixtures(): Promise<Fixture> {
     lessonTitle,
     notificationTitle,
     progressNote,
+    reportSnapshotId: reportSnapshot.id,
     studentId: student.id,
     studentName,
     subjectName,
@@ -712,6 +755,26 @@ async function createFixtures(): Promise<Fixture> {
     termId: term.id,
     termName,
   };
+}
+
+async function cleanupGeneratedReportUploads() {
+  const uploadRoots = [
+    path.resolve(process.cwd(), ".data", "uploads"),
+    path.resolve(process.cwd(), "public", "uploads"),
+  ];
+  for (const key of new Set(generatedReportUploadKeys)) {
+    const relative = key
+      .replace(/^\/+/, "")
+      .replace(/^public[\\/]/, "")
+      .replace(/^uploads[\\/]?/, "");
+    for (const uploadRoot of uploadRoots) {
+      const absolutePath = path.resolve(uploadRoot, relative);
+      if (absolutePath === uploadRoot || !absolutePath.startsWith(`${uploadRoot}${path.sep}`)) {
+        continue;
+      }
+      await unlink(absolutePath).catch(() => undefined);
+    }
+  }
 }
 
 function isTransientDatabaseError(error: unknown) {
