@@ -133,7 +133,9 @@ test.describe("Student assignments portal", () => {
     await expect(page.getByText(/this assignment is overdue/i)).toBeVisible();
     await page.getByLabel(/work link|submission url|content/i).fill(SUBMITTED_WORK_URL);
     await page.getByRole("button", { name: /^submit$/i }).click();
-    await expect(page.getByText(/submitted|saved|updated/i)).toBeVisible();
+    await expect(
+      page.locator("form output").filter({ hasText: /work (submitted|updated)\./i }),
+    ).toBeVisible();
 
     await page.goto(`${BASE_URL}/portal/student/assignments?status=missing`);
     await expect(page.getByText(fixture.overdueAssignmentTitle)).toHaveCount(0);
@@ -158,12 +160,16 @@ test.describe("Student assignments portal", () => {
 
     await page.getByLabel(/work link|submission url|content/i).fill(SUBMITTED_WORK_URL);
     await page.getByRole("button", { name: /^submit$/i }).click();
-    await expect(page.getByText(/submitted|saved|updated/i)).toBeVisible();
+    await expect(
+      page.locator("form output").filter({ hasText: /work (submitted|updated)\./i }),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: /resubmit/i })).toBeVisible();
 
     await page.getByLabel(/work link|submission url|content/i).fill(RESUBMITTED_WORK_URL);
     await page.getByRole("button", { name: /resubmit/i }).click();
-    await expect(page.getByText(/resubmitted|updated|saved/i)).toBeVisible();
+    await expect(
+      page.locator("form output").filter({ hasText: /work (submitted|updated)\./i }),
+    ).toBeVisible();
 
     await page.goto(`${BASE_URL}/portal/student/assignments/${fixture.gradedAssignmentId}`);
     await expect(page.getByRole("heading", { name: fixture.gradedAssignmentTitle })).toBeVisible();

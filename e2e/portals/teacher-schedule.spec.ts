@@ -138,7 +138,7 @@ test.describe("Teacher schedule portal", () => {
     await expect(joinableCard).toContainText(fixture.groupName);
     await expect(joinableCard).toContainText(/students:\s*2|roster:\s*2/i);
     await expect(joinableCard).toContainText(/scheduled|live/i);
-    await expect(joinableCard).toContainText(/Europe\/Kiev/i);
+    await expect(joinableCard).toContainText(/Africa\/Nairobi/i);
     await expect(joinableCard).toContainText(/materials:\s*1/i);
     await expect(joinableCard).toContainText(/assignments:\s*1|homework:\s*1/i);
     await expect(joinableCard).toContainText(/pending submissions:\s*1/i);

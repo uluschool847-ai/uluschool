@@ -12,6 +12,7 @@ const COOKIE_DOMAIN = new URL(BASE_URL).hostname;
 const prisma = new PrismaClient();
 
 const HTTPS_MATERIAL_HREF = "https://example.com/e2e-assets/parent-material-safe.pdf";
+const HTTPS_MATERIAL_ATTACHMENT_HREF = "/uploads/e2e/parent-material-https-attachment.pdf";
 const UPLOAD_MATERIAL_URL = "/uploads/e2e/parent-material-upload.pdf";
 const USER_EMAIL_PREFIX = "qa.parent-materials.";
 const GROUP_PREFIX = "QA Parent Materials Group";
@@ -99,7 +100,7 @@ test.describe("Parent materials portal", () => {
       materialCard(page, fixture.httpsMaterialTitle).getByRole("link", {
         name: /open material|view file|download/i,
       }),
-    ).toHaveAttribute("href", HTTPS_MATERIAL_HREF);
+    ).toHaveAttribute("href", HTTPS_MATERIAL_ATTACHMENT_HREF);
     await expect(
       materialCard(page, fixture.uploadMaterialTitle).getByRole("link", {
         name: /open material|view file|download/i,

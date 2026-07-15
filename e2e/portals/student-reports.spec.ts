@@ -80,7 +80,7 @@ test.describe("Student reports portal", () => {
       page.getByRole("link", { name: /view report/i }).click(),
     ]);
     await expect(page.getByRole("heading", { name: /^report$/i })).toBeVisible();
-    await expect(page.getByText(fixture.studentName)).toBeVisible();
+    await expect(page.locator("#main-content").getByText(fixture.studentName)).toBeVisible();
     await expect(page.getByText(fixture.termName)).toBeVisible();
     await expect(page.getByText(fixture.homeworkTitle)).toBeVisible();
     await expect(page.getByText(fixture.manualTitle)).toBeVisible();

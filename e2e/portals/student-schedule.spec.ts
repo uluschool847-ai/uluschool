@@ -130,7 +130,7 @@ test.describe("Student and parent schedule portals", () => {
     await expect(joinableCard).toContainText(fixture.subjectName);
     await expect(joinableCard).toContainText(fixture.teacherName);
     await expect(joinableCard).toContainText(fixture.groupName);
-    await expect(joinableCard).toContainText(/Europe\/Kiev/i);
+    await expect(joinableCard).toContainText(/Africa\/Nairobi/i);
     await expect(joinableCard).toContainText(/live|scheduled/i);
     await expect(joinableCard).toContainText(/\d{1,2}:\d{2}/);
     await expect(page.getByText(fixture.unlinkedLessonTitle)).toHaveCount(0);

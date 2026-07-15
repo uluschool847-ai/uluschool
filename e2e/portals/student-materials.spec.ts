@@ -91,17 +91,20 @@ test.describe("Student materials portal", () => {
     await page.getByRole("button", { name: /apply|filter|show materials/i }).click();
     await expect(page.getByText(fixture.groupMaterialTitle)).toBeVisible();
 
-    const safeLink = materialCard(page, fixture.directMaterialTitle).getByRole("link", {
+    const directMaterialCard = materialCard(page, fixture.directMaterialTitle);
+    const directMaterialLink = directMaterialCard.getByRole("link", {
       name: /open material|view file|download/i,
     });
-    await expect(safeLink).toHaveAttribute("href", SAFE_MATERIAL_URL);
+    await expect(directMaterialLink).toHaveCount(0);
+    await expect(directMaterialCard.getByText(/file unavailable/i)).toBeVisible();
 
     await page.goto(`${BASE_URL}/portal/student/schedule/${fixture.directLessonId}`);
     await expect(page.getByRole("heading", { name: fixture.directLessonTitle })).toBeVisible();
-    await expect(page.getByRole("link", { name: fixture.directMaterialTitle })).toHaveAttribute(
-      "href",
-      SAFE_MATERIAL_URL,
-    );
+    const materialsSection = page.getByRole("region", { name: /^materials$/i });
+    await expect(materialsSection.getByText(fixture.directMaterialTitle)).toBeVisible();
+    await expect(
+      materialsSection.getByRole("link", { name: fixture.directMaterialTitle }),
+    ).toHaveCount(0);
     await expect(page.getByRole("link", { name: /view all materials/i })).toHaveAttribute(
       "href",
       `/portal/student/materials?scheduledClassId=${fixture.directLessonId}`,
