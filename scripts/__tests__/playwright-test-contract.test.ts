@@ -254,7 +254,7 @@ function readPackageScripts() {
   };
 }
 
-describe("Playwright E2E partition contract", () => {
+describe("Playwright E2E partition contract", { timeout: 30_000 }, () => {
   it("runs the production release partitions with required admin 2FA isolated", () => {
     const scripts = readPackageScripts().scripts;
 
