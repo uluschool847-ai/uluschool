@@ -451,7 +451,7 @@ rg -n "findMany|findFirst|create|update|deleteMany|upsert" lib/repositories
 ```bash
 git grep -n "/portal/teacher"
 git grep -n "getActiveTeachers"
-git grep -n "DEFAULT_PORTAL_PASSWORD"
+git grep -n "SEED_PORTAL_PASSWORD"
 ```
 
 ### Git history

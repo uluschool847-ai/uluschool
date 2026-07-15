@@ -1,6 +1,7 @@
 # Role-Based QA Matrix
 
-Use `DEFAULT_PORTAL_PASSWORD` for all seeded accounts unless your local `.env.local` overrides it. If it is not overridden, the default password is `ChangeMe123!`.
+Use `SEED_PORTAL_PASSWORD` only for disposable locally seeded accounts. Hosted staging and
+production accounts are created through the production bootstrap and admin workflow instead.
 
 ## Guest (Unauthenticated)
 

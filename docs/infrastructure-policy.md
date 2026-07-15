@@ -1,41 +1,52 @@
-# Infrastructure & Security Policies
+# Infrastructure and Security Policies
 
-As mathSchool scales, establishing robust operational procedures is critical to ensure data integrity, security, and uninterrupted service.
+This policy defines the current production controls for ULU Online School. Exact operator steps
+live under `docs/deployment/`.
 
-## 1. Database Backups and Recovery
+## 1. Hosting, data, and recovery
 
-We utilize **Neon Serverless Postgres** for our database infrastructure. Neon provides built-in mechanisms that we must configure and monitor.
+- **Application:** A paid Render Web Service runs the approved `main` commit in Frankfurt.
+- **Database:** Paid Render PostgreSQL runs in Frankfurt and is reached from the web service through
+  the environment's Internal Database URL.
+- **Private files:** Cloudflare R2 buckets are private. Downloads flow through role- and
+  relationship-scoped application routes; provider object URLs and credentials are not public.
+- **Isolation:** Staging has a separate database, R2 bucket or equivalently isolated prefix,
+  Turnstile widget, Sentry environment, and no production personal data.
+- **Recovery:** The owner verifies Render point-in-time recovery, records the actual recovery
+  window, and schedules restore drills. Recovery creates an isolated database for validation before
+  cutover. Normal schema rollback is a reviewed forward corrective migration, never a reset.
+- **Exports:** Any logical backup export is encrypted, access-controlled, retention-limited, and
+  tested before it is considered a recovery control.
 
-- **Automated Backups:**
-  - Neon automatically handles continuous storage backups.
-  - We retain PITR (Point-In-Time Recovery) data for at least 7 days in production.
-- **Recovery Procedure:**
-  - In the event of catastrophic data loss or accidental deletion, the lead engineer will utilize Neon's branching feature to instantly restore the database state to a point just before the incident.
-  - The restored branch will then be promoted to the primary production endpoint.
-- **Data Export:**
-  - Weekly logical dumps (`pg_dump`) will be executed via a secure cron job and stored in encrypted S3 buckets for cold storage compliance.
+## 2. Access control
 
-## 2. Team Access Control (RBAC)
+- Production provider access follows least privilege and requires individual accounts with 2FA.
+- `ADMIN` has authorized administration scope; `TEACHER`, `STUDENT`, and `PARENT` remain constrained
+  by server-enforced assignment, enrollment, and parent-child ownership.
+- Database and provider credentials are entered only in the relevant environment dashboard. They
+  are not committed, pasted into chat, or placed in screenshots and deploy evidence.
+- Local development and CI use disposable databases. They never connect to the production database.
+- Access is reviewed at launch, on role change, and after any credential incident.
 
-Access to the mathSchool platform and infrastructure is strictly governed by the principle of least privilege.
+## 3. Deployments and monitoring
 
-- **Application Roles (`UserRole` enum):**
-  - `ADMIN`: Full access to CMS, BI dashboards, CRM, and system settings.
-  - `TEACHER`: Access limited to assigned classes, materials, and specific student data.
-  - `STUDENT` & `PARENT`: Access restricted exclusively to their own educational data.
-- **Infrastructure Access:**
-  - Production database access is restricted to Lead Engineers via VPN or secure Bastion hosts.
-  - Developers utilize separate Neon branches for development and testing. Never connect local environments to the production database URL.
+- GitHub Actions is the required verification gate. Render deploys the approved staging or `main`
+  branch only after checks pass.
+- Render runs the repository's exact build, environment validation, migration, bootstrap, start,
+  and health-check contract from `docs/deployment/render-production.md`.
+- Sentry receives sanitized application errors only when explicitly enabled. Alert tests must reach
+  the configured private operations channel without request bodies, session data, credentials,
+  database URLs, or student data.
+- A failed build or pre-deploy does not justify bypassing validation. Operators correct the cause
+  and deploy a new reviewed commit.
+- Incidents and rollback decisions follow `docs/deployment/rollback.md` with a named owner,
+  timestamps, recovery point when relevant, verification evidence, and follow-up actions.
 
-## 3. Incident Response and "Firefighting" Mitigation
+## 4. Privacy and school operations
 
-The goal of scaling is to move away from constant firefighting.
-
-- **Error Tracking:** All application errors are logged via **Sentry** (`@sentry/nextjs`). High-severity errors trigger immediate Slack alerts to the engineering team.
-- **Automated Triage:** The `ManagerTask` system automatically flags anomalous business events (e.g., consecutive failed payments) for the admin team to review proactively, rather than waiting for customer complaints.
-- **Deployments:** Vercel is used for CI/CD. All pull requests generate preview environments. Code is only merged to `main` (production) after passing automated Prisma schema validation and visual review.
-
-## 4. Privacy & Compliance
-
-- **2FA (Two-Factor Authentication):** Enabled and required for all `ADMIN` accounts.
-- **PII Protection:** Student names, contact details, and payment information are strictly segregated. Only authorized personnel can export lists of PII.
+- Admin 2FA is mandatory in staging and production.
+- Enrolment records retain the required consent evidence and link to the current privacy notice.
+- Staff access only the student and parent information needed for their assigned work.
+- Audit and monitoring metadata exclude credentials and unnecessary personal data.
+- Retention, correction, access, and deletion requests follow the published privacy policy and the
+  school's documented legal/operational decision process.

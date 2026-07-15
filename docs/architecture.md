@@ -35,7 +35,7 @@ Dedicated portals are built for different personas to streamline educational ope
 
 ### C. Process Automation Engine
 To eliminate manual "firefighting", background processes handle routine tasks.
-Since Next.js doesn't natively support long-running daemons, we use securely authenticated API routes (`/api/cron/...`) triggered by an external cron service (e.g., Vercel Cron or GitHub Actions).
+Since Next.js doesn't natively support long-running daemons, we use securely authenticated API routes (`/api/cron/...`) triggered by an approved scheduler such as a Render Cron Job or GitHub Actions.
 
 - **Automated Reminders:** Trigger WhatsApp/Email reminders for upcoming classes or pending homework deadlines.
 - **Task Generation:** Automatically create actionable tasks (`ManagerTask`) for the admin team when an `Enquiry` becomes stale or requires follow-up.
@@ -55,8 +55,10 @@ Data-driven decision making is facilitated by an internal analytics dashboard bu
 
 ## 3. Technology Stack Summary
 - **Frontend/Backend:** Next.js 15 (App Router, React 18)
-- **Database:** PostgreSQL (Neon Serverless Postgres recommended)
+- **Production hosting:** Render Web Service in Frankfurt with Render PostgreSQL in the same region
+- **Database:** PostgreSQL via Prisma; local and CI databases remain isolated from hosted environments
+- **Private files:** Cloudflare R2 behind role-scoped application download routes
 - **ORM:** Prisma Client
 - **Styling:** Tailwind CSS + Radix UI components
 - **Monitoring:** Sentry
-- **Authentication:** Custom sessions/JWT with 2FA support
+- **Authentication:** Custom signed cookie sessions with mandatory hosted-admin TOTP support

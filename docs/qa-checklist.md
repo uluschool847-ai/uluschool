@@ -16,7 +16,7 @@
 ## Student
 Use `fixed.student@uluglobalacademy.com` for data-rich checks.
 
-- [ ] Login works with the seeded password from `DEFAULT_PORTAL_PASSWORD`
+- [ ] Login works with the local seeded password from `SEED_PORTAL_PASSWORD`
 - [ ] `D:\2026\mathSchool\app\portal\student\page.tsx` shows assignments
 - [ ] Existing grade/feedback is visible on the student dashboard
 - [ ] Progress notes render on the dashboard
@@ -27,7 +27,7 @@ Use `fixed.student@uluglobalacademy.com` for data-rich checks.
 ## Teacher
 Use `fixed.teacher@uluglobalacademy.com` for data-rich checks.
 
-- [ ] Login works with the seeded password from `DEFAULT_PORTAL_PASSWORD`
+- [ ] Login works with the local seeded password from `SEED_PORTAL_PASSWORD`
 - [ ] `D:\2026\mathSchool\app\portal\teacher\page.tsx` shows metrics
 - [ ] Classes and upcoming lessons render consistent local times
 - [ ] Assignment due dates render in the same `DD Month YYYY` format used elsewhere
@@ -38,7 +38,7 @@ Use `fixed.teacher@uluglobalacademy.com` for data-rich checks.
 ## Parent
 Use `fixed.parent@uluglobalacademy.com` for the linked-child flow and `onboardingparent@uluglobalacademy.com` for the empty-state flow.
 
-- [ ] Login works with the seeded password from `DEFAULT_PORTAL_PASSWORD`
+- [ ] Login works with the local seeded password from `SEED_PORTAL_PASSWORD`
 - [ ] Parent dashboard shows one linked child with classes, homework status, grades, and progress cards
 - [ ] Empty state appears for the onboarding parent with no linked student
 - [ ] Child sections are readable and stack correctly on mobile

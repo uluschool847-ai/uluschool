@@ -8,7 +8,7 @@ Playwright specs under `e2e/portals/admin*.spec.ts` and the admin unit/action/co
 - Focused one-command QA smoke: `npm run qa:admin-smoke`
   - Allocates an isolated `localhost` port for the run and sets `PLAYWRIGHT_BASE_URL`/`PORT`.
   - Uses seeded admin credentials: `fixed.admin@uluglobalacademy.com` with `E2E_PORTAL_PASSWORD`,
-    `DEFAULT_PORTAL_PASSWORD`, or `ChangeMe123!`.
+    `SEED_PORTAL_PASSWORD`, or the local fixture fallback.
   - Runs route smoke, authenticated header checks, browser console/page error checks,
     failed-request and 5xx network checks, dashboard CRM search, reminder dry run, and sensitive
     admin RBAC.

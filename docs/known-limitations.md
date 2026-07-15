@@ -26,8 +26,10 @@
 - The local implementation does not support readable stream uploads.
 - Upload size is capped at 5 MB per file.
 - MIME types are restricted to a small allowlist plus images.
-- The upload route enforces a simple role gate (`DEVELOPER` or `TEACHER` request role).
-- There is no S3/GCS/Azure storage integration in the current local stack.
+- Upload routes derive identity and role from the authenticated server-side session. Repository and
+  action code enforce teacher assignment, student enrollment, and linked-parent ownership.
+- Hosted staging and production require private Cloudflare R2 through the S3-compatible adapter;
+  local development intentionally retains filesystem storage.
 
 ## Admin Materials / Files
 - There is intentionally no standalone `/admin/materials` or `/admin/files` workspace.
