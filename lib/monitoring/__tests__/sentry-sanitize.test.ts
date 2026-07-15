@@ -315,6 +315,47 @@ describe("sanitizeSentryEvent", () => {
     },
   );
 
+  it.each([
+    "/%252e%252e/portal/login",
+    "/%252Fportal/login",
+    "/%252e/portal/login",
+    "/%255Cportal/login",
+  ])("removes request payloads after canonicalizing encoded route %s", (url) => {
+    const event = {
+      request: {
+        url,
+        data: { safeField: "canonical-route-payload" },
+        body: { safeField: "canonical-route-body" },
+      },
+    } as Event;
+
+    const sanitized = sanitizeSentryEvent(event);
+    const request = sanitized.request as Event["request"] & { body?: unknown };
+
+    expect(request?.data).toBeUndefined();
+    expect(request?.body).toBeUndefined();
+  });
+
+  it.each([
+    "/portal/login/%252e%252e/teacher",
+    "/%252Fportal/teacher/assignments",
+    "/%255Cportal/teacher/assignments",
+  ])("preserves request payloads when canonical route %s is safe", (url) => {
+    const event = {
+      request: {
+        url,
+        data: { safeField: "safe-canonical-payload" },
+        body: { safeField: "safe-canonical-body" },
+      },
+    } as Event;
+
+    const sanitized = sanitizeSentryEvent(event);
+    const request = sanitized.request as Event["request"] & { body?: unknown };
+
+    expect(request?.data).toEqual({ safeField: "safe-canonical-payload" });
+    expect(request?.body).toEqual({ safeField: "safe-canonical-body" });
+  });
+
   it.each(["/contact-us", "/portal/logins", "/api/authentication", "/api/files/auth"])(
     "preserves safe request payloads outside sensitive route boundaries for %s",
     (url) => {

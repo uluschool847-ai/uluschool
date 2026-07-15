@@ -96,8 +96,27 @@ function pathnameFromRouteValue(value: unknown) {
   }
 }
 
+function normalizePathSegments(pathname: string) {
+  const segments: string[] = [];
+
+  for (const segment of pathname.replace(/\\/g, "/").split("/")) {
+    if (segment === "" || segment === ".") {
+      continue;
+    }
+
+    if (segment === "..") {
+      segments.pop();
+      continue;
+    }
+
+    segments.push(segment);
+  }
+
+  return `/${segments.join("/")}`;
+}
+
 function canonicalizePathname(pathname: string) {
-  let canonical = pathname.replace(/\\/g, "/");
+  let canonical = normalizePathSegments(pathname);
 
   for (let pass = 0; pass < MAX_PATH_DECODE_PASSES; pass += 1) {
     if (!canonical.includes("%")) {
@@ -105,17 +124,17 @@ function canonicalizePathname(pathname: string) {
     }
 
     if (!ENCODED_OCTET.test(canonical)) {
-      return pass === 0 ? null : canonical;
+      return null;
     }
 
     try {
-      canonical = decodeURIComponent(canonical).replace(/\\/g, "/");
+      canonical = normalizePathSegments(decodeURIComponent(canonical));
     } catch {
       return null;
     }
   }
 
-  return ENCODED_OCTET.test(canonical) ? null : canonical;
+  return canonical.includes("%") ? null : canonical;
 }
 
 function classifyRoute(value: unknown): RouteClassification {
