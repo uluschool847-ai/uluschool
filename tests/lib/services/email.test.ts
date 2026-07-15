@@ -432,6 +432,67 @@ describe("lib/services/email.ts env handling", () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
+  it("rejects invalid DNS labels before transport with zero attempts and no log", async () => {
+    configureSmtp();
+    const invalidRecipients = [
+      `student@${"a".repeat(64)}.example`,
+      "student@example..com",
+      "student@example-.com",
+    ];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { sendClassReminderEmail } = await import("../../../lib/services/email");
+
+    const results = [];
+    for (const recipientEmail of invalidRecipients) {
+      results.push(
+        await sendClassReminderEmail({
+          recipientEmail,
+          recipientName: "Private Student",
+          classTitle: "Private Mathematics Class",
+          startAt: new Date("2026-07-15T08:00:00.000Z"),
+          endAt: new Date("2026-07-15T09:00:00.000Z"),
+          liveLessonUrl: "https://example.com/private-live-class",
+        }),
+      );
+    }
+
+    expect(results).toEqual(
+      invalidRecipients.map(() => ({
+        delivered: false,
+        reason: "SEND_FAILED",
+        attempts: 0,
+      })),
+    );
+    expect(createTransportMock).not.toHaveBeenCalled();
+    expect(sendMailMock).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it("delivers to exact valid 63-octet and punycode DNS recipients", async () => {
+    configureSmtp();
+    const validRecipients = [`student@${"a".repeat(63)}.example`, "student@example.xn--p1ai"];
+    const { sendClassReminderEmail } = await import("../../../lib/services/email");
+
+    const results = [];
+    for (const recipientEmail of validRecipients) {
+      results.push(
+        await sendClassReminderEmail({
+          recipientEmail,
+          recipientName: "Student",
+          classTitle: "Mathematics",
+          startAt: new Date("2026-07-15T08:00:00.000Z"),
+          endAt: new Date("2026-07-15T09:00:00.000Z"),
+          liveLessonUrl: "https://example.com/live",
+        }),
+      );
+    }
+
+    expect(results).toEqual(validRecipients.map(() => ({ delivered: true, attempts: 1 })));
+    expect(sendMailMock.mock.calls.map(([message]) => message.to)).toEqual(
+      validRecipients.map((address) => ({ name: "", address })),
+    );
+  });
+
   it("fails closed for injected sender or school mailbox configuration", async () => {
     configureSmtp();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);

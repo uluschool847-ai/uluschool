@@ -11,9 +11,11 @@ const HTML_ENTITIES: Record<string, string> = {
 
 const MAX_MAILBOX_LENGTH = 254;
 const MAX_LOCAL_PART_LENGTH = 64;
+const MAX_DOMAIN_LENGTH = 253;
+const MAX_DOMAIN_LABEL_LENGTH = 63;
 const MAX_SENDER_NAME_CODE_POINTS = 200;
 const MAX_SUBJECT_CODE_POINTS = 200;
-const MAILBOX_SCHEMA = z.string().max(MAX_MAILBOX_LENGTH).email();
+const LOCAL_PART_MAILBOX_SCHEMA = z.string().email();
 
 export type StructuredEmailAddress = {
   name: string;
@@ -25,21 +27,81 @@ export function escapeHtml(value: unknown) {
 }
 
 export function sanitizeEmailSubject(value: unknown) {
-  const normalized = String(value ?? "")
-    .replace(/[\r\n]+/g, " ")
-    .trim();
+  let normalized = "";
+  let previousWasControl = false;
+  for (const character of String(value ?? "")) {
+    if (isDisallowedHeaderControl(character)) {
+      if (!previousWasControl) {
+        normalized += " ";
+      }
+      previousWasControl = true;
+      continue;
+    }
 
-  return Array.from(normalized).slice(0, MAX_SUBJECT_CODE_POINTS).join("");
+    normalized += character;
+    previousWasControl = false;
+  }
+
+  return Array.from(normalized.trim()).slice(0, MAX_SUBJECT_CODE_POINTS).join("");
+}
+
+function isDisallowedHeaderControl(character: string) {
+  const codePoint = character.codePointAt(0);
+  return codePoint !== undefined && (codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f));
+}
+
+function hasDisallowedHeaderControl(value: string) {
+  return Array.from(value).some(isDisallowedHeaderControl);
+}
+
+function isAsciiDnsCharacter(character: string) {
+  const codePoint = character.codePointAt(0);
+  return (
+    codePoint !== undefined &&
+    ((codePoint >= 0x30 && codePoint <= 0x39) ||
+      (codePoint >= 0x41 && codePoint <= 0x5a) ||
+      (codePoint >= 0x61 && codePoint <= 0x7a) ||
+      codePoint === 0x2d)
+  );
+}
+
+function hasValidDnsDomain(domain: string) {
+  const labels = domain.split(".");
+  if (labels.length < 2 || labels.some((label) => label.length === 0)) {
+    return false;
+  }
+
+  for (const label of labels) {
+    if (!Array.from(label).every(isAsciiDnsCharacter)) {
+      return false;
+    }
+
+    // ASCII-only labels make JavaScript string length equal the DNS octet length.
+    if (label.length > MAX_DOMAIN_LABEL_LENGTH || label.startsWith("-") || label.endsWith("-")) {
+      return false;
+    }
+  }
+
+  return domain.length <= MAX_DOMAIN_LENGTH;
 }
 
 function hasValidMailboxSyntax(value: string) {
   const separatorIndex = value.lastIndexOf("@");
-  if (separatorIndex <= 0 || separatorIndex !== value.indexOf("@")) {
+  if (
+    value.length > MAX_MAILBOX_LENGTH ||
+    separatorIndex <= 0 ||
+    separatorIndex !== value.indexOf("@")
+  ) {
     return false;
   }
 
   const localPart = value.slice(0, separatorIndex);
-  return localPart.length <= MAX_LOCAL_PART_LENGTH && MAILBOX_SCHEMA.safeParse(value).success;
+  const domain = value.slice(separatorIndex + 1);
+  return (
+    localPart.length <= MAX_LOCAL_PART_LENGTH &&
+    LOCAL_PART_MAILBOX_SCHEMA.safeParse(`${localPart}@example.com`).success &&
+    hasValidDnsDomain(domain)
+  );
 }
 
 function parseOneAddress(value: unknown) {
@@ -47,7 +109,7 @@ function parseOneAddress(value: unknown) {
     typeof value !== "string" ||
     value.length === 0 ||
     value !== value.trim() ||
-    /[\r\n]/.test(value)
+    hasDisallowedHeaderControl(value)
   ) {
     return null;
   }
@@ -58,13 +120,6 @@ function parseOneAddress(value: unknown) {
   }
 
   return parsed[0];
-}
-
-function hasControlCharacter(value: string) {
-  return Array.from(value).some((character) => {
-    const codePoint = character.codePointAt(0);
-    return codePoint !== undefined && (codePoint <= 31 || codePoint === 127);
-  });
 }
 
 export function parseSingleMailbox(value: unknown): StructuredEmailAddress | null {
@@ -96,7 +151,7 @@ export function parseEmailSender(value: unknown): StructuredEmailAddress | null 
     typeof value !== "string" ||
     !value.endsWith(addressSuffix) ||
     Array.from(parsed.name).length > MAX_SENDER_NAME_CODE_POINTS ||
-    hasControlCharacter(parsed.name)
+    hasDisallowedHeaderControl(parsed.name)
   ) {
     return null;
   }
