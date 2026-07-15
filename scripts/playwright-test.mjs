@@ -47,23 +47,56 @@ function expandArg(arg) {
   return matches.length > 0 ? matches : [arg];
 }
 
+const playwrightOptionsWithRequiredValues = new Set([
+  "--browser",
+  "--global-timeout",
+  "--grep",
+  "--grep-invert",
+  "--max-failures",
+  "--output",
+  "--project",
+  "--repeat-each",
+  "--retries",
+  "--run-agents",
+  "--shard",
+  "--test-list",
+  "--test-list-invert",
+  "--timeout",
+  "--trace",
+  "--tsconfig",
+  "--ui-host",
+  "--ui-port",
+  "--update-source-method",
+  "--workers",
+  "-g",
+  "-j",
+]);
+
+function isPlaywrightConfigOption(arg) {
+  return (
+    arg === "--config" ||
+    arg.startsWith("--config=") ||
+    arg === "-c" ||
+    arg.startsWith("-c=") ||
+    (arg.startsWith("-c") && arg.length > 2)
+  );
+}
+
 function withReleaseReporter(args, reporterPath) {
   const forwardedArgs = [];
+  const releaseReporterArg = `--reporter=${reporterPath}`;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (
-      arg === "--config" ||
-      arg.startsWith("--config=") ||
-      arg === "-c" ||
-      arg.startsWith("-c=") ||
-      (arg.startsWith("-c") && arg.length > 2)
-    ) {
+    if (arg === "--") {
+      return [...forwardedArgs, releaseReporterArg, ...args.slice(index)];
+    }
+    if (isPlaywrightConfigOption(arg)) {
       throw new Error("Release Playwright partitions do not accept caller --config/-c overrides.");
     }
     if (arg === "--reporter") {
       const value = args[index + 1];
-      if (!value || value.startsWith("-")) {
+      if (!value) {
         throw new Error("--reporter requires a reporter value.");
       }
       index += 1;
@@ -76,9 +109,13 @@ function withReleaseReporter(args, reporterPath) {
       continue;
     }
     forwardedArgs.push(arg);
+    if (playwrightOptionsWithRequiredValues.has(arg) && args[index + 1] !== undefined) {
+      forwardedArgs.push(args[index + 1]);
+      index += 1;
+    }
   }
 
-  return [...forwardedArgs, `--reporter=${reporterPath}`];
+  return [...forwardedArgs, releaseReporterArg];
 }
 
 function portFromBaseUrl(baseUrl) {

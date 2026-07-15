@@ -251,10 +251,11 @@ function runActualPlaywrightFixture(
   source: string,
   options: {
     args?: string[];
-    callerConfig?: "equals" | "separate";
+    callerConfig?: "equals" | "separate" | "short-attached" | "short-equals" | "short-separate";
     callerReporter?: "hostile";
     environmentReporter?: "hostile";
     partition?: "focused" | "standard";
+    specFileName?: string;
   } = {},
 ): {
   bridgeRan: boolean;
@@ -270,7 +271,7 @@ function runActualPlaywrightFixture(
   const hostileConfigFile = join(directory, "hostile-playwright.config.mjs");
   const hostileConfigMarkerFile = join(directory, "hostile-playwright-config-ran.txt");
   const hostileReporterFile = join(directory, "hostile-reporter.mjs");
-  const specFile = join(directory, "release-gate.spec.mjs");
+  const specFile = join(directory, options.specFileName ?? "release-gate.spec.mjs");
   const realPlaywrightCli = join(ROOT, "node_modules", "@playwright", "test", "cli.js");
 
   writeFileSync(
@@ -322,17 +323,10 @@ import { writeFileSync } from "node:fs";
 
 writeFileSync(${JSON.stringify(bridgeMarkerFile)}, "ran");
 const args = process.argv.slice(2);
-const hasCallerConfig = args.some(
-  (arg) =>
-    arg === "--config" ||
-    arg.startsWith("--config=") ||
-    arg === "-c" ||
-    arg.startsWith("-c=") ||
-    (arg.startsWith("-c") && arg.length > 2),
-);
+const hasCallerConfig = ${JSON.stringify(options.callerConfig !== undefined)};
 const forwardedArgs = hasCallerConfig
   ? args
-  : [...args, ${JSON.stringify(`--config=${configFile}`)}];
+  : [args[0], ${JSON.stringify(`--config=${configFile}`)}, ...args.slice(1)];
 const result = spawnSync(
   process.execPath,
   [${JSON.stringify(realPlaywrightCli)}, ...forwardedArgs],
@@ -351,7 +345,13 @@ process.exit(result.status ?? 1);
       ? ["--config", hostileConfigFile]
       : options.callerConfig === "equals"
         ? [`--config=${hostileConfigFile}`]
-        : [];
+        : options.callerConfig === "short-separate"
+          ? ["-c", hostileConfigFile]
+          : options.callerConfig === "short-equals"
+            ? [`-c=${hostileConfigFile}`]
+            : options.callerConfig === "short-attached"
+              ? [`-c${hostileConfigFile}`]
+              : [];
   const callerReporterArgs =
     options.callerReporter === "hostile" ? [`--reporter=${hostileReporterFile}`] : [];
   const result = spawnSync(
@@ -466,13 +466,31 @@ const releaseConfigOverrideCases = [
 ].flatMap(([partitionName, partitionFlag]) => [
   {
     configArgs: ["--config", "hostile-release-config.mjs"],
-    formName: "separate",
+    formName: "long separate",
     partitionFlag,
     partitionName,
   },
   {
     configArgs: ["--config=hostile-release-config.mjs"],
-    formName: "equals",
+    formName: "long equals",
+    partitionFlag,
+    partitionName,
+  },
+  {
+    configArgs: ["-c", "hostile-release-config.mjs"],
+    formName: "short separate",
+    partitionFlag,
+    partitionName,
+  },
+  {
+    configArgs: ["-c=hostile-release-config.mjs"],
+    formName: "short equals",
+    partitionFlag,
+    partitionName,
+  },
+  {
+    configArgs: ["-chostile-release-config.mjs"],
+    formName: "short attached",
     partitionFlag,
     partitionName,
   },
@@ -687,6 +705,55 @@ test.skip("hostile config skipped release test", () => {});
     expect(result.hostileConfigRan).toBe(false);
     expect(result.output).toContain(RELEASE_CONFIG_ERROR);
     expect(result.output).not.toContain(HOSTILE_REPORTER_MARKER);
+  });
+
+  cliIt("rejects an attached short config before its executable module can run", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test("hostile attached short config release failure", () => {
+  throw new Error("hostile attached short config failure detail");
+});
+`,
+      { callerConfig: "short-attached" },
+    );
+
+    expect(result.status, result.output).toBe(1);
+    expect(result.bridgeRan).toBe(false);
+    expect(result.hostileConfigRan).toBe(false);
+    expect(result.output).toContain(RELEASE_CONFIG_ERROR);
+    expect(result.output).not.toContain(HOSTILE_REPORTER_MARKER);
+  });
+
+  cliIt("runs a real release fixture with a dash-prefixed grep value", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test("controlled -critical grep release test", () => {});
+test("controlled unmatched grep release test", () => {});
+`,
+      { args: ["--grep", "-critical"] },
+    );
+
+    expect(result.status, result.output).toBe(0);
+    expect(result.bridgeRan).toBe(true);
+    expect(result.output).not.toContain(RELEASE_CONFIG_ERROR);
+    expect(playwrightSummaryCounts(result.output)).toEqual(["1 passed"]);
+  });
+
+  cliIt("runs a real release fixture with a dash-prefixed positional filter", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test("controlled positional release test", () => {});
+`,
+      { args: ["--", "-critical"], specFileName: "release-critical.spec.mjs" },
+    );
+
+    expect(result.status, result.output).toBe(0);
+    expect(result.bridgeRan).toBe(true);
+    expect(result.output).not.toContain(RELEASE_CONFIG_ERROR);
+    expect(playwrightSummaryCounts(result.output)).toEqual(["1 passed"]);
   });
 
   cliIt("rejects a timed-out result despite a hostile caller reporter", () => {
@@ -961,11 +1028,37 @@ test.skip("controlled focused skipped test", () => {});
     SUBPROCESS_TEST_TIMEOUT_MS,
   );
 
+  cliIt("forwards a dash-prefixed mandatory option value in a release run", () => {
+    const { capture, status } = runRunner([
+      "--standard-partition",
+      "--grep",
+      "-critical",
+      "--list",
+    ]);
+
+    expect(status).toBe(0);
+    expectReleaseReporterArgs(capture, ["test", "--grep", "-critical", "--list"]);
+    expectWrapperFlagsRemoved(capture);
+  });
+
+  cliIt("forwards a dash-prefixed positional filter after the option terminator", () => {
+    const { capture, status } = runRunner(["--standard-partition", "--", "-critical"]);
+
+    expect(status).toBe(0);
+    expect(capture.args).toEqual(["test", `--reporter=${RELEASE_REPORTER}`, "--", "-critical"]);
+    expectWrapperFlagsRemoved(capture);
+  });
+
   it.each([
-    ["separate", ["--config", "focused-config.mjs"]],
-    ["equals", ["--config=focused-config.mjs"]],
+    ["long separate config", ["--config", "focused-config.mjs"]],
+    ["long equals config", ["--config=focused-config.mjs"]],
+    ["short separate config", ["-c", "focused-config.mjs"]],
+    ["short equals config", ["-c=focused-config.mjs"]],
+    ["short attached config", ["-cfocused-config.mjs"]],
+    ["dash-prefixed grep value", ["--grep", "-critical"]],
+    ["dash-prefixed positional filter", ["--", "-critical"]],
   ])(
-    "forwards the focused $0 config form unchanged",
+    "forwards focused $0 arguments unchanged",
     (_formName, configArgs) => {
       const { capture, status } = runRunner([...configArgs, "--list"]);
 

@@ -185,7 +185,7 @@ test.describe("Teacher progress portal", () => {
     await expect(page.getByText(/excellent work with functions/i)).toBeVisible();
 
     await page.getByRole("link", { name: /all progress|back to progress/i }).click();
-    await expect(page).toHaveURL(new RegExp("/portal/teacher/progress(?:\\?|$)"));
+    await expect(page).toHaveURL(/\/portal\/teacher\/progress(?:\?|$)/);
     await page.getByLabel(/status/i).selectOption("archived");
     await page.getByRole("button", { name: /apply/i }).click();
     await expect(page.getByText(/excellent work with functions/i)).toBeVisible();
