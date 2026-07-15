@@ -14,6 +14,7 @@ const TEACHER_PREFIX = "E2E Teacher";
 const USER_EMAIL_PREFIX = "e2e.teacher.";
 const TEST_DIR = path.join(process.cwd(), ".e2e-debug", "admin-teachers");
 
+const validPngPath = path.join(TEST_DIR, "valid.png");
 const invalidSvgPath = path.join(TEST_DIR, "invalid.svg");
 const oversizedPngPath = path.join(TEST_DIR, "oversized.png");
 
@@ -65,12 +66,16 @@ test.describe("Admin Teacher Management", () => {
       displayOrder: 8,
       subjects: ["Mathematics", "Physics"],
       cabinetUserId: createUser.id,
+      photoPath: validPngPath,
     });
 
-    await seedTeacherPhoto(mainTeacher.id);
-    await page.reload();
     const createdRow = rowByText(page, mainTeacher.fullName);
+    const createdPhotoUrl = requirePhotoUrl(mainTeacher.photoUrl);
     await expect(createdRow.getByRole("img", { name: mainTeacher.fullName })).toBeVisible();
+    await expect(createdRow.getByRole("img", { name: mainTeacher.fullName })).toHaveAttribute(
+      "src",
+      createdPhotoUrl,
+    );
     await expect(createdRow).toContainText("Linked account");
 
     const updatedName = `${TEACHER_PREFIX} Flow Updated ${RUN_ID}`;
@@ -82,10 +87,12 @@ test.describe("Admin Teacher Management", () => {
       checkSubjects: ["Biology", "Chemistry"],
       uncheckSubjects: ["Mathematics", "Physics"],
       cabinetUserId: testUsers.editUser.id,
+      photoPath: validPngPath,
     });
 
     await page.reload();
-    await expect(rowByText(page, updatedName)).toBeVisible();
+    const updatedRow = rowByText(page, updatedName);
+    await expect(updatedRow).toBeVisible();
 
     const updatedTeacher = await prisma.teacher.findUniqueOrThrow({
       where: { id: mainTeacher.id },
@@ -96,6 +103,10 @@ test.describe("Admin Teacher Management", () => {
       "Biology",
       "Chemistry",
     ]);
+    await expect(updatedRow.getByRole("img", { name: updatedName })).toHaveAttribute(
+      "src",
+      requirePhotoUrl(updatedTeacher.photoUrl),
+    );
 
     await removeTeacherPhoto(page, mainTeacher.id, updatedName);
     await verifyStatusToggleAndPublicFiltering(page, updatedName);
@@ -262,13 +273,6 @@ async function createTeacherCabinetUser(page: Page) {
   });
 }
 
-async function seedTeacherPhoto(teacherId: string) {
-  await prisma.teacher.update({
-    data: { photoUrl: "/uploads/e2e-teacher-photo.png" },
-    where: { id: teacherId },
-  });
-}
-
 async function editTeacherProfile(
   page: Page,
   teacherId: string,
@@ -280,6 +284,7 @@ async function editTeacherProfile(
     checkSubjects: string[];
     uncheckSubjects: string[];
     cabinetUserId: string;
+    photoPath: string;
   },
 ) {
   await page.goto(`/admin/teachers/${teacherId}/edit`);
@@ -296,9 +301,18 @@ async function editTeacherProfile(
   }
 
   await page.getByRole("combobox", { name: "Cabinet access" }).selectOption(input.cabinetUserId);
+  await page.locator('input[type="file"][name="photo"]').setInputFiles(input.photoPath);
   await page.getByRole("button", { name: "Save Changes" }).click();
 
   await expect(rowByText(page, input.fullName)).toBeVisible({ timeout: 60000 });
+}
+
+function requirePhotoUrl(photoUrl: string | null) {
+  expect(photoUrl).toBeTruthy();
+  if (!photoUrl) {
+    throw new Error("Expected teacher photo to persist after upload.");
+  }
+  return photoUrl;
 }
 
 async function removeTeacherPhoto(page: Page, teacherId: string, teacherName: string) {
@@ -539,6 +553,13 @@ async function cleanupTestData() {
 
 function ensureUploadFixtures() {
   mkdirSync(TEST_DIR, { recursive: true });
+  writeFileSync(
+    validPngPath,
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAFgwJ/l1skWQAAAABJRU5ErkJggg==",
+      "base64",
+    ),
+  );
   writeFileSync(
     invalidSvgPath,
     '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
