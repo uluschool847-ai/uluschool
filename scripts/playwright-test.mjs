@@ -99,13 +99,33 @@ async function ensureBaseUrl() {
 }
 
 const isolatedServerFlag = "--isolated-server";
+const nextStartFlag = "--next-start";
+const partitionFlags = new Map([
+  ["--standard-partition", "standard"],
+  ["--storage-partition", "storage"],
+  ["--initial-admin-2fa-partition", "initial-admin-2fa"],
+]);
 const rawArgs = process.argv.slice(2);
-const usesIsolatedServer = rawArgs.includes(isolatedServerFlag);
-const expandedArgs = rawArgs.filter((arg) => arg !== isolatedServerFlag).flatMap(expandArg);
+const selectedPartitions = rawArgs
+  .filter((arg) => partitionFlags.has(arg))
+  .map((arg) => partitionFlags.get(arg));
+
+if (selectedPartitions.length > 1) {
+  throw new Error("Only one Playwright E2E partition can be selected at a time.");
+}
+
+const partition = selectedPartitions[0] ?? "focused";
+const usesIsolatedServer = rawArgs.includes(isolatedServerFlag) || partition !== "focused";
+const usesNextStart = rawArgs.includes(nextStartFlag);
+const expandedArgs = rawArgs
+  .filter((arg) => arg !== isolatedServerFlag && arg !== nextStartFlag && !partitionFlags.has(arg))
+  .flatMap(expandArg);
 
 if (usesIsolatedServer) {
   Reflect.deleteProperty(process.env, "PLAYWRIGHT_BASE_URL");
   Reflect.deleteProperty(process.env, "PORT");
+  Reflect.deleteProperty(process.env, "PLAYWRIGHT_SERVER_COMMAND");
+  Reflect.deleteProperty(process.env, "E2E_PLAYWRIGHT_SERVER_COMMAND");
   process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER = "false";
 }
 
@@ -115,16 +135,23 @@ if (usesIsolatedServer) {
   console.log(`Playwright isolated server: ${process.env.PLAYWRIGHT_BASE_URL} (reuse disabled).`);
 }
 
-const runsInitialAdminTwoFactorSpec = expandedArgs.some(
-  (arg) => arg.replaceAll("\\", "/") === "e2e/portals/initial-admin-2fa.spec.ts",
-);
+const runsInitialAdminTwoFactorSpec =
+  partition === "initial-admin-2fa" ||
+  expandedArgs.some((arg) => arg.replaceAll("\\", "/") === "e2e/portals/initial-admin-2fa.spec.ts");
 
 process.env.E2E_ADMIN_REQUIRE_2FA = runsInitialAdminTwoFactorSpec ? "true" : "false";
+process.env.E2E_PARTITION = partition;
+if (usesNextStart) process.env.E2E_PLAYWRIGHT_SERVER_COMMAND = "npx next start";
 
-const executable = process.platform === "win32" ? "playwright.cmd" : "playwright";
-const child = spawn(executable, ["test", ...expandedArgs], {
-  shell: true,
+const playwrightCli = path.resolve("node_modules", "@playwright", "test", "cli.js");
+const child = spawn(process.execPath, [playwrightCli, "test", ...expandedArgs], {
+  shell: false,
   stdio: "inherit",
+});
+
+child.on("error", (error) => {
+  console.error(`Unable to start Playwright: ${error.message}`);
+  process.exit(1);
 });
 
 child.on("exit", (code, signal) => {

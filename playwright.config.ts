@@ -4,8 +4,19 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 const reuseExistingServer = /^(1|true|yes)$/i.test(
   process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER ?? "",
 );
-const serverCommand = process.env.PLAYWRIGHT_SERVER_COMMAND?.trim() || "npm run dev";
+const partition = process.env.E2E_PARTITION ?? "focused";
+const isStoragePartition = partition === "storage";
 const runInitialAdminTwoFactorSpec = process.env.E2E_ADMIN_REQUIRE_2FA === "true";
+const serverCommand = isStoragePartition
+  ? "npm run dev"
+  : (process.env.E2E_PLAYWRIGHT_SERVER_COMMAND ??
+    process.env.PLAYWRIGHT_SERVER_COMMAND?.trim() ??
+    "npm run dev");
+const storageSpecPattern =
+  /(?:^|[\\/])(admin-teachers|teacher-academics|teacher-materials)\.spec\.ts$/;
+const initialAdminTwoFactorSpecPattern = /initial-admin-2fa\.spec\.ts$/;
+const testIgnore =
+  partition === "standard" ? [storageSpecPattern, initialAdminTwoFactorSpecPattern] : undefined;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -13,7 +24,7 @@ export default defineConfig({
   retries: 1,
   workers: 1,
   timeout: 60000,
-  testIgnore: runInitialAdminTwoFactorSpec ? undefined : /initial-admin-2fa\.spec\.ts$/,
+  testIgnore,
   expect: {
     timeout: 10000,
   },
@@ -37,7 +48,8 @@ export default defineConfig({
     stderr: "pipe",
     env: {
       ...process.env,
-      ADMIN_REQUIRE_2FA: process.env.E2E_ADMIN_REQUIRE_2FA ?? "false",
+      ADMIN_REQUIRE_2FA: runInitialAdminTwoFactorSpec ? "true" : "false",
+      ...(isStoragePartition ? { STORAGE_DRIVER: "local" } : {}),
     },
   },
 });
