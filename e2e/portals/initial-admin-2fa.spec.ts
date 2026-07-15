@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 
 const password =
   process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
-const adminTwoFactorRequired = process.env.E2E_ADMIN_REQUIRE_2FA === "true";
+const adminTwoFactorRequired = (process.env.E2E_ADMIN_REQUIRE_2FA ?? "false") === "true";
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const email = `qa.initial-2fa.${runId}@example.com`;
 let adminId = "";

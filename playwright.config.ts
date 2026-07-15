@@ -6,7 +6,7 @@ const reuseExistingServer = /^(1|true|yes)$/i.test(
 );
 const partition = process.env.E2E_PARTITION ?? "focused";
 const isStoragePartition = partition === "storage";
-const adminTwoFactorRequired = process.env.E2E_ADMIN_REQUIRE_2FA === "true";
+const adminTwoFactorRequired = (process.env.E2E_ADMIN_REQUIRE_2FA ?? "false") === "true";
 const serverCommand = isStoragePartition
   ? "npm run dev"
   : (process.env.E2E_PLAYWRIGHT_SERVER_COMMAND ??

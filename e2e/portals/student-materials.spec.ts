@@ -10,7 +10,7 @@ import {
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 const COOKIE_DOMAIN = new URL(BASE_URL).hostname;
 const prisma = new PrismaClient();
-const HTTP_MATERIAL_URL = "http://cdn.example.com/e2e-assets/student-material-http.pdf";
+const HTTP_MATERIAL_HREF = "http://cdn.example.com/e2e-assets/student-material-http.pdf";
 
 const USER_EMAIL_PREFIX = "qa.student-materials.";
 const LESSON_PREFIX = "QA Student Materials Lesson";
@@ -250,7 +250,7 @@ async function createFixtures(): Promise<StudentMaterialsFixture> {
     prisma.courseMaterial.create({
       data: {
         description: "Direct enrollment HTTP material should remain visible but non-clickable.",
-        fileUrl: HTTP_MATERIAL_URL,
+        fileUrl: HTTP_MATERIAL_HREF,
         scheduledClassId: directLesson.id,
         teacherId: teacher.id,
         title: httpMaterialTitle,
