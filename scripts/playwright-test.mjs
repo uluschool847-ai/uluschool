@@ -141,6 +141,7 @@ const runsInitialAdminTwoFactorSpec =
 
 process.env.E2E_ADMIN_REQUIRE_2FA = runsInitialAdminTwoFactorSpec ? "true" : "false";
 process.env.E2E_PARTITION = partition;
+if (partition === "storage") process.env.STORAGE_DRIVER = "local";
 if (usesNextStart) process.env.E2E_PLAYWRIGHT_SERVER_COMMAND = "npx next start";
 
 const playwrightCli = path.resolve("node_modules", "@playwright", "test", "cli.js");
