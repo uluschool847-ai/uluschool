@@ -15,7 +15,7 @@ const serverCommand = isStoragePartition
 const storageSpecPattern =
   /(?:^|[\\/])(admin-teachers|teacher-academics|teacher-materials)\.spec\.ts$/;
 const adminTwoFactorSpecPattern = /(?:admin-security|initial-admin-2fa)\.spec\.ts$/;
-const signedDeliverySpecPattern = /(?:^|[\\/])signed-file-delivery\.spec\.ts$/;
+const signedDeliverySpecPattern = /(?:^|[\\/])e2e[\\/]storage[\\/]signed-file-delivery\.spec\.ts$/;
 const testIgnore =
   partition === "standard"
     ? [storageSpecPattern, adminTwoFactorSpecPattern, signedDeliverySpecPattern]

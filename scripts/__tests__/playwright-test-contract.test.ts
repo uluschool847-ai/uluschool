@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
@@ -11,7 +11,18 @@ const temporaryDirectories: string[] = [];
 type Capture = {
   args: string[];
   environment: Record<string, string | null>;
+  matcherResults: Record<string, boolean>;
   source: string;
+  webServerEnvironment: Record<string, string | null>;
+};
+
+const signedDeliveryEnvironment = {
+  RUN_S4_SIGNED_DELIVERY_E2E: "1",
+  STORAGE_DRIVER: "r2",
+  R2_ENDPOINT: "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com",
+  R2_ACCESS_KEY_ID: "r2-access-key-value",
+  R2_SECRET_ACCESS_KEY: "r2-secret-key-value",
+  R2_BUCKET_NAME: "s4-private-files",
 };
 
 const hostileEnvironment = {
@@ -36,40 +47,116 @@ afterEach(() => {
 
 function writeCaptureCli(directory: string, source: string) {
   const cli = join(directory, `${source}-playwright-cli.mjs`);
+  const configLoader = join(directory, `${source}-config-loader.mts`);
   const sourceLiteral = JSON.stringify(source);
+
+  writeFileSync(
+    configLoader,
+    `import { pathToFileURL } from "node:url";
+
+const configFile = process.env.PLAYWRIGHT_TEST_CONFIG_FILE;
+
+if (!configFile) {
+  throw new Error("PLAYWRIGHT_TEST_CONFIG_FILE is required.");
+}
+
+const configModule = await import(pathToFileURL(configFile).href);
+const config = configModule.default;
+const webServer = Array.isArray(config.webServer) ? config.webServer[0] : config.webServer;
+const environmentKeys = [
+  "PLAYWRIGHT_BASE_URL",
+  "PORT",
+  "PLAYWRIGHT_REUSE_EXISTING_SERVER",
+  "PLAYWRIGHT_SERVER_COMMAND",
+  "E2E_PLAYWRIGHT_SERVER_COMMAND",
+  "E2E_ADMIN_REQUIRE_2FA",
+  "ADMIN_REQUIRE_2FA",
+  "E2E_PARTITION",
+  "STORAGE_DRIVER",
+  "RUN_S4_SIGNED_DELIVERY_E2E",
+  "R2_ENDPOINT",
+  "R2_ACCESS_KEY_ID",
+  "R2_SECRET_ACCESS_KEY",
+  "R2_BUCKET_NAME",
+];
+const webServerEnvironment = Object.fromEntries(
+  environmentKeys.map((name) => [name, webServer?.env?.[name] ?? null]),
+);
+const ignorePatterns = (Array.isArray(config.testIgnore) ? config.testIgnore : [config.testIgnore])
+  .filter((pattern) => pattern instanceof RegExp);
+const matcherPaths = [
+  "e2e/storage/signed-file-delivery.spec.ts",
+  "e2e\\\\storage\\\\signed-file-delivery.spec.ts",
+  "e2e/other/signed-file-delivery.spec.ts",
+  "e2e\\\\other\\\\signed-file-delivery.spec.ts",
+];
+const matcherResults = Object.fromEntries(
+  matcherPaths.map((filePath) => [
+    filePath,
+    ignorePatterns.some((pattern) => pattern.test(filePath)),
+  ]),
+);
+
+process.stdout.write(JSON.stringify({ matcherResults, webServerEnvironment }));
+`,
+  );
 
   writeFileSync(
     cli,
     `import { writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 
 const captureFile = process.env.PLAYWRIGHT_TEST_CAPTURE_FILE;
+const configFile = process.env.PLAYWRIGHT_TEST_CONFIG_FILE;
 
-if (!captureFile) {
-  throw new Error("PLAYWRIGHT_TEST_CAPTURE_FILE is required for the test capture CLI.");
+if (!captureFile || !configFile) {
+  throw new Error("PLAYWRIGHT_TEST_CAPTURE_FILE and PLAYWRIGHT_TEST_CONFIG_FILE are required.");
 }
 
+const requireFromProject = createRequire(configFile);
+const tsxCliPath = requireFromProject.resolve("tsx/cli");
+const configCapture = spawnSync(
+  process.execPath,
+  [tsxCliPath, ${JSON.stringify(configLoader)}],
+  { encoding: "utf8", env: process.env },
+);
+
+if (configCapture.status !== 0) {
+  throw new Error("Unable to capture Playwright config: " + configCapture.stderr);
+}
+
+const { matcherResults, webServerEnvironment } = JSON.parse(configCapture.stdout);
+const environmentKeys = [
+  "PLAYWRIGHT_BASE_URL",
+  "PORT",
+  "PLAYWRIGHT_REUSE_EXISTING_SERVER",
+  "PLAYWRIGHT_SERVER_COMMAND",
+  "E2E_PLAYWRIGHT_SERVER_COMMAND",
+  "E2E_ADMIN_REQUIRE_2FA",
+  "ADMIN_REQUIRE_2FA",
+  "E2E_PARTITION",
+  "STORAGE_DRIVER",
+  "RUN_S4_SIGNED_DELIVERY_E2E",
+  "R2_ENDPOINT",
+  "R2_ACCESS_KEY_ID",
+  "R2_SECRET_ACCESS_KEY",
+  "R2_BUCKET_NAME",
+];
+
 const capturedEnvironment = Object.fromEntries(
-  [
-    "PLAYWRIGHT_BASE_URL",
-    "PORT",
-    "PLAYWRIGHT_REUSE_EXISTING_SERVER",
-    "PLAYWRIGHT_SERVER_COMMAND",
-    "E2E_PLAYWRIGHT_SERVER_COMMAND",
-    "E2E_ADMIN_REQUIRE_2FA",
-    "ADMIN_REQUIRE_2FA",
-    "E2E_PARTITION",
-    "STORAGE_DRIVER",
-    "RUN_S4_SIGNED_DELIVERY_E2E",
-    "R2_ENDPOINT",
-    "R2_ACCESS_KEY_ID",
-    "R2_SECRET_ACCESS_KEY",
-    "R2_BUCKET_NAME",
-  ].map((name) => [name, process.env[name] ?? null]),
+  environmentKeys.map((name) => [name, process.env[name] ?? null]),
 );
 
 writeFileSync(
   captureFile,
-  JSON.stringify({ source: ${sourceLiteral}, args: process.argv.slice(2), environment: capturedEnvironment }),
+  JSON.stringify({
+    source: ${sourceLiteral},
+    args: process.argv.slice(2),
+    environment: capturedEnvironment,
+    matcherResults,
+    webServerEnvironment,
+  }),
 );
 
 process.exit(Number(process.env.PLAYWRIGHT_TEST_EXIT_CODE ?? "0"));
@@ -100,6 +187,7 @@ function runRunner(
         ...environment,
         NODE_ENV: "test",
         PLAYWRIGHT_TEST_CAPTURE_FILE: captureFile,
+        PLAYWRIGHT_TEST_CONFIG_FILE: join(ROOT, "playwright.config.ts"),
         PLAYWRIGHT_TEST_CLI: ambientCli,
       },
     },
@@ -130,6 +218,7 @@ function runProductionRunner(useExplicitHook: boolean) {
       ...hostileEnvironment,
       NODE_ENV: "production",
       PLAYWRIGHT_TEST_CAPTURE_FILE: captureFile,
+      PLAYWRIGHT_TEST_CONFIG_FILE: join(ROOT, "playwright.config.ts"),
       PLAYWRIGHT_TEST_CLI: ambientCli,
     },
   });
@@ -165,14 +254,9 @@ function readPackageScripts() {
   };
 }
 
-function readConfigSource() {
-  return readFileSync(join(ROOT, "playwright.config.ts"), "utf8");
-}
-
 describe("Playwright E2E partition contract", () => {
   it("runs the production release partitions with required admin 2FA isolated", () => {
     const scripts = readPackageScripts().scripts;
-    const configSource = readConfigSource();
 
     expect(scripts["test:e2e"]).toBe(
       "npm run test:e2e:standard && npm run test:e2e:admin-2fa && npm run test:e2e:signed-delivery && npm run test:e2e:storage",
@@ -191,20 +275,55 @@ describe("Playwright E2E partition contract", () => {
       "node scripts/playwright-test.mjs --isolated-server --admin-2fa-partition --next-start e2e/portals/initial-admin-2fa.spec.ts",
     );
     expect(scripts["test:e2e:focused"]).toBe("node scripts/playwright-test.mjs --isolated-server");
-    expect(configSource).toContain(
-      "const adminTwoFactorSpecPattern = /(?:admin-security|initial-admin-2fa)\\.spec\\.ts$/;",
+  });
+
+  it("standard Playwright collection excludes only the partitioned signed-delivery path", () => {
+    const decoyDirectory = mkdtempSync(join(ROOT, "e2e", "playwright-contract-decoy-"));
+    temporaryDirectories.push(decoyDirectory);
+    const decoySpec = join(decoyDirectory, "signed-file-delivery.spec.ts");
+    writeFileSync(
+      decoySpec,
+      `import { test } from "@playwright/test";\n\ntest("signed delivery decoy remains in standard collection", () => {});\n`,
     );
-    expect(configSource).toContain(
-      "const signedDeliverySpecPattern = /(?:^|[\\\\/])signed-file-delivery\\.spec\\.ts$/;",
+
+    const result = spawnSync(
+      process.execPath,
+      [RUNNER, "--isolated-server", "--standard-partition", "--next-start", "--list"],
+      {
+        cwd: ROOT,
+        encoding: "utf8",
+        env: { ...process.env, NODE_ENV: "test" },
+      },
     );
-    expect(configSource).toContain(
-      'partition === "standard"\n    ? [storageSpecPattern, adminTwoFactorSpecPattern, signedDeliverySpecPattern]\n    : undefined',
-    );
-    expect(configSource).toContain(
-      'E2E_ADMIN_REQUIRE_2FA: adminTwoFactorRequired ? "true" : "false",',
-    );
-    expect(configSource).toContain('ADMIN_REQUIRE_2FA: adminTwoFactorRequired ? "true" : "false",');
-    expect(configSource).toContain('...(isStoragePartition ? { STORAGE_DRIVER: "local" } : {})');
+    const output = `${result.stdout}\n${result.stderr}`.replaceAll("\\", "/");
+    const decoyRelativePath = relative(join(ROOT, "e2e"), decoySpec).replaceAll("\\", "/");
+
+    expect(result.status, output).toBe(0);
+    expect(output).toContain(decoyRelativePath);
+    expect(output).toContain("signed delivery decoy remains in standard collection");
+    expect(output).not.toContain("storage/signed-file-delivery.spec.ts");
+    expect(output).not.toContain("portals/admin-security.spec.ts");
+    expect(output).not.toContain("portals/initial-admin-2fa.spec.ts");
+    expect(output).not.toContain("portals/admin-teachers.spec.ts");
+    expect(output).not.toContain("portals/teacher-academics.spec.ts");
+    expect(output).not.toContain("portals/teacher-materials.spec.ts");
+  }, 30_000);
+
+  it("matches the signed-delivery ignore on exact Windows and POSIX path components", () => {
+    const { capture, status } = runRunner([
+      "--isolated-server",
+      "--standard-partition",
+      "--next-start",
+      "--list",
+    ]);
+
+    expect(status).toBe(0);
+    expect(capture.matcherResults).toEqual({
+      "e2e/storage/signed-file-delivery.spec.ts": true,
+      "e2e\\storage\\signed-file-delivery.spec.ts": true,
+      "e2e/other/signed-file-delivery.spec.ts": false,
+      "e2e\\other\\signed-file-delivery.spec.ts": false,
+    });
   });
 
   it("normalizes an isolated admin-2fa child and forwards only Playwright arguments", () => {
@@ -284,13 +403,9 @@ describe("Playwright E2E partition contract", () => {
       E2E_ADMIN_REQUIRE_2FA: "false",
       E2E_PARTITION: "signed-delivery",
       E2E_PLAYWRIGHT_SERVER_COMMAND: "npx next start",
-      RUN_S4_SIGNED_DELIVERY_E2E: "1",
-      STORAGE_DRIVER: "r2",
-      R2_ENDPOINT: "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com",
-      R2_ACCESS_KEY_ID: "r2-access-key-value",
-      R2_SECRET_ACCESS_KEY: "r2-secret-key-value",
-      R2_BUCKET_NAME: "s4-private-files",
+      ...signedDeliveryEnvironment,
     });
+    expect(capture.webServerEnvironment).toMatchObject(signedDeliveryEnvironment);
     expect(capture.args).toEqual(["test", "e2e/storage/signed-file-delivery.spec.ts"]);
     expectWrapperFlagsRemoved(capture);
   });
