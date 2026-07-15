@@ -4,11 +4,14 @@ import { UserRole } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createSessionMock = vi.hoisted(() => vi.fn());
+const createAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const findUserByEmailMock = vi.hoisted(() => vi.fn());
+const startAdminTwoFactorChallengeMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({
   createSession: createSessionMock,
+  createAdminPendingTwoFactor: createAdminPendingTwoFactorMock,
 }));
 
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
@@ -17,6 +20,10 @@ vi.mock("@/lib/repositories/admin-audit-repository", () => ({
 
 vi.mock("@/lib/repositories/user-repository", () => ({
   findUserByEmail: findUserByEmailMock,
+}));
+
+vi.mock("@/lib/repositories/admin-two-factor-challenge-repository", () => ({
+  startAdminTwoFactorChallenge: startAdminTwoFactorChallengeMock,
 }));
 
 import { GET } from "./route";
@@ -56,6 +63,12 @@ describe("admin SSO callback route", () => {
       fullName: "SSO Admin",
       role: UserRole.ADMIN,
       isActive: true,
+      mustChangePassword: false,
+      twoFactorEnabled: true,
+    });
+    startAdminTwoFactorChallengeMock.mockResolvedValue({
+      id: "challenge-1",
+      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
     });
   });
 
@@ -165,7 +178,33 @@ describe("admin SSO callback route", () => {
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
   });
 
-  it("creates an SSO admin session, audits the login, and redirects to admin", async () => {
+  it.each([
+    { mustChangePassword: true, twoFactorEnabled: true },
+    { mustChangePassword: false, twoFactorEnabled: false },
+  ])("rejects SSO accounts that are not ready for required TOTP: %o", async (accountState) => {
+    findUserByEmailMock.mockResolvedValueOnce({
+      id: "admin-1",
+      email: ADMIN_EMAIL,
+      fullName: "SSO Admin",
+      role: UserRole.ADMIN,
+      isActive: true,
+      ...accountState,
+    });
+    const ts = String(Date.now());
+
+    const response = await callSsoCallback({
+      email: ADMIN_EMAIL,
+      ts,
+      sig: makeSignature(ADMIN_EMAIL, ts),
+    });
+
+    expect(response.status).toBe(403);
+    expect(createSessionMock).not.toHaveBeenCalled();
+    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
+    expect(startAdminTwoFactorChallengeMock).not.toHaveBeenCalled();
+  });
+
+  it("starts a normal pending TOTP challenge instead of creating an SSO session", async () => {
     const ts = String(Date.now());
     const response = await callSsoCallback({
       email: `  ${ADMIN_EMAIL.toUpperCase()}  `,
@@ -174,19 +213,23 @@ describe("admin SSO callback route", () => {
     });
 
     expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("http://localhost:3000/admin");
+    expect(response.headers.get("location")).toBe("http://localhost:3000/portal/login/verify-2fa");
     expect(findUserByEmailMock).toHaveBeenCalledWith(ADMIN_EMAIL);
-    expect(createSessionMock).toHaveBeenCalledWith({
-      uid: "admin-1",
-      role: UserRole.ADMIN,
-      email: ADMIN_EMAIL,
-      fullName: "SSO Admin",
-      mfaVerified: true,
+    expect(createSessionMock).not.toHaveBeenCalled();
+    expect(startAdminTwoFactorChallengeMock).toHaveBeenCalledWith({
+      userId: "admin-1",
       authMethod: "sso",
+    });
+    expect(createAdminPendingTwoFactorMock).toHaveBeenCalledWith({
+      uid: "admin-1",
+      email: ADMIN_EMAIL,
+      challengeId: "challenge-1",
+      authMethod: "sso",
+      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
     });
     expect(createAdminAuditLogMock).toHaveBeenCalledWith({
       adminUserId: "admin-1",
-      action: "ADMIN_SSO_LOGIN",
+      action: "ADMIN_SSO_LOGIN_PENDING_2FA",
       targetType: "Auth",
       targetId: "admin-1",
     });

@@ -13,6 +13,8 @@ const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const createSessionMock = vi.hoisted(() => vi.fn());
 const createAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const getPortalRedirectPathMock = vi.hoisted(() => vi.fn());
+const startAdminTwoFactorChallengeMock = vi.hoisted(() => vi.fn());
+const logAuthEventMock = vi.hoisted(() => vi.fn());
 const accountSetupMocks = vi.hoisted(() => {
   class InitialPasswordChangeError extends Error {
     constructor(public readonly code: string) {
@@ -41,6 +43,14 @@ vi.mock("@/lib/auth/session", () => ({
 vi.mock("@/lib/repositories/account-setup-repository", () => ({
   changeInitialPassword: accountSetupMocks.changeInitialPassword,
   InitialPasswordChangeError: accountSetupMocks.InitialPasswordChangeError,
+}));
+
+vi.mock("@/lib/repositories/admin-two-factor-challenge-repository", () => ({
+  startAdminTwoFactorChallenge: startAdminTwoFactorChallengeMock,
+}));
+
+vi.mock("@/lib/repositories/admin-audit-repository", () => ({
+  logAuthEvent: logAuthEventMock,
 }));
 
 type PasswordActionModule = typeof import("@/app/portal/setup/password/actions");
@@ -107,6 +117,11 @@ describe("changeInitialPasswordAction", () => {
     getInitialSetupSessionMock.mockResolvedValue(setupSession());
     accountSetupMocks.changeInitialPassword.mockResolvedValue(safeUser());
     getPortalRedirectPathMock.mockReturnValue("/portal/student/assignments");
+    startAdminTwoFactorChallengeMock.mockResolvedValue({
+      id: "challenge-1",
+      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
+    });
+    logAuthEventMock.mockResolvedValue(undefined);
   });
 
   it.each(["missing", "expired"])(
@@ -338,6 +353,13 @@ describe("changeInitialPasswordAction", () => {
     expect(createAdminPendingTwoFactorMock).toHaveBeenCalledWith({
       uid: "admin-1",
       email: "admin@example.com",
+      challengeId: "challenge-1",
+      authMethod: "password",
+      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
+    });
+    expect(startAdminTwoFactorChallengeMock).toHaveBeenCalledWith({
+      userId: "admin-1",
+      authMethod: "password",
     });
     expect(createAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
     expect(createSessionMock).not.toHaveBeenCalled();

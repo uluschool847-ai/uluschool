@@ -99,11 +99,22 @@ async function createSignedSessionToken(input: {
   return token as string;
 }
 
-async function createSignedPendingTwoFactorToken(input: { uid?: string; email?: string } = {}) {
+async function createSignedPendingTwoFactorToken(
+  input: {
+    uid?: string;
+    email?: string;
+    challengeId?: string;
+    authMethod?: "password" | "sso";
+    expiresAt?: Date;
+  } = {},
+) {
   cookieSetMock.mockClear();
   await sessionModule.createAdminPendingTwoFactor({
     uid: input.uid ?? "admin-1",
     email: input.email ?? "admin@example.com",
+    challengeId: input.challengeId ?? "challenge-1",
+    authMethod: input.authMethod ?? "password",
+    expiresAt: input.expiresAt ?? new Date(Date.now() + 10 * 60 * 1000),
   });
   const token = cookieSetMock.mock.calls.find(([name]) => name === "ulu_admin_2fa_pending")?.[1];
   expect(token).toEqual(expect.any(String));
@@ -404,7 +415,11 @@ describe("session validation and expiry handling", () => {
         name === "ulu_admin_2fa_pending" ? { value: token } : undefined,
       );
       await expect(sessionModule.getAdminPendingTwoFactor()).resolves.toEqual(
-        expect.objectContaining({ purpose: "ADMIN_PENDING_2FA" }),
+        expect.objectContaining({
+          purpose: "ADMIN_PENDING_2FA",
+          challengeId: "challenge-1",
+          authMethod: "password",
+        }),
       );
       await expect(sessionModule.verifySessionToken(token)).resolves.toBeNull();
       cookieGetMock.mockImplementation((name: string) =>
@@ -417,6 +432,9 @@ describe("session validation and expiry handling", () => {
     it.each([
       ["missing purpose", { purpose: undefined }],
       ["missing email", { email: undefined }],
+      ["missing challenge id", { challengeId: undefined }],
+      ["missing auth method", { authMethod: undefined }],
+      ["unsupported auth method", { authMethod: "magic" }],
       ["malformed expiry", { exp: 1.5 }],
       ["unknown field", { unexpected: true }],
     ])("rejects a signed pending-admin payload with %s", async (_case, overrides) => {
@@ -424,6 +442,8 @@ describe("session validation and expiry handling", () => {
         purpose: "ADMIN_PENDING_2FA",
         uid: "admin-1",
         email: "admin@example.com",
+        challengeId: "challenge-1",
+        authMethod: "password",
         exp: Date.now() + 60_000,
         ...overrides,
       });
@@ -442,6 +462,7 @@ describe("session validation and expiry handling", () => {
       vi.advanceTimersByTime(10 * 60 * 1000);
 
       await expect(sessionModule.getAdminPendingTwoFactor()).resolves.toBeNull();
+      expect(cookieDeleteMock).toHaveBeenCalledWith("ulu_admin_2fa_pending");
     });
 
     it.each([

@@ -229,6 +229,21 @@ describe("Middleware Routing and Access Control", () => {
       expect(redirectUrl).toContain("/portal/login/verify-2fa");
       expect(redirectUrl).toContain("next=%2Fadmin%2Fsettings");
     });
+
+    it("does not exempt an SSO-labelled admin session from the required TOTP gate", async () => {
+      vi.mocked(verifySessionToken).mockResolvedValue({
+        role: UserRole.ADMIN,
+        mfaVerified: false,
+        authMethod: "sso",
+        exp: futureExp(),
+      } as Awaited<ReturnType<typeof verifySessionToken>>);
+
+      await middleware(createMockRequest("/admin/security", "sso-pending-token"));
+
+      const redirectUrl = redirectMock.mock.lastCall?.[0]?.toString() || "";
+      expect(redirectUrl).toContain("/portal/login/verify-2fa");
+      expect(redirectUrl).toContain("next=%2Fadmin%2Fsecurity");
+    });
   });
 
   describe("Teacher Portal Route Behavior", () => {

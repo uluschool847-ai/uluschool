@@ -79,6 +79,8 @@ describe("Admin security page 2FA setup redirect UX", () => {
     );
     expect(screen.queryByRole("link", { name: /continue to admin dashboard/i })).toBeNull();
     expect(screen.getByText(/current status:\s*disabled/i)).toBeDefined();
+    expect(screen.queryByRole("heading", { name: /SSO Callback/i })).toBeNull();
+    expect(document.body.textContent).not.toMatch(/prefer SSO/i);
   });
 
   it("shows a dashboard continuation path when setup is optional for local demos", async () => {

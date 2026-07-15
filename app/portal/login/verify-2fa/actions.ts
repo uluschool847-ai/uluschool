@@ -6,12 +6,7 @@ import {
   getAdminPendingTwoFactor,
   getPortalRedirectPath,
 } from "@/lib/auth/session";
-import { consumeBackupCode, verifyTotpCode } from "@/lib/auth/two-factor";
-import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
-import {
-  consumeAdminBackupCode,
-  findAdminUserForTwoFactor,
-} from "@/lib/repositories/user-repository";
+import { completeAdminTwoFactorChallenge } from "@/lib/repositories/admin-two-factor-challenge-repository";
 import { type TwoFactorFormState, twoFactorVerifySchema } from "@/lib/validations/two-factor";
 import { redirect } from "next/navigation";
 
@@ -37,94 +32,55 @@ export async function verify2faAction(
     return { success: false, message: "Two-factor session expired. Please log in again." };
   }
 
-  const user = await findAdminUserForTwoFactor(pendingSession.uid);
-  if (!user || !user.twoFactorEnabled) {
-    await clearAdminPendingTwoFactor();
-    return { success: false, message: "Invalid state. Please log in again." };
-  }
-
   const isUsingBackupCode = Boolean(parsed.data.backupCode);
 
-  if (isUsingBackupCode) {
-    const backupCodeValue = parsed.data.backupCode;
-    if (!backupCodeValue) {
-      return { success: false, message: "Backup code is required." };
+  const codeValue = isUsingBackupCode ? parsed.data.backupCode : parsed.data.code;
+  if (!codeValue) {
+    return {
+      success: false,
+      message: isUsingBackupCode ? "Backup code is required." : "Authenticator code is required.",
+    };
+  }
+
+  const completion = await completeAdminTwoFactorChallenge({
+    userId: pendingSession.uid,
+    challengeId: pendingSession.challengeId,
+    authMethod: pendingSession.authMethod,
+    verification: isUsingBackupCode
+      ? { type: "backup", code: codeValue }
+      : { type: "totp", code: codeValue },
+  });
+
+  if (completion.outcome === "rejected") {
+    await clearAdminPendingTwoFactor();
+    return { success: false, message: "Two-factor session expired. Please log in again." };
+  }
+
+  if (completion.outcome === "failure") {
+    if (completion.locked) {
+      await clearAdminPendingTwoFactor();
+      return {
+        success: false,
+        message: "Too many invalid two-factor attempts. Please log in again.",
+      };
     }
-
-    const backupCodeResult = await consumeBackupCode({
-      providedCode: backupCodeValue,
-      hashedCodes: user.twoFactorBackupCodes,
-    });
-    const isValidBackup = backupCodeResult.valid;
-
-    if (!isValidBackup) {
-      await createAdminAuditLog({
-        adminUserId: user.id,
-        action: "ADMIN_LOGIN_2FA_BACKUP_FAILED",
-        targetType: "AUTH",
-        meta: {
-          ipAddress: "127.0.0.1",
-          userAgent: "unknown",
-        },
-      });
-      return { success: false, message: "Invalid or already used backup code." };
-    }
-
-    await consumeAdminBackupCode(user.id, backupCodeResult.remaining);
-
-    await createAdminAuditLog({
-      adminUserId: user.id,
-      action: "ADMIN_LOGIN_2FA_BACKUP_SUCCESS",
-      targetType: "AUTH",
-      meta: {
-        ipAddress: "127.0.0.1",
-        userAgent: "unknown",
-      },
-    });
-  } else {
-    // Standard TOTP
-    if (!user.twoFactorSecret) {
-      return { success: false, message: "2FA is not properly configured." };
-    }
-
-    const codeValue = parsed.data.code;
-    if (!codeValue) {
-      return { success: false, message: "Authenticator code is required." };
-    }
-
-    const isValidTotp = verifyTotpCode(codeValue, user.twoFactorSecret);
-    if (!isValidTotp) {
-      await createAdminAuditLog({
-        adminUserId: user.id,
-        action: "ADMIN_LOGIN_2FA_TOTP_FAILED",
-        targetType: "AUTH",
-        meta: {
-          ipAddress: "127.0.0.1",
-          userAgent: "unknown",
-        },
-      });
-      return { success: false, message: "Invalid authenticator code." };
-    }
-
-    await createAdminAuditLog({
-      adminUserId: user.id,
-      action: "ADMIN_LOGIN_2FA_TOTP_SUCCESS",
-      targetType: "AUTH",
-      meta: {
-        ipAddress: "127.0.0.1",
-        userAgent: "unknown",
-      },
-    });
+    return {
+      success: false,
+      message: isUsingBackupCode
+        ? "Invalid or already used backup code."
+        : "Invalid authenticator code.",
+    };
   }
 
   await clearAdminPendingTwoFactor();
   await createSession({
-    uid: user.id,
-    role: user.role,
-    email: user.email,
+    uid: completion.user.id,
+    role: completion.user.role,
+    email: completion.user.email,
+    fullName: completion.user.fullName,
     mfaVerified: true,
-    authMethod: "password",
+    authMethod: pendingSession.authMethod,
   });
 
-  redirect(getPortalRedirectPath(user.role, nextPath));
+  redirect(getPortalRedirectPath(completion.user.role, nextPath));
 }

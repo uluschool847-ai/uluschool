@@ -11,10 +11,9 @@ import {
   getTotpUri,
   verifyTotpCode,
 } from "@/lib/auth/two-factor";
-import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 import {
-  disableAdminTwoFactor,
-  enableAdminTwoFactor,
+  disableAdminTwoFactorWithAudit,
+  enableAdminTwoFactorWithAudit,
   findAdminUserForTwoFactor,
   saveAdminTwoFactorSecret,
 } from "@/lib/repositories/user-repository";
@@ -104,16 +103,11 @@ export async function confirmTwoFactorSetupAction(
     }
 
     const backupCodes = await generateBackupCodes();
-    await enableAdminTwoFactor(admin.id, admin.twoFactorSecret, backupCodes.hashed);
-
-    await createAdminAuditLog({
-      adminUserId: session.uid,
-      action: "ADMIN_2FA_ENABLED",
-      targetType: "AppUser",
-      targetId: admin.id,
-      before: { twoFactorEnabled: false },
-      after: { twoFactorEnabled: true },
-      meta: { actorRole: UserRole.ADMIN },
+    await enableAdminTwoFactorWithAudit({
+      userId: admin.id,
+      actorId: session.uid,
+      secret: admin.twoFactorSecret,
+      backupCodeHashes: backupCodes.hashed,
     });
 
     revalidatePath("/admin/security");
@@ -135,6 +129,13 @@ export async function confirmTwoFactorSetupAction(
 export async function disableTwoFactorAction(): Promise<TwoFactorSetupState> {
   try {
     const session = await requireRole([UserRole.ADMIN]);
+    if ((process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false") {
+      return {
+        success: false,
+        message: "Administrator 2FA is mandatory and cannot be disabled from this session.",
+      };
+    }
+
     const admin = await findAdminUserForTwoFactor(session.uid);
     if (!admin) {
       return { success: false, message: "Admin user not found." };
@@ -144,15 +145,9 @@ export async function disableTwoFactorAction(): Promise<TwoFactorSetupState> {
       return { success: false, message: "2FA is already disabled for this account." };
     }
 
-    await disableAdminTwoFactor(admin.id);
-    await createAdminAuditLog({
-      adminUserId: session.uid,
-      action: "ADMIN_2FA_DISABLED",
-      targetType: "AppUser",
-      targetId: admin.id,
-      before: { twoFactorEnabled: true },
-      after: { twoFactorEnabled: false },
-      meta: { actorRole: UserRole.ADMIN },
+    await disableAdminTwoFactorWithAudit({
+      userId: admin.id,
+      actorId: session.uid,
     });
 
     revalidatePath("/admin/security");

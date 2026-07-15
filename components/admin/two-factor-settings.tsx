@@ -7,7 +7,6 @@ import {
   type TwoFactorSetupState,
   beginTwoFactorSetupAction,
   confirmTwoFactorSetupAction,
-  disableTwoFactorAction,
 } from "@/app/(admin)/admin/security/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,8 +24,7 @@ function SubmitButton({ label, pendingLabel }: { label: string; pendingLabel: st
 export function TwoFactorSettings({ enabled }: { enabled: boolean }) {
   const [setupState, beginSetup] = useActionState(beginTwoFactorSetupAction, initialState);
   const [confirmState, confirmSetup] = useActionState(confirmTwoFactorSetupAction, initialState);
-  const [disableState, disableSetup] = useActionState(disableTwoFactorAction, initialState);
-  const currentEnabled = enabled ? !disableState.success : confirmState.success;
+  const currentEnabled = enabled || confirmState.success;
 
   return (
     <div className="space-y-4">
@@ -103,20 +101,6 @@ export function TwoFactorSettings({ enabled }: { enabled: boolean }) {
             ))}
           </ul>
         </div>
-      ) : null}
-
-      {currentEnabled ? (
-        <form action={disableSetup}>
-          <SubmitButton label="Disable 2FA" pendingLabel="Disabling..." />
-        </form>
-      ) : null}
-
-      {disableState.message ? (
-        <p
-          className={disableState.success ? "text-sm text-emerald-600" : "text-sm text-destructive"}
-        >
-          {disableState.message}
-        </p>
       ) : null}
     </div>
   );

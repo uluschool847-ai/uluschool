@@ -10,8 +10,8 @@ import {
   createSession,
   getPortalRedirectPath,
 } from "@/lib/auth/session";
-import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 import { logAuthEvent } from "@/lib/repositories/admin-audit-repository";
+import { startAdminTwoFactorChallenge } from "@/lib/repositories/admin-two-factor-challenge-repository";
 import { findUserByEmail } from "@/lib/repositories/user-repository";
 import {
   checkLoginRateLimit,
@@ -98,12 +98,6 @@ export async function loginAction(
   }
 
   recordSuccessfulLogin(identifier);
-  await logAuthEvent({
-    eventType: "LOGIN_SUCCESS",
-    userId: user.id,
-    identifier,
-    timestamp: new Date(),
-  });
 
   await clearSession();
   await clearAdminPendingTwoFactor();
@@ -113,6 +107,15 @@ export async function loginAction(
   const adminNeedsEnrollment = user.role === UserRole.ADMIN && require2FA && !user.twoFactorEnabled;
 
   if (user.mustChangePassword || adminNeedsEnrollment) {
+    if (user.role === UserRole.ADMIN) {
+      await logAuthEvent({
+        eventType: "ADMIN_LOGIN_PASSWORD_VERIFIED",
+        userId: user.id,
+        identifier,
+        metadata: { authenticationStage: "password_verified" },
+        timestamp: new Date(),
+      });
+    }
     await createInitialSetupSession({
       uid: user.id,
       email: user.email,
@@ -124,33 +127,31 @@ export async function loginAction(
 
   if (user.role === UserRole.ADMIN) {
     if (require2FA) {
-      await createAdminAuditLog({
-        adminUserId: user.id,
-        action: "ADMIN_LOGIN_PENDING_2FA",
-        targetType: "AUTH",
-        meta: {
-          ipAddress: "127.0.0.1",
-          userAgent: "unknown",
-        },
+      await logAuthEvent({
+        eventType: "ADMIN_LOGIN_PASSWORD_VERIFIED",
+        userId: user.id,
+        identifier,
+        metadata: { authenticationStage: "password_verified" },
+        timestamp: new Date(),
       });
 
-      await createAdminPendingTwoFactor({ uid: user.id, email: user.email });
+      const challenge = await startAdminTwoFactorChallenge({
+        userId: user.id,
+        authMethod: "password",
+      });
+      await createAdminPendingTwoFactor({
+        uid: user.id,
+        email: user.email,
+        challengeId: challenge.id,
+        authMethod: "password",
+        expiresAt: challenge.expiresAt,
+      });
 
       const nextQuery = nextPath ? `?next=${encodeURIComponent(nextPath)}` : "";
       redirect(`/portal/login/verify-2fa${nextQuery}`);
     }
 
     // 2FA Disabled
-    await createAdminAuditLog({
-      adminUserId: user.id,
-      action: "ADMIN_LOGIN_PASSWORD_ONLY",
-      targetType: "AUTH",
-      meta: {
-        ipAddress: "127.0.0.1",
-        userAgent: "unknown",
-      },
-    });
-
     await createSession({
       uid: user.id,
       role: user.role,
@@ -158,6 +159,13 @@ export async function loginAction(
       fullName: user.fullName,
       mfaVerified: false,
       authMethod: "password",
+    });
+    await logAuthEvent({
+      eventType: "LOGIN_SUCCESS",
+      userId: user.id,
+      identifier,
+      metadata: { authenticationStage: "password_only", mfaVerified: false },
+      timestamp: new Date(),
     });
 
     redirect(getPortalRedirectPath(user.role, nextPath));
@@ -171,6 +179,13 @@ export async function loginAction(
     fullName: user.fullName,
     mfaVerified: true,
     authMethod: "password",
+  });
+  await logAuthEvent({
+    eventType: "LOGIN_SUCCESS",
+    userId: user.id,
+    identifier,
+    metadata: { authenticationStage: "final", mfaVerified: true },
+    timestamp: new Date(),
   });
 
   redirect(getPortalRedirectPath(user.role, nextPath));

@@ -8,6 +8,7 @@ const createInitialSetupSessionMock = vi.hoisted(() => vi.fn(() => Promise.resol
 const clearSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const completeAdminTwoFactorChallengeMock = vi.hoisted(() => vi.fn());
 
 // Mock redirect to throw an error so we can catch and assert it
 const redirectMock = vi.hoisted(() =>
@@ -42,6 +43,10 @@ vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   logAuthEvent: vi.fn(() => Promise.resolve()),
 }));
 
+vi.mock("@/lib/repositories/admin-two-factor-challenge-repository", () => ({
+  completeAdminTwoFactorChallenge: completeAdminTwoFactorChallengeMock,
+}));
+
 vi.mock("@/lib/auth/session", () => ({
   createSession: createSessionMock,
   createAdminPendingTwoFactor: createAdminPendingTwoFactorMock,
@@ -49,7 +54,14 @@ vi.mock("@/lib/auth/session", () => ({
   clearSession: clearSessionMock,
   clearAdminPendingTwoFactor: clearAdminPendingTwoFactorMock,
   clearInitialSetupSession: clearInitialSetupSessionMock,
-  getAdminPendingTwoFactor: vi.fn(() => Promise.resolve({ uid: "admin-1" })),
+  getAdminPendingTwoFactor: vi.fn(() =>
+    Promise.resolve({
+      uid: "admin-1",
+      email: "admin@uluglobalacademy.com",
+      challengeId: "challenge-1",
+      authMethod: "password",
+    }),
+  ),
   getPortalRedirectPath: vi.fn((role, nextPath) => {
     // Emulate proper nextPath resolution
     if (nextPath) return nextPath;
@@ -86,6 +98,15 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
       passwordHash: "hashed",
       mustChangePassword: false,
       twoFactorEnabled: false,
+    });
+    completeAdminTwoFactorChallengeMock.mockResolvedValue({
+      outcome: "success",
+      user: {
+        id: "admin-1",
+        email: "admin@uluglobalacademy.com",
+        fullName: "Admin User",
+        role: "ADMIN",
+      },
     });
   });
 
@@ -246,5 +267,11 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
     await expect(verify2faAction({ success: false, message: "" }, formData)).rejects.toThrow(
       "REDIRECT:/portal/admin/settings",
     );
+    expect(completeAdminTwoFactorChallengeMock).toHaveBeenCalledWith({
+      userId: "admin-1",
+      challengeId: "challenge-1",
+      authMethod: "password",
+      verification: { type: "totp", code: "123456" },
+    });
   });
 });

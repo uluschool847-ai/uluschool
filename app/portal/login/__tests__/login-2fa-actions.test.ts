@@ -16,6 +16,7 @@ const createInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const createSessionMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const logAuthEventMock = vi.hoisted(() => vi.fn());
+const startAdminTwoFactorChallengeMock = vi.hoisted(() => vi.fn());
 
 vi.mock("next/navigation", () => ({
   redirect: redirectMock,
@@ -56,6 +57,10 @@ vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   logAuthEvent: logAuthEventMock,
 }));
 
+vi.mock("@/lib/repositories/admin-two-factor-challenge-repository", () => ({
+  startAdminTwoFactorChallenge: startAdminTwoFactorChallengeMock,
+}));
+
 function makeLoginFormData(nextPath = "/admin/security") {
   const formData = new FormData();
   formData.set("email", "admin@example.com");
@@ -73,6 +78,10 @@ describe("portal login admin 2FA actions", () => {
     verifyPasswordMock.mockResolvedValue(true);
     createAdminAuditLogMock.mockResolvedValue(undefined);
     logAuthEventMock.mockResolvedValue(undefined);
+    startAdminTwoFactorChallengeMock.mockResolvedValue({
+      id: "challenge-1",
+      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
+    });
     findUserByEmailMock.mockResolvedValue({
       id: "admin-1",
       email: "admin@example.com",
@@ -96,13 +105,28 @@ describe("portal login admin 2FA actions", () => {
     expect(createAdminPendingTwoFactorMock).toHaveBeenCalledWith({
       uid: "admin-1",
       email: "admin@example.com",
+      challengeId: "challenge-1",
+      authMethod: "password",
+      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
+    });
+    expect(startAdminTwoFactorChallengeMock).toHaveBeenCalledWith({
+      userId: "admin-1",
+      authMethod: "password",
     });
     expectAllAuthCookiesClearedBefore(createAdminPendingTwoFactorMock);
     expect(createSessionMock).not.toHaveBeenCalled();
     expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
-    expect(createAdminAuditLogMock).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "ADMIN_LOGIN_PENDING_2FA" }),
+    expect(logAuthEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: "ADMIN_LOGIN_PASSWORD_VERIFIED",
+        userId: "admin-1",
+        identifier: "admin@example.com",
+      }),
     );
+    expect(
+      logAuthEventMock.mock.calls.some(([event]) => event?.eventType === "LOGIN_SUCCESS"),
+    ).toBe(false);
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
   });
 
   it.each(["development", "production"])(

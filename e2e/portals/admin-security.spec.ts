@@ -119,7 +119,7 @@ test.describe("Admin Security", () => {
     await prisma.$disconnect();
   });
 
-  test("admin can enable, verify-login, and disable TOTP 2FA without leaking secrets", async ({
+  test("admin can enable and verify-login with TOTP without exposing self-service disablement", async ({
     page,
   }) => {
     await setPortalSession(page, {
@@ -141,10 +141,7 @@ test.describe("Admin Security", () => {
     await expect(
       page.getByRole("heading", { name: "Two-Factor Authentication (TOTP)" }),
     ).toBeVisible();
-    await expect(page.getByRole("heading", { name: "SSO Callback" })).toBeVisible();
-    await expect(page.getByText("/api/auth/sso/callback")).toBeVisible();
-    await expect(page.getByText(/ADMIN_SSO_ENABLED=true/)).toBeVisible();
-    await expect(page.getByText(/shared secret/i)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "SSO Callback" })).toHaveCount(0);
     await expect(page.getByText(/current status:\s*disabled/i)).toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });
@@ -219,19 +216,17 @@ test.describe("Admin Security", () => {
     await expect(page).toHaveURL(/\/admin\/security/, { timeout: 60000 });
     await expect(page.getByText(/current status:\s*enabled/i)).toBeVisible();
 
-    await page.getByRole("button", { name: "Disable 2FA" }).click();
-    await expect(page.getByText(/2FA disabled/i)).toBeVisible();
-    await expect(page.getByText(/current status:\s*disabled/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Disable 2FA" })).toHaveCount(0);
     await page.reload();
-    await expect(page.getByText(/current status:\s*disabled/i)).toBeVisible();
+    await expect(page.getByText(/current status:\s*enabled/i)).toBeVisible();
 
-    const adminDisabled = await prisma.appUser.findUniqueOrThrow({
+    const adminAfterVerification = await prisma.appUser.findUniqueOrThrow({
       where: { id: adminUserId },
       select: { twoFactorEnabled: true, twoFactorSecret: true, twoFactorBackupCodes: true },
     });
-    expect(adminDisabled.twoFactorEnabled).toBe(false);
-    expect(adminDisabled.twoFactorSecret).toBeNull();
-    expect(adminDisabled.twoFactorBackupCodes).toEqual([]);
+    expect(adminAfterVerification.twoFactorEnabled).toBe(true);
+    expect(adminAfterVerification.twoFactorSecret).toBeTruthy();
+    expect(adminAfterVerification.twoFactorBackupCodes.length).toBeGreaterThan(0);
 
     const auditLogs = await prisma.adminAuditLog.findMany({
       where: {
@@ -239,17 +234,17 @@ test.describe("Admin Security", () => {
         action: {
           in: [
             "ADMIN_2FA_ENABLED",
-            "ADMIN_2FA_DISABLED",
-            "ADMIN_LOGIN_PENDING_2FA",
+            "ADMIN_LOGIN_PASSWORD_VERIFIED",
             "ADMIN_LOGIN_2FA_TOTP_FAILED",
             "ADMIN_LOGIN_2FA_TOTP_SUCCESS",
+            "LOGIN_SUCCESS",
           ],
         },
       },
       orderBy: { createdAt: "desc" },
     });
     expect(auditLogs.some((log) => log.action === "ADMIN_2FA_ENABLED")).toBe(true);
-    expect(auditLogs.some((log) => log.action === "ADMIN_2FA_DISABLED")).toBe(true);
+    expect(auditLogs.some((log) => log.action === "LOGIN_SUCCESS")).toBe(true);
     expect(JSON.stringify(auditLogs)).not.toMatch(/secret|token|backup|otpauth|000000/i);
   });
 

@@ -16,6 +16,8 @@ import {
   InitialPasswordChangeError,
   changeInitialPassword,
 } from "@/lib/repositories/account-setup-repository";
+import { logAuthEvent } from "@/lib/repositories/admin-audit-repository";
+import { startAdminTwoFactorChallenge } from "@/lib/repositories/admin-two-factor-challenge-repository";
 import {
   type InitialPasswordFormState,
   getSafeInitialPasswordFieldErrors,
@@ -111,7 +113,24 @@ export async function changeInitialPasswordAction(
 
   if (user.twoFactorEnabled) {
     await clearAllAuthCookies();
-    await createAdminPendingTwoFactor({ uid: user.id, email: user.email });
+    await logAuthEvent({
+      eventType: "ADMIN_LOGIN_PASSWORD_VERIFIED",
+      userId: user.id,
+      identifier: user.email,
+      metadata: { authenticationStage: "post_password_setup" },
+      timestamp: new Date(),
+    });
+    const challenge = await startAdminTwoFactorChallenge({
+      userId: user.id,
+      authMethod: "password",
+    });
+    await createAdminPendingTwoFactor({
+      uid: user.id,
+      email: user.email,
+      challengeId: challenge.id,
+      authMethod: "password",
+      expiresAt: challenge.expiresAt,
+    });
     redirect("/portal/login/verify-2fa");
   }
 

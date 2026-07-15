@@ -9,13 +9,12 @@ const SESSION_COOKIE = "ulu_session";
 const ADMIN_PENDING_2FA_COOKIE = "ulu_admin_2fa_pending";
 const INITIAL_SETUP_COOKIE = "ulu_initial_setup";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
-const ADMIN_PENDING_2FA_DURATION_MS = 1000 * 60 * 10;
 const INITIAL_SETUP_DURATION_MS = 1000 * 60 * 15;
 const INITIAL_TWO_FACTOR_HANDOFF_DURATION_MS = 1000 * 60 * 10;
 const MAX_INITIAL_SETUP_NEXT_PATH_LENGTH = 2048;
 const MAX_INITIAL_TWO_FACTOR_CAPABILITY_LENGTH = 1024;
 
-type AuthMethod = "password" | "sso";
+export type AuthMethod = "password" | "sso";
 
 type SessionInput = {
   uid: string;
@@ -87,10 +86,12 @@ export type SessionValidationResult = {
   user?: { id: string; role: string };
 };
 
-type PendingTwoFactorPayload = {
+export type PendingTwoFactorPayload = {
   purpose: "ADMIN_PENDING_2FA";
   uid: string;
   email: string;
+  challengeId: string;
+  authMethod: AuthMethod;
   exp: number;
 };
 
@@ -307,10 +308,14 @@ function isInitialSetupPayload(payload: unknown): payload is InitialSetupPayload
 function isPendingTwoFactorPayload(payload: unknown): payload is PendingTwoFactorPayload {
   return Boolean(
     isRecord(payload) &&
-      hasOnlyKeys(payload, ["purpose", "uid", "email", "exp"]) &&
+      hasOnlyKeys(payload, ["purpose", "uid", "email", "challengeId", "authMethod", "exp"]) &&
       payload.purpose === "ADMIN_PENDING_2FA" &&
       isNonEmptyString(payload.uid) &&
       isNonEmptyString(payload.email) &&
+      isNonEmptyString(payload.challengeId) &&
+      payload.challengeId === payload.challengeId.trim() &&
+      payload.challengeId.length <= 191 &&
+      (payload.authMethod === "password" || payload.authMethod === "sso") &&
       isValidExpiry(payload.exp),
   );
 }
@@ -658,12 +663,25 @@ export async function validateSession(sessionToken: string): Promise<SessionVali
   };
 }
 
-export async function createAdminPendingTwoFactor(input: { uid: string; email: string }) {
+export async function createAdminPendingTwoFactor(input: {
+  uid: string;
+  email: string;
+  challengeId: string;
+  authMethod: AuthMethod;
+  expiresAt: Date;
+}) {
+  const exp = input.expiresAt.getTime();
+  if (!Number.isFinite(exp) || exp <= Date.now()) {
+    throw new Error("Invalid administrator two-factor challenge expiry.");
+  }
+
   const payload: PendingTwoFactorPayload = {
     purpose: "ADMIN_PENDING_2FA",
     uid: input.uid,
     email: input.email,
-    exp: Date.now() + ADMIN_PENDING_2FA_DURATION_MS,
+    challengeId: input.challengeId,
+    authMethod: input.authMethod,
+    exp,
   };
 
   const token = await encodeSignedPayload(payload);
@@ -673,7 +691,7 @@ export async function createAdminPendingTwoFactor(input: { uid: string; email: s
     sameSite: "lax",
     secure: (process.env.NODE_ENV ?? "development") === "production",
     path: "/",
-    maxAge: ADMIN_PENDING_2FA_DURATION_MS / 1000,
+    maxAge: Math.max(0, (exp - Date.now()) / 1000),
   });
 }
 
@@ -686,6 +704,7 @@ export async function getAdminPendingTwoFactor(): Promise<PendingTwoFactorPayloa
 
   const payload = await decodeSignedPayload(token);
   if (!isPendingTwoFactorPayload(payload) || !isNotExpired(payload.exp)) {
+    cookieStore.delete(ADMIN_PENDING_2FA_COOKIE);
     return null;
   }
   return payload;
@@ -719,7 +738,6 @@ export async function requireRole(allowedRoles: UserRole[]) {
   if (
     session.role === UserRole.ADMIN &&
     (process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false" &&
-    session.authMethod !== "sso" &&
     !session.mfaVerified
   ) {
     redirect("/portal/login/verify-2fa");

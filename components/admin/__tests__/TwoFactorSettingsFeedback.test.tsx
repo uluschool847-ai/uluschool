@@ -15,7 +15,6 @@ vi.mock("react-dom", async () => {
 vi.mock("@/app/(admin)/admin/security/actions", () => ({
   beginTwoFactorSetupAction: vi.fn(),
   confirmTwoFactorSetupAction: vi.fn(),
-  disableTwoFactorAction: vi.fn(),
 }));
 
 import { TwoFactorSettings } from "@/components/admin/two-factor-settings";
@@ -33,7 +32,7 @@ describe("Admin two-factor settings feedback", () => {
   });
   afterEach(() => cleanup());
 
-  it("shows loading feedback for setup and disable actions", () => {
+  it("shows loading feedback for setup actions", () => {
     useFormStatusMock.mockReturnValue({ pending: true });
     render(<TwoFactorSettings enabled={false} />);
     expect(screen.getByRole("button", { name: /generating/i })).toBeDefined();
@@ -67,19 +66,15 @@ describe("Admin two-factor settings feedback", () => {
     useActionStateMock
       .mockReturnValueOnce([{ success: false, message: "Could not generate secret" }, vi.fn()])
       .mockReturnValueOnce([{ success: false, message: "Invalid code" }, vi.fn()])
-      .mockReturnValueOnce([{ success: false, message: "Disable failed" }, vi.fn()]);
+      .mockReturnValueOnce([{ success: false, message: "" }, vi.fn()]);
     render(<TwoFactorSettings enabled={false} />);
     expect(screen.getByText(/could not generate secret/i)).toBeDefined();
   });
 
-  it("keeps disable success feedback visible after the local status changes", () => {
-    useActionStateMock.mockReset();
-    useActionStateMock
-      .mockReturnValueOnce([{ success: false, message: "" }, vi.fn()])
-      .mockReturnValueOnce([{ success: false, message: "" }, vi.fn()])
-      .mockReturnValueOnce([{ success: true, message: "2FA disabled" }, vi.fn()]);
+  it("does not expose a self-service disable control for an enabled administrator", () => {
     render(<TwoFactorSettings enabled />);
-    expect(screen.getByText(/current status:/i).textContent).toMatch(/disabled/i);
-    expect(screen.getByText(/2fa disabled/i)).toBeDefined();
+    expect(screen.getByText(/current status:/i).textContent).toMatch(/enabled/i);
+    expect(screen.queryByRole("button", { name: /disable 2fa/i })).toBeNull();
+    expect(useActionStateMock).toHaveBeenCalledTimes(2);
   });
 });

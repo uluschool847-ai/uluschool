@@ -4,8 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const requireRoleMock = vi.hoisted(() => vi.fn());
 const findAdminUserForTwoFactorMock = vi.hoisted(() => vi.fn());
 const saveAdminTwoFactorSecretMock = vi.hoisted(() => vi.fn());
-const enableAdminTwoFactorMock = vi.hoisted(() => vi.fn());
-const disableAdminTwoFactorMock = vi.hoisted(() => vi.fn());
+const enableAdminTwoFactorWithAuditMock = vi.hoisted(() => vi.fn());
+const disableAdminTwoFactorWithAuditMock = vi.hoisted(() => vi.fn());
 const generateTwoFactorSecretMock = vi.hoisted(() => vi.fn());
 const getTotpUriMock = vi.hoisted(() => vi.fn());
 const verifyTotpCodeMock = vi.hoisted(() => vi.fn());
@@ -31,8 +31,8 @@ vi.mock("@/lib/repositories/admin-audit-repository", () => ({
 vi.mock("@/lib/repositories/user-repository", () => ({
   findAdminUserForTwoFactor: findAdminUserForTwoFactorMock,
   saveAdminTwoFactorSecret: saveAdminTwoFactorSecretMock,
-  enableAdminTwoFactor: enableAdminTwoFactorMock,
-  disableAdminTwoFactor: disableAdminTwoFactorMock,
+  enableAdminTwoFactorWithAudit: enableAdminTwoFactorWithAuditMock,
+  disableAdminTwoFactorWithAudit: disableAdminTwoFactorWithAuditMock,
 }));
 
 vi.mock("next/cache", () => ({
@@ -75,6 +75,8 @@ describe("admin security 2FA actions", () => {
       plain: ["PLAIN-CODE"],
       hashed: ["HASHED-CODE"],
     });
+    enableAdminTwoFactorWithAuditMock.mockResolvedValue(undefined);
+    disableAdminTwoFactorWithAuditMock.mockResolvedValue(undefined);
   });
 
   it("does not return an existing secret when setup is already enabled", async () => {
@@ -97,7 +99,7 @@ describe("admin security 2FA actions", () => {
     expect(saveAdminTwoFactorSecretMock).not.toHaveBeenCalled();
   });
 
-  it("enables 2FA with audit before/after and without logging secrets", async () => {
+  it("enables 2FA through one atomic repository transition without logging secrets", async () => {
     const formData = new FormData();
     formData.set("code", "123456");
 
@@ -105,16 +107,13 @@ describe("admin security 2FA actions", () => {
     const result = await confirmTwoFactorSetupAction({}, formData);
 
     expect(result.success).toBe(true);
-    expect(enableAdminTwoFactorMock).toHaveBeenCalledWith("admin-1", "SECRET123", ["HASHED-CODE"]);
-    expect(createAdminAuditLogMock).toHaveBeenCalledWith({
-      adminUserId: "admin-1",
-      action: "ADMIN_2FA_ENABLED",
-      targetType: "AppUser",
-      targetId: "admin-1",
-      before: { twoFactorEnabled: false },
-      after: { twoFactorEnabled: true },
-      meta: { actorRole: UserRole.ADMIN },
+    expect(enableAdminTwoFactorWithAuditMock).toHaveBeenCalledWith({
+      userId: "admin-1",
+      actorId: "admin-1",
+      secret: "SECRET123",
+      backupCodeHashes: ["HASHED-CODE"],
     });
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
     expect(JSON.stringify(createAdminAuditLogMock.mock.calls)).not.toMatch(
       /SECRET123|PLAIN-CODE|HASHED-CODE/,
     );
@@ -131,11 +130,24 @@ describe("admin security 2FA actions", () => {
 
     expect(result.success).toBe(false);
     expect(result.message).toMatch(/invalid code/i);
-    expect(enableAdminTwoFactorMock).not.toHaveBeenCalled();
+    expect(enableAdminTwoFactorWithAuditMock).not.toHaveBeenCalled();
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
   });
 
-  it("disables 2FA with audit before/after", async () => {
+  it("rejects direct disablement while mandatory administrator 2FA is active", async () => {
+    const { disableTwoFactorAction } = await loadActions();
+    const result = await disableTwoFactorAction();
+
+    expect(result).toEqual({
+      success: false,
+      message: "Administrator 2FA is mandatory and cannot be disabled from this session.",
+    });
+    expect(disableAdminTwoFactorWithAuditMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it("uses one atomic repository transition only when local non-production policy permits disablement", async () => {
+    process.env.ADMIN_REQUIRE_2FA = "false";
     findAdminUserForTwoFactorMock.mockResolvedValueOnce({
       id: "admin-1",
       email: "admin@example.com",
@@ -149,16 +161,11 @@ describe("admin security 2FA actions", () => {
     const result = await disableTwoFactorAction();
 
     expect(result.success).toBe(true);
-    expect(disableAdminTwoFactorMock).toHaveBeenCalledWith("admin-1");
-    expect(createAdminAuditLogMock).toHaveBeenCalledWith({
-      adminUserId: "admin-1",
-      action: "ADMIN_2FA_DISABLED",
-      targetType: "AppUser",
-      targetId: "admin-1",
-      before: { twoFactorEnabled: true },
-      after: { twoFactorEnabled: false },
-      meta: { actorRole: UserRole.ADMIN },
+    expect(disableAdminTwoFactorWithAuditMock).toHaveBeenCalledWith({
+      userId: "admin-1",
+      actorId: "admin-1",
     });
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
     expect(JSON.stringify(createAdminAuditLogMock.mock.calls)).not.toMatch(/SECRET123|HASHED-CODE/);
   });
 });

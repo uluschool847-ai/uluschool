@@ -84,6 +84,9 @@ function validProductionEnv(): Record<string, string> {
       "postgres://migration_user:direct-credential@direct.internal:5432/ulu_school?sslmode=require",
     AUTH_SESSION_SECRET: "auth-session-value-7f4b2d9c6a1e8f3d",
     ADMIN_REQUIRE_2FA: "true",
+    ADMIN_SSO_ENABLED: "false",
+    ADMIN_SSO_LOGIN_URL: "",
+    ADMIN_SSO_SHARED_SECRET: "",
     GOOGLE_TIMEZONE: "Africa/Nairobi",
     NEXT_PUBLIC_SITE_URL: PRODUCTION_ORIGIN,
     TURNSTILE_ENFORCE: "true",
@@ -190,6 +193,20 @@ describe("validateProductionEnv", () => {
     ["ALERT_WEBHOOK_URL", "http://alerts.invalid/hook"],
     ["ALERT_TEST_TOKEN", "too-short"],
   ])("rejects an unsafe or missing %s", (key, value) => {
+    expectInvalidKey(key, value);
+  });
+
+  it.each([undefined, "", "true", "TRUE", "1", "yes"])(
+    "rejects a non-false ADMIN_SSO_ENABLED value %s in production-like environments",
+    (value) => {
+      expectInvalidKey("ADMIN_SSO_ENABLED", value);
+    },
+  );
+
+  it.each([
+    ["ADMIN_SSO_LOGIN_URL", "https://idp.example.com/login"],
+    ["ADMIN_SSO_SHARED_SECRET", "non-empty-sso-shared-secret"],
+  ])("rejects a non-empty %s in production-like environments", (key, value) => {
     expectInvalidKey(key, value);
   });
 

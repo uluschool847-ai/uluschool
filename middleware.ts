@@ -188,7 +188,6 @@ export async function middleware(request: NextRequest) {
   if (
     session.role === "ADMIN" &&
     (process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false" &&
-    session.authMethod !== "sso" &&
     !session.mfaVerified &&
     !matchesPrefix(pathname, "/portal/login/verify-2fa")
   ) {

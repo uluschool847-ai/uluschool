@@ -114,6 +114,9 @@ const productionEnvironmentSchema = z
     DIRECT_URL: z.string().optional(),
     AUTH_SESSION_SECRET: z.string().optional(),
     ADMIN_REQUIRE_2FA: z.string().optional(),
+    ADMIN_SSO_ENABLED: z.string().optional(),
+    ADMIN_SSO_LOGIN_URL: z.string().optional(),
+    ADMIN_SSO_SHARED_SECRET: z.string().optional(),
     GOOGLE_TIMEZONE: z.string().optional(),
     NEXT_PUBLIC_SITE_URL: z.string().optional(),
     TURNSTILE_ENFORCE: z.string().optional(),
@@ -156,6 +159,9 @@ const productionEnvironmentSchema = z
     requireDatabaseUrl(context, env.DIRECT_URL, "DIRECT_URL");
     requireSecret(context, env.AUTH_SESSION_SECRET, "AUTH_SESSION_SECRET");
     requireLiteral(context, env.ADMIN_REQUIRE_2FA, "ADMIN_REQUIRE_2FA", "true");
+    requireLiteral(context, env.ADMIN_SSO_ENABLED, "ADMIN_SSO_ENABLED", "false");
+    requireEmpty(context, env.ADMIN_SSO_LOGIN_URL, "ADMIN_SSO_LOGIN_URL");
+    requireEmpty(context, env.ADMIN_SSO_SHARED_SECRET, "ADMIN_SSO_SHARED_SECRET");
     requireLiteral(context, env.GOOGLE_TIMEZONE, "GOOGLE_TIMEZONE", "Africa/Nairobi");
     requireSiteOrigin(context, env.NEXT_PUBLIC_SITE_URL, appEnv);
     requireLiteral(context, env.TURNSTILE_ENFORCE, "TURNSTILE_ENFORCE", "true");
@@ -200,6 +206,10 @@ function requireLiteral(
   expected: string,
 ) {
   if (value !== expected) addIssue(context, key, `must equal ${expected}`);
+}
+
+function requireEmpty(context: z.RefinementCtx, value: string | undefined, key: string) {
+  if (value !== undefined && value !== "") addIssue(context, key, "must be empty");
 }
 
 function isPlaceholder(

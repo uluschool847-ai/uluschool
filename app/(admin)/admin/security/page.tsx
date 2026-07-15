@@ -56,8 +56,8 @@ export default async function AdminSecurityPage({ searchParams = {} }: AdminSecu
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Admin Security</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            This page controls production hardening for admin access. Keep 2FA enabled in production
-            and prefer SSO for organization-managed identity.
+            This page controls production hardening for administrator access. Keep 2FA enabled for
+            every production administrator.
           </p>
         </div>
         {isSetupRedirect && adminTwoFactorRequired ? (
@@ -119,20 +119,6 @@ export default async function AdminSecurityPage({ searchParams = {} }: AdminSecu
               Unable to load admin account security settings.
             </p>
           )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>SSO Callback</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <p>
-            SSO callback endpoint: <code>/api/auth/sso/callback</code>
-          </p>
-          <p>
-            Enable with env: <code>ADMIN_SSO_ENABLED=true</code> and configure shared secret.
-          </p>
         </CardContent>
       </Card>
     </div>

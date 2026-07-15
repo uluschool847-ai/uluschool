@@ -287,6 +287,7 @@ model AppUser {
   availabilityRules TeacherAvailabilityRule[]
   unavailablePeriods TeacherUnavailablePeriod[]
   adminAuditLogs     AdminAuditLog[]
+  adminTwoFactorChallenges AdminTwoFactorChallenge[]
   attendanceRecords  AttendanceRecord[] @relation("StudentAttendanceRecords")
   markedAttendanceRecords AttendanceRecord[] @relation("AttendanceMarkedBy")
   inAppNotifications InAppNotification[] @relation("UserInAppNotifications")
@@ -324,6 +325,21 @@ model AppUser {
   paidPayments      PaymentTransaction[]  @relation("PayerPayments")
   billingInvoices   BillingInvoice[]      @relation("StudentBillingInvoices")
   payerInvoices     BillingInvoice[]      @relation("PayerBillingInvoices")
+}
+
+model AdminTwoFactorChallenge {
+  id             String   @id @default(cuid())
+  userId         String
+  user           AppUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  authMethod     String
+  failedAttempts Int      @default(0)
+  expiresAt      DateTime
+  consumedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt, consumedAt])
 }
 
 model InAppNotification {

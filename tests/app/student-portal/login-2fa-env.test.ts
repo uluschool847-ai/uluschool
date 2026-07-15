@@ -17,6 +17,7 @@ const getSessionMock = vi.hoisted(() => vi.fn());
 const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const revalidatePathMock = vi.hoisted(() => vi.fn());
+const startAdminTwoFactorChallengeMock = vi.hoisted(() => vi.fn());
 const getPortalRedirectPathMock = vi.hoisted(() =>
   vi.fn((role: string) => (role === "ADMIN" ? "/admin" : "/portal/login")),
 );
@@ -37,6 +38,10 @@ vi.mock("@/lib/repositories/user-repository", () => ({
   findUserByEmail: findUserByEmailMock,
   findAdminUserForTwoFactor: vi.fn(),
   consumeAdminBackupCode: vi.fn(),
+}));
+
+vi.mock("@/lib/repositories/admin-two-factor-challenge-repository", () => ({
+  startAdminTwoFactorChallenge: startAdminTwoFactorChallengeMock,
 }));
 
 vi.mock("@/lib/auth/session", () => ({
@@ -101,6 +106,10 @@ describe("app/student-portal/actions.ts 2FA env defaults", () => {
     createSessionMock.mockResolvedValue(undefined);
     createAdminAuditLogMock.mockResolvedValue(undefined);
     logAuthEventMock.mockResolvedValue(undefined);
+    startAdminTwoFactorChallengeMock.mockResolvedValue({
+      id: "challenge-1",
+      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
+    });
   });
 
   it("routes an admin without configured 2FA to restricted setup by default", async () => {
@@ -118,6 +127,7 @@ describe("app/student-portal/actions.ts 2FA env defaults", () => {
     });
     expect(createSessionMock).not.toHaveBeenCalled();
     expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
+    expect(startAdminTwoFactorChallengeMock).not.toHaveBeenCalled();
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
   });
 
@@ -133,9 +143,10 @@ describe("app/student-portal/actions.ts 2FA env defaults", () => {
     expectAllAuthCookiesClearedBefore(createSessionMock);
     expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
     expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
-    expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+    expect(startAdminTwoFactorChallengeMock).not.toHaveBeenCalled();
+    expect(logAuthEventMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: "ADMIN_LOGIN_PASSWORD_ONLY",
+        eventType: "LOGIN_SUCCESS",
       }),
     );
   });
