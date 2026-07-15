@@ -17,6 +17,16 @@ vi.mock("@sentry/nextjs", () => ({
 }));
 
 const FILTERED = "[Filtered]";
+const AUTHORITY_LIKE_LOGIN_PATHS = [
+  "//portal/login",
+  String.raw`/\\portal\\login`,
+  String.raw`\\portal\login`,
+] as const;
+const AUTHORITY_LIKE_SAFE_PATHS = [
+  "//portal/teacher/assignments",
+  String.raw`/\\portal\\teacher\\assignments`,
+  String.raw`\\portal\teacher\assignments`,
+] as const;
 const SENTRY_ENV_KEYS = [
   "SENTRY_ENABLED",
   "SENTRY_DSN",
@@ -294,6 +304,148 @@ describe("sanitizeSentryEvent", () => {
 
     expect(request?.data).toEqual({ safeField: "safe-transaction-payload" });
     expect(request?.body).toEqual({ safeField: "safe-transaction-body" });
+  });
+
+  it.each(AUTHORITY_LIKE_LOGIN_PATHS)(
+    "treats slash/backslash-leading request route %s as a sensitive path",
+    (url) => {
+      const event = {
+        request: {
+          url,
+          data: { safeField: "authority-request-payload" },
+          body: { safeField: "authority-request-body" },
+        },
+      } as Event;
+
+      const sanitized = sanitizeSentryEvent(event);
+      const request = sanitized.request as Event["request"] & { body?: unknown };
+
+      expect(request?.data).toBeUndefined();
+      expect(request?.body).toBeUndefined();
+    },
+  );
+
+  it.each(AUTHORITY_LIKE_LOGIN_PATHS)(
+    "treats transaction route POST %s as a sensitive path fallback",
+    (route) => {
+      const event = {
+        transaction: `POST ${route}`,
+        request: {
+          data: { safeField: "authority-transaction-payload" },
+          body: { safeField: "authority-transaction-body" },
+        },
+      } as Event;
+
+      const sanitized = sanitizeSentryEvent(event);
+      const request = sanitized.request as Event["request"] & { body?: unknown };
+
+      expect(request?.data).toBeUndefined();
+      expect(request?.body).toBeUndefined();
+    },
+  );
+
+  it.each(AUTHORITY_LIKE_SAFE_PATHS)(
+    "preserves request payloads for safe slash/backslash-leading path %s",
+    (url) => {
+      const event = {
+        request: {
+          url,
+          data: { safeField: "safe-authority-request-payload" },
+          body: { safeField: "safe-authority-request-body" },
+        },
+      } as Event;
+
+      const sanitized = sanitizeSentryEvent(event);
+      const request = sanitized.request as Event["request"] & { body?: unknown };
+
+      expect(request?.data).toEqual({ safeField: "safe-authority-request-payload" });
+      expect(request?.body).toEqual({ safeField: "safe-authority-request-body" });
+    },
+  );
+
+  it.each(AUTHORITY_LIKE_SAFE_PATHS)(
+    "preserves request payloads for safe transaction path POST %s",
+    (route) => {
+      const event = {
+        transaction: `POST ${route}`,
+        request: {
+          data: { safeField: "safe-authority-transaction-payload" },
+          body: { safeField: "safe-authority-transaction-body" },
+        },
+      } as Event;
+
+      const sanitized = sanitizeSentryEvent(event);
+      const request = sanitized.request as Event["request"] & { body?: unknown };
+
+      expect(request?.data).toEqual({ safeField: "safe-authority-transaction-payload" });
+      expect(request?.body).toEqual({ safeField: "safe-authority-transaction-body" });
+    },
+  );
+
+  it("strips a query before classifying a slash-leading request path", () => {
+    const event = {
+      request: {
+        url: "//portal/login?token=QUERY_SECRET",
+        data: { safeField: "query-request-payload" },
+        body: { safeField: "query-request-body" },
+      },
+    } as Event;
+
+    const sanitized = sanitizeSentryEvent(event);
+    const request = sanitized.request as Event["request"] & { body?: unknown };
+
+    expect(request?.url).toBe("//portal/login");
+    expect(request?.data).toBeUndefined();
+    expect(request?.body).toBeUndefined();
+  });
+
+  it("strips a query before classifying a slash-leading transaction path", () => {
+    const event = {
+      transaction: "POST //portal/login?token=QUERY_SECRET",
+      request: {
+        data: { safeField: "query-transaction-payload" },
+        body: { safeField: "query-transaction-body" },
+      },
+    } as Event;
+
+    const sanitized = sanitizeSentryEvent(event);
+    const request = sanitized.request as Event["request"] & { body?: unknown };
+
+    expect(request?.data).toBeUndefined();
+    expect(request?.body).toBeUndefined();
+  });
+
+  it("preserves a safe slash-leading transaction path with a query", () => {
+    const event = {
+      transaction: "POST //portal/teacher/assignments?view=active",
+      request: {
+        data: { safeField: "safe-query-transaction-payload" },
+        body: { safeField: "safe-query-transaction-body" },
+      },
+    } as Event;
+
+    const sanitized = sanitizeSentryEvent(event);
+    const request = sanitized.request as Event["request"] & { body?: unknown };
+
+    expect(request?.data).toEqual({ safeField: "safe-query-transaction-payload" });
+    expect(request?.body).toEqual({ safeField: "safe-query-transaction-body" });
+  });
+
+  it("continues to URL-parse a true absolute HTTP URL", () => {
+    const event = {
+      request: {
+        url: "https://portal/login?view=active",
+        data: { safeField: "absolute-url-payload" },
+        body: { safeField: "absolute-url-body" },
+      },
+    } as Event;
+
+    const sanitized = sanitizeSentryEvent(event);
+    const request = sanitized.request as Event["request"] & { body?: unknown };
+
+    expect(request?.url).toBe("https://portal/login");
+    expect(request?.data).toEqual({ safeField: "absolute-url-payload" });
+    expect(request?.body).toEqual({ safeField: "absolute-url-body" });
   });
 
   it.each(["/portal%252Flogin", "/portal%2Flogin/%E0%A4%A"])(

@@ -81,10 +81,15 @@ function pathnameFromRouteValue(value: unknown) {
   }
 
   const candidate = value.trim();
-  if (
-    candidate === "" ||
-    (!candidate.startsWith("/") && !/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate))
-  ) {
+  if (candidate === "") {
+    return null;
+  }
+
+  if (candidate.startsWith("/") || candidate.startsWith("\\")) {
+    return stripUrlQuery(candidate);
+  }
+
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate)) {
     return null;
   }
 
