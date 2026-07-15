@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const prismaMock = vi.hoisted(() => ({
   level: {
@@ -99,6 +99,10 @@ describe("enquiry-repository CRM-lite contract", () => {
     });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("stores the fixed consent version and server time for a new enquiry", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-13T09:30:00.000Z"));
@@ -124,7 +128,6 @@ describe("enquiry-repository CRM-lite contract", () => {
         consentGivenAt: new Date("2026-07-13T09:30:00.000Z"),
       }),
     });
-    vi.useRealTimers();
   });
 
   it("findAllEnquiries should return total count and paginated search results", async () => {

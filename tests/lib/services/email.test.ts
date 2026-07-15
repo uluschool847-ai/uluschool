@@ -32,6 +32,7 @@ const ENROL_PAYLOAD = {
   phoneWhatsapp: "+254711111111",
   preferredSchedule: "Weekday evenings",
   additionalNotes: "Needs scholarship details",
+  consentAccepted: true,
 };
 
 const SMTP_KEYS = [
@@ -61,6 +62,7 @@ describe("lib/services/email.ts env handling", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     resetSmtpEnv();
   });
 
@@ -135,5 +137,56 @@ describe("lib/services/email.ts env handling", () => {
         pass: "legacy-app-password",
       },
     });
+  });
+
+  it("logs only an allowlisted classification when SMTP delivery fails", async () => {
+    const smtpUser = "smtp-private-user";
+    const smtpPassword = "smtp-private-password";
+    const schoolInbox = "private-school-inbox@example.com";
+    const privatePayload = {
+      ...CONTACT_PAYLOAD,
+      fullName: "Private Parent Name",
+      email: "private-parent@example.com",
+      phoneWhatsapp: "+254799999999",
+      message: "Private family notes",
+    };
+    process.env.SMTP_HOST = "127.0.0.1";
+    process.env.SMTP_PORT = "1025";
+    process.env.SMTP_USER = smtpUser;
+    process.env.SMTP_PASS = smtpPassword;
+    process.env.SCHOOL_INBOX_EMAIL = schoolInbox;
+    process.env.SMTP_MAX_RETRIES = "1";
+    sendMailMock.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          `${smtpUser} ${smtpPassword} ${schoolInbox} ${privatePayload.email} ${privatePayload.message}`,
+        ),
+        {
+          name: "PrivateSmtpAuthenticationFailure",
+          recipient: privatePayload.email,
+          response: privatePayload.phoneWhatsapp,
+        },
+      ),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const { sendContactEmail } = await import("../../../lib/services/email");
+    const result = await sendContactEmail(privatePayload);
+
+    expect(result).toEqual({ delivered: false, reason: "SEND_FAILED", attempts: 1 });
+    expect(errorSpy.mock.calls).toEqual([["Email delivery failed", { errorType: "Error" }]]);
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    for (const privateValue of [
+      smtpUser,
+      smtpPassword,
+      schoolInbox,
+      privatePayload.fullName,
+      privatePayload.email,
+      privatePayload.phoneWhatsapp,
+      privatePayload.message,
+      "PrivateSmtpAuthenticationFailure",
+    ]) {
+      expect(logged).not.toContain(privateValue);
+    }
   });
 });

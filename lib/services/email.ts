@@ -147,7 +147,9 @@ async function sendWithRetry(message: {
       return { delivered: true, attempts };
     } catch (error) {
       if (attempts >= maxAttempts) {
-        console.error("Email delivery failed", error);
+        console.error("Email delivery failed", {
+          errorType: error instanceof Error ? "Error" : "UnknownError",
+        });
         return { delivered: false, reason: "SEND_FAILED", attempts };
       }
       await new Promise((resolve) => setTimeout(resolve, attempts * 250));

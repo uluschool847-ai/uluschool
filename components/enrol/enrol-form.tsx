@@ -237,7 +237,17 @@ export function EnrolForm({ subjects, levels }: EnrolFormProps) {
           </div>
         </div>
 
-        <form ref={formRef} action={formAction} className="grid gap-6" noValidate>
+        <form
+          ref={formRef}
+          action={formAction}
+          className="grid gap-6"
+          noValidate
+          onSubmit={(event) => {
+            if (step !== 3 || !validateStepBeforeAdvance(3)) {
+              event.preventDefault();
+            }
+          }}
+        >
           <input
             type="text"
             name="companyWebsite"
