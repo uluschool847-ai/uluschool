@@ -1,11 +1,16 @@
 import { UserRole } from "@prisma/client";
 import type { Metadata } from "next";
 
+import {
+  formatMonth,
+  getMonthRange as getNairobiMonthRange,
+} from "@/components/portal/schedule-display";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/session";
 import { listLessonsForStudent, listLessonsForTeacher } from "@/lib/repositories/lesson-repository";
 import { listScheduleForUser } from "@/lib/repositories/schedule-repository";
+import { DEFAULT_AVAILABILITY_TIMEZONE, utcToLocalDateTime } from "@/lib/scheduling/availability";
 
 export const metadata: Metadata = {
   title: "Portal Schedule",
@@ -32,17 +37,8 @@ type ScheduleLessonItem = {
 };
 
 function getMonthRange(monthValue?: string) {
-  const now = new Date();
-  const monthDate = monthValue ? new Date(`${monthValue}-01T00:00:00`) : now;
-  const start = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
-  const end = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
-  return { start, end };
-}
-
-function formatMonth(date: Date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
+  const range = getNairobiMonthRange(monthValue);
+  return { start: range.from, end: new Date(range.to.getTime() + 1) };
 }
 
 function formatDateLabel(date: Date) {
@@ -50,6 +46,7 @@ function formatDateLabel(date: Date) {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: DEFAULT_AVAILABILITY_TIMEZONE,
   }).format(date);
 }
 
@@ -57,6 +54,7 @@ function formatTime(date: Date) {
   return new Intl.DateTimeFormat("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: DEFAULT_AVAILABILITY_TIMEZONE,
   }).format(date);
 }
 
@@ -98,7 +96,10 @@ export default async function PortalSchedulePage({ searchParams }: SchedulePageP
 
   const grouped = new Map<string, ScheduleLessonItem[]>();
   for (const item of classes) {
-    const key = new Date(item.startAt).toISOString().slice(0, 10);
+    const key = utcToLocalDateTime({
+      date: new Date(item.startAt),
+      timezone: DEFAULT_AVAILABILITY_TIMEZONE,
+    }).slice(0, 10);
     grouped.set(key, [...(grouped.get(key) || []), item]);
   }
 

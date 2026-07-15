@@ -10,6 +10,11 @@ import type {
   JoinState,
   StudentScheduleLesson,
 } from "@/lib/repositories/student-schedule-repository";
+import {
+  DEFAULT_AVAILABILITY_TIMEZONE,
+  localDateTimeToUtc,
+  utcToLocalDateTime,
+} from "@/lib/scheduling/availability";
 import { safeStoredFileHref } from "@/lib/security/storage-links";
 
 export const LESSON_STATUSES = [
@@ -21,30 +26,43 @@ export const LESSON_STATUSES = [
 ] as const;
 
 export function getMonthRange(monthValue?: string) {
-  const now = new Date();
-  const match = monthValue?.match(/^(\d{4})-(\d{2})$/);
-  const year = match ? Number(match[1]) : now.getFullYear();
-  const monthIndex = match ? Number(match[2]) - 1 : now.getMonth();
-  const from = new Date(year, monthIndex, 1, 0, 0, 0, 0);
-  const to = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
-  return { from, to, value: formatMonth(from) };
+  const currentMonth = utcToLocalDateTime({
+    date: new Date(),
+    timezone: DEFAULT_AVAILABILITY_TIMEZONE,
+  }).slice(0, 7);
+  const match = monthValue?.match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+  const value = match ? match[0] : currentMonth;
+  const [year, month] = value.split("-").map(Number);
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  const from = localDateTimeToUtc({
+    value: `${value}-01T00:00`,
+    timezone: DEFAULT_AVAILABILITY_TIMEZONE,
+  });
+  const nextMonthStart = localDateTimeToUtc({
+    value: `${nextYear}-${String(nextMonth).padStart(2, "0")}-01T00:00`,
+    timezone: DEFAULT_AVAILABILITY_TIMEZONE,
+  });
+  const to = new Date(nextMonthStart.getTime() - 1);
+  return { from, to, value };
 }
 
 export function formatMonth(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  return utcToLocalDateTime({ date, timezone: DEFAULT_AVAILABILITY_TIMEZONE }).slice(0, 7);
 }
 
 export function formatDateTimeRange(lesson: Pick<StudentScheduleLesson, "startAt" | "endAt">) {
-  return `${formatDate(lesson.startAt)} ${formatTime(lesson.startAt)} - ${formatTime(
+  return `${formatScheduleDate(lesson.startAt)} ${formatTime(lesson.startAt)} - ${formatTime(
     lesson.endAt,
   )}`;
 }
 
-function formatDate(date: Date) {
+export function formatScheduleDate(date: Date) {
   return new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: DEFAULT_AVAILABILITY_TIMEZONE,
   }).format(date);
 }
 
@@ -52,6 +70,7 @@ function formatTime(date: Date) {
   return new Intl.DateTimeFormat("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: DEFAULT_AVAILABILITY_TIMEZONE,
   }).format(date);
 }
 
@@ -279,7 +298,7 @@ export function LessonDetail(props: {
             {lesson.assignments.map((assignment) => (
               <li key={assignment.id} className="rounded-md border p-3">
                 <p className="font-medium">{assignment.title}</p>
-                <p>Due: {formatDate(assignment.dueDate)}</p>
+                <p>Due: {formatScheduleDate(assignment.dueDate)}</p>
                 <p>Submission: {formatSubmissionStatus(assignment.submissionStatus)}</p>
                 {assignment.grade !== null ? <p>Grade: {assignment.grade}</p> : null}
                 {assignment.grade !== null && assignment.feedback ? (
@@ -306,7 +325,7 @@ export function LessonDetail(props: {
             ) : null}
             {lesson.attendance.reason ? <p>Reason: {lesson.attendance.reason}</p> : null}
             {lesson.attendance.markedAt ? (
-              <p>Marked: {formatDate(lesson.attendance.markedAt)}</p>
+              <p>Marked: {formatScheduleDate(lesson.attendance.markedAt)}</p>
             ) : null}
           </div>
         ) : (

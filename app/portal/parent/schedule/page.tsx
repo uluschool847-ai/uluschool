@@ -1,7 +1,12 @@
 import { UserRole } from "@prisma/client";
 import type { Metadata } from "next";
 
-import { LessonCard, ScheduleFilters, getMonthRange } from "@/components/portal/schedule-display";
+import {
+  LessonCard,
+  ScheduleFilters,
+  formatScheduleDate,
+  getMonthRange,
+} from "@/components/portal/schedule-display";
 import { requireRole } from "@/lib/auth/session";
 import { parseLessonStatus } from "@/lib/lessons/lesson-status";
 import { getLinkedChildren } from "@/lib/repositories/portal-repository";
@@ -53,7 +58,7 @@ export default async function ParentSchedulePage({ searchParams }: ParentSchedul
       <header className="space-y-2">
         <h1 className="text-3xl font-bold">Child Schedule</h1>
         <p className="text-sm text-muted-foreground">
-          Lessons for {monthRange.from.toLocaleDateString()} - {monthRange.to.toLocaleDateString()}
+          Lessons for {formatScheduleDate(monthRange.from)} - {formatScheduleDate(monthRange.to)}
         </p>
       </header>
 

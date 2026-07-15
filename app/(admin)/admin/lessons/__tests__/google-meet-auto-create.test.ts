@@ -114,7 +114,7 @@ function lessonRecord(overrides?: Record<string, unknown>) {
     cancelledAt: null,
     classGroupId: "group-1",
     description: "Live problem-solving session",
-    endAt: new Date("2026-06-01T11:00:00.000Z"),
+    endAt: new Date("2026-06-01T08:00:00.000Z"),
     googleCalendarEventId: "calendar-event-1",
     googleMeetSpaceName: "spaces/abc-defg-hij",
     id: "lesson-1",
@@ -123,7 +123,7 @@ function lessonRecord(overrides?: Record<string, unknown>) {
     meetingProvider: MeetingProvider.GOOGLE_MEET,
     meetingUpdatedAt: new Date("2026-06-01T08:00:00.000Z"),
     rescheduledFromId: null,
-    startAt: new Date("2026-06-01T10:00:00.000Z"),
+    startAt: new Date("2026-06-01T07:00:00.000Z"),
     status: "SCHEDULED",
     subjectId: "subject-math",
     teacherId: "teacher-1",
@@ -215,9 +215,9 @@ describe("Admin lesson Google Meet auto-create actions", () => {
       expect.objectContaining({
         classGroupId: "group-1",
         description: "Live problem-solving session",
-        endAt: new Date("2026-06-01T11:00:00.000Z"),
+        endAt: new Date("2026-06-01T08:00:00.000Z"),
         lessonId: "lesson-1",
-        startAt: new Date("2026-06-01T10:00:00.000Z"),
+        startAt: new Date("2026-06-01T07:00:00.000Z"),
         timezone: "Africa/Nairobi",
         title: "Quadratic functions",
       }),
@@ -395,8 +395,8 @@ describe("Admin lesson Google Meet auto-create actions", () => {
   });
 
   it("syncs Google Calendar metadata when rescheduling a lesson with an existing calendar event", async () => {
-    const newStart = new Date("2026-06-08T10:00:00.000Z");
-    const newEnd = new Date("2026-06-08T11:00:00.000Z");
+    const newStart = new Date("2026-06-08T07:00:00.000Z");
+    const newEnd = new Date("2026-06-08T08:00:00.000Z");
     updateGoogleMeetEventForLessonMock.mockResolvedValueOnce(googleMeetResult());
     rescheduleLessonMock.mockResolvedValueOnce({
       ...lessonRecord({ endAt: newEnd, startAt: newStart, status: "RESCHEDULED" }),

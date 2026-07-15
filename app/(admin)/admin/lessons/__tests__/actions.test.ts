@@ -143,8 +143,8 @@ function lessonRecord(overrides?: Record<string, unknown>) {
     classGroupId: "group-1",
     title: "Quadratic functions",
     description: "Live problem-solving session",
-    startAt: new Date("2026-06-01T10:00:00.000Z"),
-    endAt: new Date("2026-06-01T11:00:00.000Z"),
+    startAt: new Date("2026-06-01T07:00:00.000Z"),
+    endAt: new Date("2026-06-01T08:00:00.000Z"),
     timezone: "Africa/Nairobi",
     status: "SCHEDULED",
     liveLessonUrl: "https://meet.google.com/abc-defg-hij",
@@ -327,8 +327,8 @@ describe("Admin lesson actions", () => {
     expect(checkTeacherAvailabilityMock).toHaveBeenCalledWith(
       {
         teacherId: "teacher-1",
-        startAt: new Date("2026-06-01T10:00:00.000Z"),
-        endAt: new Date("2026-06-01T11:00:00.000Z"),
+        startAt: new Date("2026-06-01T07:00:00.000Z"),
+        endAt: new Date("2026-06-01T08:00:00.000Z"),
       },
       transactionClientMock,
     );
@@ -410,8 +410,8 @@ describe("Admin lesson actions", () => {
     expect(checkTeacherAvailabilityMock).toHaveBeenCalledWith(
       {
         teacherId: "teacher-1",
-        startAt: new Date("2026-06-01T10:00:00.000Z"),
-        endAt: new Date("2026-06-01T11:00:00.000Z"),
+        startAt: new Date("2026-06-01T07:00:00.000Z"),
+        endAt: new Date("2026-06-01T08:00:00.000Z"),
       },
       transactionClientMock,
     );
@@ -439,6 +439,33 @@ describe("Admin lesson actions", () => {
     );
   });
 
+  it("converts Africa/Nairobi datetime-local values to UTC before availability and persistence", async () => {
+    createLessonMock.mockResolvedValueOnce(lessonRecord());
+
+    const { createLessonAction } = await loadLessonActions();
+    const result = await createLessonAction(lessonForm());
+
+    const expectedStartAt = new Date("2026-06-01T07:00:00.000Z");
+    const expectedEndAt = new Date("2026-06-01T08:00:00.000Z");
+    expect(checkTeacherAvailabilityMock).toHaveBeenCalledWith(
+      {
+        teacherId: "teacher-1",
+        startAt: expectedStartAt,
+        endAt: expectedEndAt,
+      },
+      transactionClientMock,
+    );
+    expect(createLessonMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startAt: expectedStartAt,
+        endAt: expectedEndAt,
+        timezone: "Africa/Nairobi",
+      }),
+      transactionClientMock,
+    );
+    expect(result.success).toBe(true);
+  });
+
   it.each([
     ["OUTSIDE_AVAILABILITY", /not available|outside availability/i],
     ["UNAVAILABLE_PERIOD", /not available|unavailable period/i],
@@ -454,8 +481,8 @@ describe("Admin lesson actions", () => {
       expect(checkTeacherAvailabilityMock).toHaveBeenCalledWith(
         {
           teacherId: "teacher-1",
-          startAt: new Date("2026-06-01T10:00:00.000Z"),
-          endAt: new Date("2026-06-01T11:00:00.000Z"),
+          startAt: new Date("2026-06-01T07:00:00.000Z"),
+          endAt: new Date("2026-06-01T08:00:00.000Z"),
         },
         transactionClientMock,
       );
@@ -492,8 +519,8 @@ describe("Admin lesson actions", () => {
     expect(checkTeacherAvailabilityMock).toHaveBeenCalledWith(
       {
         teacherId: "teacher-1",
-        startAt: new Date("2026-06-01T10:00:00.000Z"),
-        endAt: new Date("2026-06-01T11:00:00.000Z"),
+        startAt: new Date("2026-06-01T07:00:00.000Z"),
+        endAt: new Date("2026-06-01T08:00:00.000Z"),
         excludeLessonId: "lesson-1",
       },
       transactionClientMock,
@@ -533,8 +560,8 @@ describe("Admin lesson actions", () => {
   });
 
   it("reschedules a lesson, writes LESSON_RESCHEDULED audit, and revalidates lesson routes", async () => {
-    const newStart = new Date("2026-06-08T10:00:00.000Z");
-    const newEnd = new Date("2026-06-08T11:00:00.000Z");
+    const newStart = new Date("2026-06-08T07:00:00.000Z");
+    const newEnd = new Date("2026-06-08T08:00:00.000Z");
     rescheduleLessonMock.mockResolvedValueOnce({
       ...lessonRecord({
         startAt: newStart,
@@ -576,8 +603,8 @@ describe("Admin lesson actions", () => {
       expect.objectContaining({
         before: expect.objectContaining({
           status: "SCHEDULED",
-          startAt: new Date("2026-06-01T10:00:00.000Z"),
-          endAt: new Date("2026-06-01T11:00:00.000Z"),
+          startAt: new Date("2026-06-01T07:00:00.000Z"),
+          endAt: new Date("2026-06-01T08:00:00.000Z"),
         }),
         after: expect.objectContaining({
           status: "RESCHEDULED",
@@ -845,8 +872,8 @@ describe("Admin lesson actions", () => {
       createdCount: 2,
       skippedCount: 1,
       created: [
-        lessonRecord({ id: "lesson-1", startAt: new Date("2026-06-01T10:00:00.000Z") }),
-        lessonRecord({ id: "lesson-2", startAt: new Date("2026-06-08T10:00:00.000Z") }),
+        lessonRecord({ id: "lesson-1", startAt: new Date("2026-06-01T07:00:00.000Z") }),
+        lessonRecord({ id: "lesson-2", startAt: new Date("2026-06-08T07:00:00.000Z") }),
       ],
     });
 

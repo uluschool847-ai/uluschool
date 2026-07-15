@@ -27,6 +27,12 @@ import {
   updateLessonMeetingLink,
 } from "@/lib/repositories/lesson-repository";
 import { checkTeacherAvailability } from "@/lib/repositories/teacher-availability-repository";
+import {
+  DEFAULT_AVAILABILITY_TIMEZONE,
+  isValidTimezone,
+  localDateTimeToUtc,
+  normalizeAvailabilityTimezone,
+} from "@/lib/scheduling/availability";
 
 export type LessonActionResult = {
   success: boolean;
@@ -46,18 +52,16 @@ const optionalId = z
   .trim()
   .transform((value) => value || null);
 
-const dateTimeSchema = z
+const dateTimeValueSchema = z.string().trim().min(1, "Date and time are required.");
+
+const timezoneSchema = z
   .string()
   .trim()
-  .min(1, "Date and time are required.")
-  .transform((value, ctx) => {
-    const normalized = /z$|[+-]\d{2}:\d{2}$/i.test(value) ? value : `${value}:00.000Z`;
-    const date = new Date(normalized);
-    if (Number.isNaN(date.getTime())) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Date and time must be valid." });
-      return z.NEVER;
+  .transform((value) => value || DEFAULT_AVAILABILITY_TIMEZONE)
+  .superRefine((value, ctx) => {
+    if (!isValidTimezone(value)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Timezone must be valid." });
     }
-    return date;
   });
 
 const dateSchema = z
@@ -121,9 +125,9 @@ const lessonBaseSchema = z.object({
   classGroupId: z.string().trim().min(1, "Class group is required."),
   title: z.string().trim().min(1, "Title is required."),
   description: optionalText,
-  startAt: dateTimeSchema,
-  endAt: dateTimeSchema,
-  timezone: z.string().trim().default("Africa/Nairobi"),
+  startAt: dateTimeValueSchema,
+  endAt: dateTimeValueSchema,
+  timezone: timezoneSchema,
   teacherId: optionalId,
   subjectId: optionalId,
   liveLessonUrl: z.string().trim(),
@@ -131,33 +135,67 @@ const lessonBaseSchema = z.object({
   reminderMinutesBefore: reminderSchema,
 });
 
-const lessonSchema = lessonBaseSchema.superRefine((value, ctx) => {
-  if (value.startAt >= value.endAt) {
+function parseLessonDateRange(
+  value: { startAt: string; endAt: string; timezone: string },
+  ctx: z.RefinementCtx,
+) {
+  let startAt: Date | null = null;
+  let endAt: Date | null = null;
+  try {
+    startAt = localDateTimeToUtc({ value: value.startAt, timezone: value.timezone });
+  } catch {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["startAt"],
+      message: "Date and time must be valid.",
+    });
+  }
+  try {
+    endAt = localDateTimeToUtc({ value: value.endAt, timezone: value.timezone });
+  } catch {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["endAt"],
+      message: "Date and time must be valid.",
+    });
+  }
+  if (startAt && endAt && startAt >= endAt) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["endAt"],
       message: "End time must be after start time.",
     });
   }
-  addMeetingUrlIssue(ctx, value.liveLessonUrl, value.meetingProvider, {
-    required: !(value.meetingProvider === MeetingProvider.GOOGLE_MEET && !value.liveLessonUrl),
-  });
-});
+}
+
+function toLessonDates<T extends { startAt: string; endAt: string; timezone: string }>(value: T) {
+  const timezone = normalizeAvailabilityTimezone(value.timezone);
+  return {
+    ...value,
+    startAt: localDateTimeToUtc({ value: value.startAt, timezone }),
+    endAt: localDateTimeToUtc({ value: value.endAt, timezone }),
+    timezone,
+  };
+}
+
+const lessonSchema = lessonBaseSchema
+  .superRefine((value, ctx) => {
+    parseLessonDateRange(value, ctx);
+    addMeetingUrlIssue(ctx, value.liveLessonUrl, value.meetingProvider, {
+      required: !(value.meetingProvider === MeetingProvider.GOOGLE_MEET && !value.liveLessonUrl),
+    });
+  })
+  .transform(toLessonDates);
 
 const lessonUpdateSchema = lessonBaseSchema
   .extend({
     id: z.string().trim().min(1, "Lesson id is required."),
   })
   .superRefine((value, ctx) => {
-    if (value.startAt >= value.endAt) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["endAt"],
-        message: "End time must be after start time.",
-      });
-    }
+    parseLessonDateRange(value, ctx);
     addMeetingUrlIssue(ctx, value.liveLessonUrl, value.meetingProvider);
-  });
+  })
+  .transform(toLessonDates);
 
 const cancelSchema = z.object({
   id: z.string().trim().min(1, "Lesson id is required."),

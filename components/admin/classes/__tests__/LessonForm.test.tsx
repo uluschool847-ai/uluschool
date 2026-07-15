@@ -91,6 +91,8 @@ describe("LessonForm admin controls", () => {
     expect(screen.getByDisplayValue("Quadratic functions")).toBeDefined();
     expect(screen.getByDisplayValue("Live problem-solving session")).toBeDefined();
     expect(screen.getByDisplayValue("https://meet.google.com/abc-defg-hij")).toBeDefined();
+    expect(screen.getByLabelText(/^start$/i)).toHaveProperty("value", "2026-06-01T13:00");
+    expect(screen.getByLabelText(/^end$/i)).toHaveProperty("value", "2026-06-01T14:00");
     expect(screen.getByText(/scheduled/i)).toBeDefined();
     expect(screen.getByRole("button", { name: /save lesson/i })).toBeDefined();
     expect(screen.getByRole("button", { name: /reschedule/i })).toBeDefined();

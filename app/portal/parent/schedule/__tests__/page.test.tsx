@@ -145,7 +145,7 @@ describe("Parent child schedule page", () => {
     const page = await loadParentSchedulePage();
     const element = await page.default({
       searchParams: Promise.resolve({
-        month: "2026-06",
+        month: "2026-01",
         studentId: "student-1",
         subjectId: "subject-math",
         status: "LIVE",
@@ -166,16 +166,15 @@ describe("Parent child schedule page", () => {
       }),
     );
     const [input] = listParentChildScheduleMock.mock.calls[0] ?? [];
-    expect(input.from.getFullYear()).toBe(2026);
-    expect(input.from.getMonth()).toBe(5);
-    expect(input.to.getFullYear()).toBe(2026);
-    expect(input.to.getMonth()).toBe(5);
+    expect(input.from).toEqual(new Date("2025-12-31T21:00:00.000Z"));
+    expect(input.to).toEqual(new Date("2026-01-31T20:59:59.999Z"));
 
     expect(screen.getByRole("heading", { name: /child schedule/i })).toBeDefined();
     expect(screen.getByLabelText(/^child$/i)).toHaveProperty("value", "student-1");
     expect(screen.getByRole("option", { name: /sofia shevchenko/i })).toBeDefined();
     expect(screen.getByRole("option", { name: /mark shevchenko/i })).toBeDefined();
-    expect(screen.getByLabelText(/month/i)).toHaveProperty("value", "2026-06");
+    expect(screen.getByText("Lessons for 01 Jan 2026 - 31 Jan 2026")).toBeDefined();
+    expect(screen.getByLabelText(/month/i)).toHaveProperty("value", "2026-01");
     expect(screen.getByLabelText(/subject/i)).toBeDefined();
     expect(screen.getByLabelText(/status/i)).toHaveProperty("value", "LIVE");
     expect(screen.getByText("Quadratic functions")).toBeDefined();

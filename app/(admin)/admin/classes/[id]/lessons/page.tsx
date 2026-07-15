@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/session";
 import { listAdminLessons } from "@/lib/repositories/lesson-repository";
+import { DEFAULT_AVAILABILITY_TIMEZONE, localDateTimeToUtc } from "@/lib/scheduling/availability";
 
 export const metadata: Metadata = {
   title: "Class Group Lessons",
@@ -18,11 +19,21 @@ type LessonsPageProps = {
 };
 
 function asDateStart(value?: string) {
-  return value ? new Date(`${value}T00:00:00`) : undefined;
+  return value
+    ? localDateTimeToUtc({
+        value: `${value}T00:00:00`,
+        timezone: DEFAULT_AVAILABILITY_TIMEZONE,
+      })
+    : undefined;
 }
 
 function asDateEnd(value?: string) {
-  return value ? new Date(`${value}T23:59:59.999`) : undefined;
+  if (!value) return undefined;
+  const end = localDateTimeToUtc({
+    value: `${value}T23:59:59`,
+    timezone: DEFAULT_AVAILABILITY_TIMEZONE,
+  });
+  return new Date(end.getTime() + 999);
 }
 
 function formatDateTime(value: Date) {
@@ -32,6 +43,7 @@ function formatDateTime(value: Date) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: DEFAULT_AVAILABILITY_TIMEZONE,
   }).format(value);
 }
 
