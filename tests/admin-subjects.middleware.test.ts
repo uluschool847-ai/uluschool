@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const verifySessionTokenMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({
+  verifyAdminPendingTwoFactorToken: vi.fn(async () => null),
   verifySessionToken: verifySessionTokenMock,
   getPortalLoginPath: vi.fn((path: string) => `/portal/login?next=${encodeURIComponent(path)}`),
   getPortalDashboardPath: vi.fn((role: string) => `/portal/${role.toLowerCase()}`),
