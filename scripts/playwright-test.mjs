@@ -100,12 +100,30 @@ async function ensureBaseUrl() {
 
 const isolatedServerFlag = "--isolated-server";
 const nextStartFlag = "--next-start";
+const testPlaywrightCliFlagPrefix = "--test-playwright-cli=";
 const partitionFlags = new Map([
   ["--standard-partition", "standard"],
   ["--storage-partition", "storage"],
   ["--admin-2fa-partition", "admin-2fa"],
 ]);
 const rawArgs = process.argv.slice(2);
+const testPlaywrightCliFlags = rawArgs.filter((arg) => arg.startsWith(testPlaywrightCliFlagPrefix));
+
+if (testPlaywrightCliFlags.length > 1) {
+  throw new Error("Only one --test-playwright-cli flag can be selected at a time.");
+}
+
+const testPlaywrightCliFlag = testPlaywrightCliFlags[0];
+const testPlaywrightCli = testPlaywrightCliFlag?.slice(testPlaywrightCliFlagPrefix.length);
+
+if (testPlaywrightCliFlag && process.env.NODE_ENV !== "test") {
+  throw new Error("--test-playwright-cli is only available when NODE_ENV=test.");
+}
+
+if (testPlaywrightCliFlag && (!testPlaywrightCli || !path.isAbsolute(testPlaywrightCli))) {
+  throw new Error("--test-playwright-cli requires an absolute CLI path.");
+}
+
 const selectedPartitions = rawArgs
   .filter((arg) => partitionFlags.has(arg))
   .map((arg) => partitionFlags.get(arg));
@@ -118,7 +136,13 @@ const partition = selectedPartitions[0] ?? "focused";
 const usesIsolatedServer = rawArgs.includes(isolatedServerFlag) || partition !== "focused";
 const usesNextStart = rawArgs.includes(nextStartFlag);
 const expandedArgs = rawArgs
-  .filter((arg) => arg !== isolatedServerFlag && arg !== nextStartFlag && !partitionFlags.has(arg))
+  .filter(
+    (arg) =>
+      arg !== isolatedServerFlag &&
+      arg !== nextStartFlag &&
+      !partitionFlags.has(arg) &&
+      !arg.startsWith(testPlaywrightCliFlagPrefix),
+  )
   .flatMap(expandArg);
 
 if (usesIsolatedServer) {
@@ -149,10 +173,9 @@ process.env.E2E_PARTITION = partition;
 if (partition === "storage") process.env.STORAGE_DRIVER = "local";
 if (usesNextStart) process.env.E2E_PLAYWRIGHT_SERVER_COMMAND = "npx next start";
 
-const playwrightCli =
-  process.env.NODE_ENV === "test" && process.env.PLAYWRIGHT_TEST_CLI
-    ? path.resolve(process.env.PLAYWRIGHT_TEST_CLI)
-    : path.resolve("node_modules", "@playwright", "test", "cli.js");
+const playwrightCli = testPlaywrightCli
+  ? path.resolve(testPlaywrightCli)
+  : path.resolve("node_modules", "@playwright", "test", "cli.js");
 const child = spawn(process.execPath, [playwrightCli, "test", ...expandedArgs], {
   shell: false,
   stdio: "inherit",

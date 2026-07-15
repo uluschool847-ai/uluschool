@@ -1,17 +1,17 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
 const RUNNER = join(ROOT, "scripts", "playwright-test.mjs");
-const CAPTURE_CLI = join(ROOT, "scripts", "__tests__", "fixtures", "playwright-cli-capture.mjs");
 const temporaryDirectories: string[] = [];
 
 type Capture = {
   args: string[];
   environment: Record<string, string | null>;
+  source: string;
 };
 
 const hostileEnvironment = {
@@ -29,6 +29,46 @@ afterEach(() => {
   }
 });
 
+function writeCaptureCli(directory: string, source: string) {
+  const cli = join(directory, `${source}-playwright-cli.mjs`);
+  const sourceLiteral = JSON.stringify(source);
+
+  writeFileSync(
+    cli,
+    `import { writeFileSync } from "node:fs";
+
+const captureFile = process.env.PLAYWRIGHT_TEST_CAPTURE_FILE;
+
+if (!captureFile) {
+  throw new Error("PLAYWRIGHT_TEST_CAPTURE_FILE is required for the test capture CLI.");
+}
+
+const capturedEnvironment = Object.fromEntries(
+  [
+    "PLAYWRIGHT_BASE_URL",
+    "PORT",
+    "PLAYWRIGHT_REUSE_EXISTING_SERVER",
+    "PLAYWRIGHT_SERVER_COMMAND",
+    "E2E_PLAYWRIGHT_SERVER_COMMAND",
+    "E2E_ADMIN_REQUIRE_2FA",
+    "ADMIN_REQUIRE_2FA",
+    "E2E_PARTITION",
+    "STORAGE_DRIVER",
+  ].map((name) => [name, process.env[name] ?? null]),
+);
+
+writeFileSync(
+  captureFile,
+  JSON.stringify({ source: ${sourceLiteral}, args: process.argv.slice(2), environment: capturedEnvironment }),
+);
+
+process.exit(Number(process.env.PLAYWRIGHT_TEST_EXIT_CODE ?? "0"));
+`,
+  );
+
+  return cli;
+}
+
 function runRunner(
   args: string[],
   environment: Record<string, string> = {},
@@ -36,18 +76,24 @@ function runRunner(
   const directory = mkdtempSync(join(tmpdir(), "ulu-playwright-runner-"));
   temporaryDirectories.push(directory);
   const captureFile = join(directory, "capture.json");
-  const result = spawnSync(process.execPath, [RUNNER, ...args], {
-    cwd: directory,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      ...hostileEnvironment,
-      ...environment,
-      NODE_ENV: "test",
-      PLAYWRIGHT_TEST_CAPTURE_FILE: captureFile,
-      PLAYWRIGHT_TEST_CLI: CAPTURE_CLI,
+  const explicitCli = writeCaptureCli(directory, "explicit");
+  const ambientCli = writeCaptureCli(directory, "ambient");
+  const result = spawnSync(
+    process.execPath,
+    [RUNNER, `--test-playwright-cli=${explicitCli}`, ...args],
+    {
+      cwd: directory,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ...hostileEnvironment,
+        ...environment,
+        NODE_ENV: "test",
+        PLAYWRIGHT_TEST_CAPTURE_FILE: captureFile,
+        PLAYWRIGHT_TEST_CLI: ambientCli,
+      },
     },
-  });
+  );
 
   if (!existsSync(captureFile)) {
     throw new Error(`Capture CLI did not run. stderr: ${result.stderr}`);
@@ -57,6 +103,28 @@ function runRunner(
     capture: JSON.parse(readFileSync(captureFile, "utf8")) as Capture,
     status: result.status,
   };
+}
+
+function runProductionRunner(useExplicitHook: boolean) {
+  const directory = mkdtempSync(join(tmpdir(), "ulu-playwright-runner-production-"));
+  temporaryDirectories.push(directory);
+  const captureFile = join(directory, "capture.json");
+  const explicitCli = writeCaptureCli(directory, "explicit");
+  const ambientCli = writeCaptureCli(directory, "ambient");
+  const args = useExplicitHook ? [`--test-playwright-cli=${explicitCli}`] : ["--help"];
+  const result = spawnSync(process.execPath, [RUNNER, ...args], {
+    cwd: ROOT,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ...hostileEnvironment,
+      NODE_ENV: "production",
+      PLAYWRIGHT_TEST_CAPTURE_FILE: captureFile,
+      PLAYWRIGHT_TEST_CLI: ambientCli,
+    },
+  });
+
+  return { captureFile, result };
 }
 
 function expectIsolatedServer(capture: Capture) {
@@ -71,11 +139,13 @@ function expectIsolatedServer(capture: Capture) {
 }
 
 function expectWrapperFlagsRemoved(capture: Capture) {
+  expect(capture.source).toBe("explicit");
   expect(capture.args).not.toContain("--isolated-server");
   expect(capture.args).not.toContain("--next-start");
   expect(capture.args).not.toContain("--admin-2fa-partition");
   expect(capture.args).not.toContain("--standard-partition");
   expect(capture.args).not.toContain("--storage-partition");
+  expect(capture.args.some((arg) => arg.startsWith("--test-playwright-cli="))).toBe(false);
 }
 
 function readPackageScripts() {
@@ -199,6 +269,7 @@ describe("Playwright E2E partition contract", () => {
         E2E_PLAYWRIGHT_SERVER_COMMAND: null,
       });
       expect(capture.args).toEqual(["test", specPath, "--reporter=line"]);
+      expectWrapperFlagsRemoved(capture);
     },
   );
 
@@ -208,7 +279,23 @@ describe("Playwright E2E partition contract", () => {
       { PLAYWRIGHT_TEST_EXIT_CODE: "23" },
     );
 
+    expectWrapperFlagsRemoved(capture);
     expect(capture.args).toEqual(["test"]);
     expect(status).toBe(23);
+  });
+
+  it("ignores hostile ambient CLI injection outside test mode", () => {
+    const { captureFile, result } = runProductionRunner(false);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(captureFile)).toBe(false);
+  });
+
+  it("rejects the explicit CLI hook outside test mode", () => {
+    const { captureFile, result } = runProductionRunner(true);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("--test-playwright-cli is only available when NODE_ENV=test.");
+    expect(existsSync(captureFile)).toBe(false);
   });
 });
