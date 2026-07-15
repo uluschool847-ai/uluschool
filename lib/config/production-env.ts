@@ -10,6 +10,7 @@ export type EnvironmentValidationResult =
 
 const PRODUCTION_ORIGIN = "https://uluglobalacademy.com";
 const MIN_SECRET_LENGTH = 32;
+const MAX_PLACEHOLDER_ANALYSIS_LENGTH = 4096;
 const R2_ENDPOINT_PATTERN =
   /^https:\/\/[a-f0-9]{32}(?:\.(?:eu|fedramp))?\.r2\.cloudflarestorage\.com\/?$/;
 const R2_BUCKET_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])$/;
@@ -25,6 +26,85 @@ const CHANGE_PLACEHOLDER_PREFIXES = [
   "pleasereplaceme",
 ] as const;
 const REPEATED_PLACEHOLDER_WORDS = ["password", "secret", "token"] as const;
+const RESERVED_PLACEHOLDER_WORDS = [
+  "access",
+  "admin",
+  "alert",
+  "api",
+  "app",
+  "auth",
+  "authentication",
+  "be",
+  "before",
+  "change",
+  "changed",
+  "changeme",
+  "changethis",
+  "credential",
+  "credentials",
+  "cron",
+  "default",
+  "deploy",
+  "deployment",
+  "dev",
+  "dummy",
+  "environment",
+  "example",
+  "fake",
+  "for",
+  "job",
+  "key",
+  "local",
+  "me",
+  "must",
+  "only",
+  "password",
+  "placeholder",
+  "please",
+  "production",
+  "reminder",
+  "replace",
+  "replaced",
+  "replacement",
+  "replaceme",
+  "replacethis",
+  "sample",
+  "secret",
+  "session",
+  "staging",
+  "temp",
+  "temporary",
+  "test",
+  "that",
+  "the",
+  "this",
+  "to",
+  "token",
+  "value",
+  "with",
+  "your",
+] as const;
+const CREDENTIAL_RISK_WORDS = new Set([
+  "auth",
+  "authentication",
+  "changeme",
+  "changethis",
+  "credential",
+  "credentials",
+  "dummy",
+  "example",
+  "fake",
+  "key",
+  "password",
+  "placeholder",
+  "replaceme",
+  "replacethis",
+  "sample",
+  "secret",
+  "token",
+]);
+const SEGMENTED_WITHOUT_RISK = 1;
+const SEGMENTED_WITH_RISK = 2;
 
 const productionEnvironmentSchema = z
   .object({
@@ -123,11 +203,13 @@ function requireLiteral(
 }
 
 function isPlaceholder(value: string) {
+  if (value.length > MAX_PLACEHOLDER_ANALYSIS_LENGTH) return true;
+
   const normalized = value.trim().toLowerCase();
   const compact = normalized.replace(/[^a-z0-9]/g, "");
   return (
     !normalized ||
-    /\b(?:placeholder|todo|tbd)\b/.test(normalized) ||
+    /\b(?:todo|tbd)\b/.test(normalized) ||
     CHANGE_PLACEHOLDER_PREFIXES.some((prefix) => compact.startsWith(prefix)) ||
     EXTENDED_PLACEHOLDER_PREFIXES.some((prefix) => compact.startsWith(prefix)) ||
     REPEATED_PLACEHOLDER_WORDS.some((word) => isRepeatedPlaceholderWord(compact, word)) ||
@@ -135,8 +217,60 @@ function isPlaceholder(value: string) {
     /^(?:sample|fake)(?:$|[-_ ])/.test(normalized) ||
     /^(?:ci|test|dev|local)[-_ ]only/.test(normalized) ||
     /^<.*>$/.test(normalized) ||
-    /^(.)\1+$/.test(normalized)
+    /^(.)\1+$/.test(normalized) ||
+    isComposedPlaceholder(normalized)
   );
+}
+
+function isComposedPlaceholder(value: string) {
+  const alphaRuns = tokenizeAlphaRuns(value);
+  let includesCredentialRisk = false;
+
+  for (const alphaRun of alphaRuns) {
+    const segmentation = segmentReservedPlaceholderWords(alphaRun);
+    if (segmentation === 0) return false;
+    if ((segmentation & SEGMENTED_WITH_RISK) !== 0) includesCredentialRisk = true;
+  }
+
+  return alphaRuns.length > 0 && includesCredentialRisk;
+}
+
+function tokenizeAlphaRuns(value: string) {
+  const runs: string[] = [];
+  let runStart = -1;
+
+  for (let index = 0; index <= value.length; index += 1) {
+    const code = index < value.length ? value.charCodeAt(index) : 0;
+    const isLowercaseLetter = code >= 97 && code <= 122;
+
+    if (isLowercaseLetter && runStart === -1) {
+      runStart = index;
+    } else if (!isLowercaseLetter && runStart !== -1) {
+      runs.push(value.slice(runStart, index));
+      runStart = -1;
+    }
+  }
+
+  return runs;
+}
+
+function segmentReservedPlaceholderWords(value: string) {
+  const states = new Uint8Array(value.length + 1);
+  states[0] = SEGMENTED_WITHOUT_RISK;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const state = states[index];
+    if (state === 0) continue;
+
+    for (const word of RESERVED_PLACEHOLDER_WORDS) {
+      if (!value.startsWith(word, index)) continue;
+
+      const nextIndex = index + word.length;
+      states[nextIndex] |= CREDENTIAL_RISK_WORDS.has(word) ? SEGMENTED_WITH_RISK : state;
+    }
+  }
+
+  return states[value.length];
 }
 
 function isRepeatedPlaceholderWord(value: string, word: string) {

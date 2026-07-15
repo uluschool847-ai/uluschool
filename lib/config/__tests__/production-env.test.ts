@@ -21,6 +21,24 @@ const OVER_LENGTH_MAILBOX = `a@${[
   "d".repeat(61),
 ].join(".")}`;
 const PLACEHOLDER_SECRET_CASES = [
+  [
+    "reviewer production underscore sequence",
+    "production_placeholder_credential_must_be_replaced_123",
+  ],
+  ["reviewer mixed-risk underscore sequence", "password_secret_token_password_secret_token_123456"],
+  [
+    "hyphen-separated deployment sequence",
+    "production-placeholder-credential-must-be-replaced-123",
+  ],
+  [
+    "whitespace-separated deployment sequence",
+    "production placeholder credential must be replaced 123",
+  ],
+  ["dot-separated deployment sequence", "production.placeholder.credential.must.be.replaced.123"],
+  ["mixed-case underscore sequence", "PrOdUcTiOn_PlAcEhOlDeR_CrEdEnTiAl_MuSt_Be_RePlAcEd_123"],
+  ["concatenated deployment sequence", "PrOdUcTiOnPlAcEhOlDeRcReDeNtIaLmUsTbErEpLaCeD123"],
+  ["concatenated mixed-risk sequence", "PasswordSecretTokenPasswordSecretToken123456"],
+  ["over bounded analysis length", "Ab1-".repeat(1025)],
   ["repeated password", "  PaSsWoRdPasswordPasswordPasswordPassword  "],
   ["separated secret", "  SeCrEt-secret_secret.secret-secret-secret  "],
   ["separated token", "  ToKeN-token_token.token-token-token-token  "],
@@ -31,6 +49,11 @@ const PLACEHOLDER_SECRET_CASES = [
   ["extended changeme", "  ChAnGeMe-credential-value-that-must-be-replaced  "],
   ["please change prefix", "  PlEaSe-ChAnGe-ThIs-credential-before-production  "],
   ["repeated secret with suffix", "  SeCrEt-secret-production-credential-value  "],
+] as const;
+const HIGH_ENTROPY_SECRET_CONTROLS = [
+  ["incidental substrings", "K9!alpha-secretary-tokenized-exampleless-Q7#v2"],
+  ["reserved token between entropy", "Xqv7-placeholder-NmK9-entropy-Zp4-8472"],
+  ["risk token between entropy", "Rk8-secret-Qm9-tokenized-Vx4-random-7315"],
 ] as const;
 
 function validProductionEnv(): Record<string, string> {
@@ -265,12 +288,13 @@ describe("validateProductionEnv", () => {
     });
   });
 
-  it("accepts high-entropy protected secrets with incidental reserved substrings", () => {
-    const highEntropyValue = "K9!alpha-secretary-tokenized-exampleless-Q7#v2";
-    const env = validProductionEnv();
-    for (const key of PROTECTED_SECRET_KEYS) env[key] = highEntropyValue;
-
-    expect(validateProductionEnv(env).ok).toBe(true);
+  describe.each(PROTECTED_SECRET_KEYS)("%s high-entropy acceptance controls", (key) => {
+    it.each(HIGH_ENTROPY_SECRET_CONTROLS)("accepts %s", (_, highEntropyValue) => {
+      expect(highEntropyValue.length).toBeGreaterThanOrEqual(32);
+      expect(validateProductionEnv({ ...validProductionEnv(), [key]: highEntropyValue }).ok).toBe(
+        true,
+      );
+    });
   });
 
   it("requires the exact production site origin", () => {
