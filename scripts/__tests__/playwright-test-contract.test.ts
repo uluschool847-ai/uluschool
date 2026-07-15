@@ -36,6 +36,9 @@ describe("Playwright E2E partition contract", () => {
     expect(runnerSource).toContain(
       'if (partition === "storage") process.env.STORAGE_DRIVER = "local";',
     );
+    expect(runnerSource).toContain(
+      "process.env.ADMIN_REQUIRE_2FA = process.env.E2E_ADMIN_REQUIRE_2FA;",
+    );
     expect(runnerSource).toContain("arg !== nextStartFlag && !partitionFlags.has(arg)");
     expect(configSource).toContain('...(isStoragePartition ? { STORAGE_DRIVER: "local" } : {})');
   });

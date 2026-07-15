@@ -140,6 +140,7 @@ const runsInitialAdminTwoFactorSpec =
   expandedArgs.some((arg) => arg.replaceAll("\\", "/") === "e2e/portals/initial-admin-2fa.spec.ts");
 
 process.env.E2E_ADMIN_REQUIRE_2FA = runsInitialAdminTwoFactorSpec ? "true" : "false";
+process.env.ADMIN_REQUIRE_2FA = process.env.E2E_ADMIN_REQUIRE_2FA;
 process.env.E2E_PARTITION = partition;
 if (partition === "storage") process.env.STORAGE_DRIVER = "local";
 if (usesNextStart) process.env.E2E_PLAYWRIGHT_SERVER_COMMAND = "npx next start";

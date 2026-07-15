@@ -49,7 +49,12 @@ const adminHeaderRoutes = [
 const diagnosticsByPage = new WeakMap<Page, string[]>();
 
 const expectedRedirectingPostPaths = new Set(["/portal/login", "/admin/reminders"]);
-const expectedAbortedGetPaths = new Set(["/api/auth/session", "/portal/teacher"]);
+const expectedAbortedGetPaths = new Set([
+  "/api/auth/session",
+  "/portal/parent",
+  "/portal/student",
+  "/portal/teacher",
+]);
 
 function installDiagnostics(page: Page) {
   const issues: string[] = [];

@@ -199,7 +199,7 @@ test.describe("Student and parent schedule portals", () => {
     await expect(linkedChildCard).toContainText(fixture.subjectName);
     await expect(linkedChildCard).toContainText(fixture.teacherName);
     await expect(linkedChildCard).toContainText(fixture.groupName);
-    await expect(linkedChildCard).toContainText(/Europe\/Kiev/i);
+    await expect(linkedChildCard).toContainText(/Africa\/Nairobi/i);
 
     await Promise.all([
       page.waitForURL(/\/portal\/parent\/schedule\/[^/]+\/[^/?]+$/, { timeout: 30000 }),
