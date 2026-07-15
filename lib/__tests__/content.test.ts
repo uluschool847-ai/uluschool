@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // @ts-expect-error Red phase: content helpers are not implemented yet.
 import { containsUnsupportedClaim, isPlaceholder } from "@/lib/content";
@@ -13,6 +13,17 @@ const supportedFeatures = [
   "free trial class",
   "parent progress tracking",
 ];
+
+const originalSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+
+afterEach(() => {
+  if (originalSiteUrl === undefined) {
+    Reflect.deleteProperty(process.env, "NEXT_PUBLIC_SITE_URL");
+  } else {
+    process.env.NEXT_PUBLIC_SITE_URL = originalSiteUrl;
+  }
+  vi.resetModules();
+});
 
 describe("lib/content placeholder and claims guards", () => {
   describe("isPlaceholder", () => {
@@ -82,5 +93,27 @@ describe("lib/content placeholder and claims guards", () => {
       expect(containsUnsupportedClaim(null, supportedFeatures)).toBe(false);
       expect(containsUnsupportedClaim(undefined, supportedFeatures)).toBe(false);
     });
+  });
+});
+
+describe("canonical SEO content", () => {
+  it("uses ULU Online School and NEXT_PUBLIC_SITE_URL in organization structured data", async () => {
+    process.env.NEXT_PUBLIC_SITE_URL = "https://ulu-school.example";
+    vi.resetModules();
+    const { generateStructuredData } = await import("@/lib/seo");
+
+    const structuredData = generateStructuredData("Organization", {});
+    const serialized = JSON.stringify(structuredData);
+
+    expect(structuredData).toEqual({
+      "@context": "https://schema.org",
+      "@type": "EducationalOrganization",
+      name: "ULU Online School",
+      description:
+        "ULU Online School delivers structured, interactive, and exam-focused Cambridge education to students anywhere in the world.",
+      url: "https://ulu-school.example",
+      logo: "https://ulu-school.example/logo.png",
+    });
+    expect(serialized).not.toMatch(/mathSchool|mathschool\.example\.com/i);
   });
 });

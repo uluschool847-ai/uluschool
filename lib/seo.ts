@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
 
-export const siteConfig = {
-  name: "mathSchool",
-  description: "Advanced online mathematics education for ambitious students.",
-  url: process.env.NEXT_PUBLIC_APP_URL || "https://mathschool.example.com",
-};
+import { siteConfig } from "@/lib/content";
+
+export { siteConfig };
 
 type StructuredDataPayload = {
   name?: string;
