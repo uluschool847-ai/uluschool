@@ -9,6 +9,12 @@ type LinkMockProps = {
 } & Record<string, unknown>;
 type ImageMockProps = { alt?: string; priority?: boolean } & Record<string, unknown>;
 
+const authenticatedPortalCases = [
+  { role: "TEACHER", label: "Teacher Portal", href: "/portal/teacher" },
+  { role: "STUDENT", label: "Student Portal", href: "/portal/student" },
+  { role: "PARENT", label: "My Portal", href: "/portal" },
+] as const;
+
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
@@ -102,27 +108,30 @@ describe("SiteHeader Navigation", () => {
     }
   });
 
-  it("disables prefetching for the authenticated teacher portal link", async () => {
-    global.fetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            authenticated: true,
-            user: {
-              uid: "teacher-1",
-              email: "teacher@example.com",
-              fullName: "Test Teacher",
-              role: "TEACHER",
-            },
-          }),
-      }),
-    ) as typeof fetch;
+  it.each(authenticatedPortalCases)(
+    "disables prefetching for the authenticated $role portal link",
+    async ({ role, label, href }) => {
+      global.fetch = vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              authenticated: true,
+              user: {
+                uid: `${role.toLowerCase()}-1`,
+                email: `${role.toLowerCase()}@example.com`,
+                fullName: `Test ${role}`,
+                role,
+              },
+            }),
+        }),
+      ) as typeof fetch;
 
-    render(<SiteHeader />);
+      render(<SiteHeader />);
 
-    const teacherPortalLink = await screen.findByRole("link", { name: "Teacher Portal" });
-    expect(teacherPortalLink).toHaveAttribute("href", "/portal/teacher");
-    expect(teacherPortalLink).toHaveAttribute("data-prefetch", "false");
-  });
+      const portalLink = await screen.findByRole("link", { name: label });
+      expect(portalLink).toHaveAttribute("href", href);
+      expect(portalLink).toHaveAttribute("data-prefetch", "false");
+    },
+  );
 });
