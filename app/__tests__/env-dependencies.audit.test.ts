@@ -294,9 +294,18 @@ describe("production environment startup contract", () => {
   it("keeps validation pure and process access isolated to the CLI adapter", () => {
     const validatorSource = readFileSync(join(ROOT, "lib/config/production-env.ts"), "utf8");
     const cliSource = readFileSync(join(ROOT, "scripts/check-production-env.ts"), "utf8");
+    const sharedMailboxParserSource = readFileSync(
+      join(ROOT, "lib/security/escape-html.ts"),
+      "utf8",
+    );
 
     expect(validatorSource).not.toMatch(/process\.env|process\.exit|console\.|\bfetch\s*\(/);
     expect(validatorSource).not.toMatch(/lib\/(?:prisma|storage)|@aws-sdk|@prisma/);
+    expect(validatorSource).toMatch(/parseEmailSender/);
+    expect(validatorSource).toMatch(/parseSingleMailbox/);
+    expect(sharedMailboxParserSource).not.toMatch(
+      /process\.env|process\.exit|console\.|\bfetch\s*\(|createTransport|@aws-sdk|@prisma/,
+    );
     expect(cliSource.match(/process\.env/g)).toHaveLength(1);
     expect(cliSource).toContain("validateProductionEnv(process.env)");
   });

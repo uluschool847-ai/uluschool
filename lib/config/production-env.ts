@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { parseEmailSender, parseSingleMailbox } from "@/lib/security/escape-html";
+
 export type DeploymentEnvironment = "staging" | "production";
 
 export type EnvironmentValidationResult =
@@ -11,7 +13,18 @@ const MIN_SECRET_LENGTH = 32;
 const R2_ENDPOINT_PATTERN =
   /^https:\/\/[a-f0-9]{32}(?:\.(?:eu|fedramp))?\.r2\.cloudflarestorage\.com\/?$/;
 const R2_BUCKET_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])$/;
-const emailSchema = z.string().email();
+const EXTENDED_PLACEHOLDER_PREFIXES = ["dummy", "example", "placeholder"] as const;
+const CHANGE_PLACEHOLDER_PREFIXES = [
+  "changethis",
+  "changeme",
+  "replacethis",
+  "replaceme",
+  "pleasechangethis",
+  "pleasechangeme",
+  "pleasereplacethis",
+  "pleasereplaceme",
+] as const;
+const REPEATED_PLACEHOLDER_WORDS = ["password", "secret", "token"] as const;
 
 const productionEnvironmentSchema = z
   .object({
@@ -76,14 +89,14 @@ const productionEnvironmentSchema = z
     requireSmtpPort(context, env.SMTP_PORT);
     requireProviderValue(context, env.SMTP_USER, "SMTP_USER");
     requireProviderValue(context, env.SMTP_PASS, "SMTP_PASS");
-    requireMailbox(context, env.SMTP_FROM, "SMTP_FROM", true);
-    requireMailbox(context, env.SCHOOL_INBOX_EMAIL, "SCHOOL_INBOX_EMAIL");
+    requireEmailSender(context, env.SMTP_FROM);
+    requireSingleMailbox(context, env.SCHOOL_INBOX_EMAIL, "SCHOOL_INBOX_EMAIL");
     requireLiteral(context, env.STORAGE_DRIVER, "STORAGE_DRIVER", "r2");
     requireR2Endpoint(context, env.R2_ENDPOINT);
     requireProviderValue(context, env.R2_ACCESS_KEY_ID, "R2_ACCESS_KEY_ID");
     requireProviderValue(context, env.R2_SECRET_ACCESS_KEY, "R2_SECRET_ACCESS_KEY");
     requireR2Bucket(context, env.R2_BUCKET_NAME);
-    requireMailbox(context, env.PRIVACY_CONTACT_EMAIL, "PRIVACY_CONTACT_EMAIL");
+    requireSingleMailbox(context, env.PRIVACY_CONTACT_EMAIL, "PRIVACY_CONTACT_EMAIL");
     requireProviderValue(context, env.PRIVACY_EMAIL_PROCESSOR_NAME, "PRIVACY_EMAIL_PROCESSOR_NAME");
     requireSecret(context, env.CRON_SECRET, "CRON_SECRET");
     requireSecret(context, env.REMINDER_CRON_TOKEN, "REMINDER_CRON_TOKEN");
@@ -111,18 +124,29 @@ function requireLiteral(
 
 function isPlaceholder(value: string) {
   const normalized = value.trim().toLowerCase();
+  const compact = normalized.replace(/[^a-z0-9]/g, "");
   return (
     !normalized ||
-    /placeholder|\btodo\b|\btbd\b/.test(normalized) ||
-    /^change(?:[-_ ]?this|[-_ ]?me)/.test(normalized) ||
-    /^replace(?:[-_ ]?this|[-_ ]?me)/.test(normalized) ||
-    /^(?:your|example)[-_ ]/.test(normalized) ||
-    /^(?:dummy|sample|fake)(?:$|[-_ ])/.test(normalized) ||
+    /\b(?:placeholder|todo|tbd)\b/.test(normalized) ||
+    CHANGE_PLACEHOLDER_PREFIXES.some((prefix) => compact.startsWith(prefix)) ||
+    EXTENDED_PLACEHOLDER_PREFIXES.some((prefix) => compact.startsWith(prefix)) ||
+    REPEATED_PLACEHOLDER_WORDS.some((word) => isRepeatedPlaceholderWord(compact, word)) ||
+    /^(?:your)[-_ ]/.test(normalized) ||
+    /^(?:sample|fake)(?:$|[-_ ])/.test(normalized) ||
     /^(?:ci|test|dev|local)[-_ ]only/.test(normalized) ||
-    /^(?:secret|password|token)$/.test(normalized) ||
     /^<.*>$/.test(normalized) ||
     /^(.)\1+$/.test(normalized)
   );
+}
+
+function isRepeatedPlaceholderWord(value: string, word: string) {
+  let remainder = value;
+  let repetitions = 0;
+  while (remainder.startsWith(word)) {
+    remainder = remainder.slice(word.length);
+    repetitions += 1;
+  }
+  return repetitions >= 2 || (repetitions === 1 && /^\d*$/.test(remainder));
 }
 
 function requireProviderValue(context: z.RefinementCtx, value: string | undefined, key: string) {
@@ -151,6 +175,11 @@ function requireSiteOrigin(
   value: string | undefined,
   appEnv: string | undefined,
 ) {
+  if (!isCanonicalHttpsOrigin(value)) {
+    addIssue(context, "NEXT_PUBLIC_SITE_URL", "must be an HTTPS origin");
+    return;
+  }
+
   if (appEnv === "production") {
     if (value !== PRODUCTION_ORIGIN) {
       addIssue(context, "NEXT_PUBLIC_SITE_URL", "must equal the canonical production origin");
@@ -158,22 +187,23 @@ function requireSiteOrigin(
     return;
   }
 
-  if (appEnv !== "staging") return;
+  if (appEnv === "staging" && value === PRODUCTION_ORIGIN) {
+    addIssue(context, "NEXT_PUBLIC_SITE_URL", "must be a different HTTPS origin for staging");
+  }
+}
 
+function isCanonicalHttpsOrigin(value: string | undefined) {
   try {
     const parsed = new URL(value ?? "");
-    if (
-      parsed.protocol !== "https:" ||
-      !parsed.hostname ||
-      parsed.username ||
-      parsed.password ||
-      parsed.origin !== value ||
-      value === PRODUCTION_ORIGIN
-    ) {
-      throw null;
-    }
+    return (
+      parsed.protocol === "https:" &&
+      Boolean(parsed.hostname) &&
+      !parsed.username &&
+      !parsed.password &&
+      parsed.origin === value
+    );
   } catch {
-    addIssue(context, "NEXT_PUBLIC_SITE_URL", "must be a different HTTPS origin for staging");
+    return false;
   }
 }
 
@@ -191,16 +221,14 @@ function requireSmtpPort(context: z.RefinementCtx, value: string | undefined) {
   }
 }
 
-function requireMailbox(
-  context: z.RefinementCtx,
-  value: string | undefined,
-  key: string,
-  allowDisplayName = false,
-) {
-  const candidate = value?.trim() ?? "";
-  const displayNameMatch = allowDisplayName ? candidate.match(/^[^<>\r\n]+<([^<>\s]+)>$/) : null;
-  const address = displayNameMatch?.[1] ?? candidate;
-  if (!emailSchema.safeParse(address).success) {
+function requireEmailSender(context: z.RefinementCtx, value: string | undefined) {
+  if (!parseEmailSender(value)) {
+    addIssue(context, "SMTP_FROM", "must be a valid email sender");
+  }
+}
+
+function requireSingleMailbox(context: z.RefinementCtx, value: string | undefined, key: string) {
+  if (!parseSingleMailbox(value)) {
     addIssue(context, key, "must be a valid email address");
   }
 }

@@ -3,10 +3,35 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { validateProductionEnv } from "@/lib/config/production-env";
+import { parseEmailSender, parseSingleMailbox } from "@/lib/security/escape-html";
 
 const ROOT = process.cwd();
 const PRODUCTION_ORIGIN = "https://uluglobalacademy.com";
 const R2_ACCOUNT_ID = "0123456789abcdef0123456789abcdef";
+const PROTECTED_SECRET_KEYS = [
+  "AUTH_SESSION_SECRET",
+  "CRON_SECRET",
+  "REMINDER_CRON_TOKEN",
+  "ALERT_TEST_TOKEN",
+] as const;
+const OVER_LENGTH_MAILBOX = `a@${[
+  "a".repeat(63),
+  "b".repeat(63),
+  "c".repeat(63),
+  "d".repeat(61),
+].join(".")}`;
+const PLACEHOLDER_SECRET_CASES = [
+  ["repeated password", "  PaSsWoRdPasswordPasswordPasswordPassword  "],
+  ["separated secret", "  SeCrEt-secret_secret.secret-secret-secret  "],
+  ["separated token", "  ToKeN-token_token.token-token-token-token  "],
+  ["extended dummy", "  DuMmY-credential-value-that-must-be-replaced  "],
+  ["extended example", "  ExAmPlE-credential-value-that-must-be-replaced  "],
+  ["extended placeholder", "  PlAcEhOlDeR-credential-value-that-must-be-replaced  "],
+  ["embedded placeholder word", "  production-PlAcEhOlDeR-credential-must-be-replaced  "],
+  ["extended changeme", "  ChAnGeMe-credential-value-that-must-be-replaced  "],
+  ["please change prefix", "  PlEaSe-ChAnGe-ThIs-credential-before-production  "],
+  ["repeated secret with suffix", "  SeCrEt-secret-production-credential-value  "],
+] as const;
 
 function validProductionEnv(): Record<string, string> {
   return {
@@ -177,15 +202,76 @@ describe("validateProductionEnv", () => {
     expect(validateProductionEnv({ ...validProductionEnv(), SMTP_PORT: port }).ok).toBe(true);
   });
 
-  it.each(["AUTH_SESSION_SECRET", "CRON_SECRET", "REMINDER_CRON_TOKEN", "ALERT_TEST_TOKEN"])(
-    "requires a 32+ character non-placeholder %s",
+  it.each([
+    ["structured", "ULU Online School <no-reply@uluglobalacademy.com>"],
+    ["plain", "no-reply@uluglobalacademy.com"],
+    ["quoted display name", '"ULU, School" <no-reply@uluglobalacademy.com>'],
+  ])("accepts the canonical %s SMTP_FROM form", (_, sender) => {
+    expect(parseEmailSender(sender)).not.toBeNull();
+    expect(validateProductionEnv({ ...validProductionEnv(), SMTP_FROM: sender }).ok).toBe(true);
+  });
+
+  it.each([
+    ["structured", "ULU Online School <no-reply@uluglobalacademy.com>"],
+    ["plain", "no-reply@uluglobalacademy.com"],
+    ["missing display-name spacing", "ULU Online School<no-reply@uluglobalacademy.com>"],
+    ["leading whitespace", " ULU Online School <no-reply@uluglobalacademy.com>"],
+    ["trailing whitespace", "ULU Online School <no-reply@uluglobalacademy.com> "],
+    ["mailbox list", "no-reply@uluglobalacademy.com, attacker@example.com"],
+    ["mailbox group", "Staff: no-reply@uluglobalacademy.com;"],
+    ["header control", "ULU\tSchool <no-reply@uluglobalacademy.com>"],
+    ["invalid Unicode DNS", "ULU School <sender@bücher.example>"],
+    ["malformed IDNA A-label", "ULU School <sender@xn--a.example>"],
+    ["over-length display name", `${"A".repeat(201)} <sender@example.com>`],
+    ["over-length mailbox", `ULU School <${OVER_LENGTH_MAILBOX}>`],
+  ])("matches runtime SMTP_FROM parser acceptance for %s", (_, sender) => {
+    const result = validateProductionEnv({ ...validProductionEnv(), SMTP_FROM: sender });
+    expect(result.ok).toBe(parseEmailSender(sender) !== null);
+  });
+
+  describe.each(["SCHOOL_INBOX_EMAIL", "PRIVACY_CONTACT_EMAIL"] as const)(
+    "%s runtime mailbox parity",
     (key) => {
-      expectInvalidKey(key, "short-value");
-      expectInvalidKey(key, "change-this-placeholder-value-that-is-long-enough");
-      expectInvalidKey(key, "dummy-credential-value-that-is-long-enough");
-      expectInvalidKey(key, "x".repeat(40));
+      it.each([
+        ["plain", "office@uluglobalacademy.com"],
+        ["canonical IDNA A-label", "office@xn--bcher-kva.example"],
+        ["outer whitespace", " office@uluglobalacademy.com "],
+        ["display name", "Office <office@uluglobalacademy.com>"],
+        ["mailbox list", "office@uluglobalacademy.com, attacker@example.com"],
+        ["mailbox group", "Staff: office@uluglobalacademy.com;"],
+        ["header control", "office@uluglobalacademy.com\r\nBcc: attacker@example.com"],
+        ["invalid DNS label", "office@example-.com"],
+        ["invalid Unicode DNS", "office@bücher.example"],
+        ["malformed IDNA A-label", "office@xn--a.example"],
+        ["over-length mailbox", OVER_LENGTH_MAILBOX],
+      ])("matches parseSingleMailbox for %s", (_, mailbox) => {
+        const result = validateProductionEnv({ ...validProductionEnv(), [key]: mailbox });
+        expect(result.ok).toBe(parseSingleMailbox(mailbox) !== null);
+      });
     },
   );
+
+  it.each(PROTECTED_SECRET_KEYS)("requires a 32+ character non-placeholder %s", (key) => {
+    expectInvalidKey(key, "short-value");
+    expectInvalidKey(key, "change-this-placeholder-value-that-is-long-enough");
+    expectInvalidKey(key, "dummy-credential-value-that-is-long-enough");
+    expectInvalidKey(key, "x".repeat(40));
+  });
+
+  describe.each(PROTECTED_SECRET_KEYS)("%s reserved placeholder normalization", (key) => {
+    it.each(PLACEHOLDER_SECRET_CASES)("rejects %s", (_, placeholderSecret) => {
+      expect(placeholderSecret.trim().length).toBeGreaterThanOrEqual(32);
+      expectInvalidKey(key, placeholderSecret);
+    });
+  });
+
+  it("accepts high-entropy protected secrets with incidental reserved substrings", () => {
+    const highEntropyValue = "K9!alpha-secretary-tokenized-exampleless-Q7#v2";
+    const env = validProductionEnv();
+    for (const key of PROTECTED_SECRET_KEYS) env[key] = highEntropyValue;
+
+    expect(validateProductionEnv(env).ok).toBe(true);
+  });
 
   it("requires the exact production site origin", () => {
     for (const origin of [
@@ -218,6 +304,31 @@ describe("validateProductionEnv", () => {
     "https://operator@staging.uluglobalacademy.com",
   ])("rejects an unsafe or production staging origin", (origin) => {
     expectInvalidKey("NEXT_PUBLIC_SITE_URL", origin, { APP_ENV: "staging" });
+  });
+
+  it("collects missing APP_ENV and site origin errors together on Render", () => {
+    const env = validProductionEnv();
+    Reflect.deleteProperty(env, "APP_ENV");
+    Reflect.deleteProperty(env, "NEXT_PUBLIC_SITE_URL");
+
+    const first = invalidResult(env);
+    const second = invalidResult(env);
+    expect(first).toEqual(second);
+    expect(first.errors.map((error) => error.key)).toEqual(["APP_ENV", "NEXT_PUBLIC_SITE_URL"]);
+  });
+
+  it("collects invalid APP_ENV and invalid site origin errors together", () => {
+    const env = {
+      ...validProductionEnv(),
+      APP_ENV: "preview",
+      NEXT_PUBLIC_SITE_URL: "http://operator:credential@private-host.invalid/path",
+    };
+
+    const result = invalidResult(env);
+    expect(result.errors.map((error) => error.key)).toEqual(["APP_ENV", "NEXT_PUBLIC_SITE_URL"]);
+    expect(JSON.stringify(result)).not.toContain(env.NEXT_PUBLIC_SITE_URL);
+    expect(JSON.stringify(result)).not.toContain("private-host.invalid");
+    expect(JSON.stringify(result)).not.toContain("operator");
   });
 
   it.each([
