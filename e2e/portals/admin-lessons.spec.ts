@@ -27,6 +27,44 @@ function testMeetUrl(path: string) {
   return `https://meet.google.com/${path}`;
 }
 
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function formatDateInput(date: Date) {
+  const pad = (value: number) => value.toString().padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function formatDateTimeInput(date: Date) {
+  const pad = (value: number) => value.toString().padStart(2, "0");
+  return `${formatDateInput(date)}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function formatMonthQuery(date: Date) {
+  return formatDateInput(date).slice(0, 7);
+}
+
+function formatTeacherScheduleQuery(date: Date) {
+  const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+  const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  return `from=${formatDateInput(monthStart)}&to=${formatDateInput(monthEnd)}`;
+}
+
+function nextWeekday(date: Date, weekday: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + ((weekday - next.getDay() + 7) % 7));
+  return next;
+}
+
+function withTime(date: Date, hours: number, minutes = 0) {
+  const next = new Date(date);
+  next.setHours(hours, minutes, 0, 0);
+  return next;
+}
+
 async function setPortalSession(
   page: Page,
   input: {
@@ -65,10 +103,15 @@ test.describe("Admin Scheduled Lessons Management", () => {
 
   test("admin manages lesson lifecycle and portal visibility", async ({ page }) => {
     const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const group = await createLessonClassGroup(suffix);
+    const lessonStart = withTime(addDays(new Date(), 14), 10);
+    const lessonEnd = withTime(lessonStart, 11);
+    const rescheduledStart = withTime(addDays(lessonStart, 2), 12);
+    const rescheduledEnd = withTime(rescheduledStart, 13);
+    const group = await createLessonClassGroup(suffix, {
+      endDate: addDays(rescheduledStart, 180),
+      startDate: addDays(lessonStart, -7),
+    });
     const lessonTitle = `${LESSON_PREFIX} ${suffix}`;
-    const rescheduledStart = "2026-07-08T12:00";
-    const rescheduledEnd = "2026-07-08T13:00";
 
     await setPortalSession(page, {
       uid: adminUserId,
@@ -81,8 +124,8 @@ test.describe("Admin Scheduled Lessons Management", () => {
     await expect(page.getByRole("heading", { name: /create lesson|new lesson/i })).toBeVisible();
     await page.getByLabel(/title/i).fill(lessonTitle);
     await page.getByLabel(/description/i).fill("Scheduled lesson lifecycle E2E.");
-    await page.getByLabel(/start/i).fill("2026-07-07T10:00");
-    await page.getByLabel(/end/i).fill("2026-07-07T11:00");
+    await page.getByLabel(/start/i).fill(formatDateTimeInput(lessonStart));
+    await page.getByLabel(/end/i).fill(formatDateTimeInput(lessonEnd));
     await page.getByLabel(/live lesson|url/i).fill(testMeetUrl("qa-lesson-lifecycle"));
     await Promise.all([
       page.waitForURL(/classMessage=Lesson(?:\+|%20)created\.?/i, { timeout: 60000 }),
@@ -113,7 +156,7 @@ test.describe("Admin Scheduled Lessons Management", () => {
       email: STUDENT_EMAIL,
       fullName: STUDENT_NAME,
     });
-    await page.goto(`${BASE_URL}/portal/schedule?month=2026-07`);
+    await page.goto(`${BASE_URL}/portal/schedule?month=${formatMonthQuery(lessonStart)}`);
     const studentLesson = page.locator("article").filter({ hasText: lessonTitle });
     await expect(studentLesson).toBeVisible();
     await expect(studentLesson.getByRole("link", { name: /join/i })).toBeVisible();
@@ -125,8 +168,8 @@ test.describe("Admin Scheduled Lessons Management", () => {
       fullName: ADMIN_NAME,
     });
     await page.goto(`${BASE_URL}/admin/classes/${group.id}/lessons/${lesson.id}/edit`);
-    await page.getByLabel(/start/i).fill(rescheduledStart);
-    await page.getByLabel(/end/i).fill(rescheduledEnd);
+    await page.getByLabel(/start/i).fill(formatDateTimeInput(rescheduledStart));
+    await page.getByLabel(/end/i).fill(formatDateTimeInput(rescheduledEnd));
     await Promise.all([
       page.waitForURL(/classMessage=Lesson(?:\+|%20)rescheduled\.?/i, { timeout: 60000 }),
       page.getByRole("button", { name: /reschedule|save lesson|update lesson/i }).click(),
@@ -139,7 +182,7 @@ test.describe("Admin Scheduled Lessons Management", () => {
       email: STUDENT_EMAIL,
       fullName: STUDENT_NAME,
     });
-    await page.goto(`${BASE_URL}/portal/schedule?month=2026-07`);
+    await page.goto(`${BASE_URL}/portal/schedule?month=${formatMonthQuery(rescheduledStart)}`);
     await expect(page.locator("article").filter({ hasText: lessonTitle })).toContainText(
       /rescheduled/i,
     );
@@ -165,7 +208,7 @@ test.describe("Admin Scheduled Lessons Management", () => {
       email: STUDENT_EMAIL,
       fullName: STUDENT_NAME,
     });
-    await page.goto(`${BASE_URL}/portal/schedule?month=2026-07`);
+    await page.goto(`${BASE_URL}/portal/schedule?month=${formatMonthQuery(rescheduledStart)}`);
     const cancelledStudentLesson = page.locator("article").filter({ hasText: lessonTitle });
     await expect(cancelledStudentLesson).toContainText(/cancelled/i);
     await expect(cancelledStudentLesson).toContainText("Instructor unavailable.");
@@ -177,7 +220,9 @@ test.describe("Admin Scheduled Lessons Management", () => {
       email: TEACHER_EMAIL,
       fullName: TEACHER_NAME,
     });
-    await page.goto(`${BASE_URL}/portal/teacher/schedule?from=2026-07-01&to=2026-07-31`);
+    await page.goto(
+      `${BASE_URL}/portal/teacher/schedule?${formatTeacherScheduleQuery(rescheduledStart)}`,
+    );
     const cancelledTeacherLesson = page.locator("article").filter({ hasText: lessonTitle });
     await expect(cancelledTeacherLesson).toContainText(/cancelled/i);
     await expect(cancelledTeacherLesson.getByRole("link", { name: /start lesson/i })).toHaveCount(
@@ -189,7 +234,14 @@ test.describe("Admin Scheduled Lessons Management", () => {
     page,
   }) => {
     const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const group = await createLessonClassGroup(suffix);
+    const recurringStartDate = nextWeekday(addDays(new Date(), 14), 2);
+    const recurringEndDate = addDays(recurringStartDate, 21);
+    const duplicateStartAt = withTime(addDays(recurringStartDate, 7), 10);
+    const duplicateEndAt = withTime(duplicateStartAt, 11);
+    const group = await createLessonClassGroup(suffix, {
+      endDate: addDays(recurringEndDate, 180),
+      startDate: addDays(recurringStartDate, -7),
+    });
     const recurringTitle = `${LESSON_PREFIX} Recurring ${suffix}`;
 
     await prisma.scheduledClass.create({
@@ -199,8 +251,8 @@ test.describe("Admin Scheduled Lessons Management", () => {
         classGroupId: group.id,
         teacherId: teacherUserId,
         subjectId: group.subjectId,
-        startAt: new Date("2026-07-14T07:00:00.000Z"),
-        endAt: new Date("2026-07-14T08:00:00.000Z"),
+        startAt: duplicateStartAt,
+        endAt: duplicateEndAt,
         liveLessonUrl: testMeetUrl("qa-recurring-existing"),
       },
     });
@@ -218,8 +270,8 @@ test.describe("Admin Scheduled Lessons Management", () => {
     await page.getByLabel(/weekday.*tuesday|tuesday/i).check();
     await page.getByLabel(/start time/i).fill("10:00");
     await page.getByLabel(/duration/i).fill("60");
-    await page.getByLabel(/start date/i).fill("2026-07-07");
-    await page.getByLabel(/end date/i).fill("2026-07-28");
+    await page.getByLabel(/start date/i).fill(formatDateInput(recurringStartDate));
+    await page.getByLabel(/end date/i).fill(formatDateInput(recurringEndDate));
     await page.getByLabel(/live link strategy/i).selectOption("reuse");
     await page.getByLabel(/live lesson|url/i).fill(testMeetUrl("qa-recurring-weekly"));
     await page.getByRole("button", { name: /preview/i }).click();
@@ -291,7 +343,13 @@ async function ensureUsers() {
   studentUserId = student.id;
 }
 
-async function createLessonClassGroup(suffix: string) {
+async function createLessonClassGroup(
+  suffix: string,
+  dates: { endDate: Date; startDate: Date } = {
+    endDate: addDays(new Date(), 180),
+    startDate: addDays(new Date(), 7),
+  },
+) {
   const subject = await prisma.subject.upsert({
     where: { slug: `${SUBJECT_SLUG_PREFIX}-${suffix}` },
     update: {
@@ -331,8 +389,8 @@ async function createLessonClassGroup(suffix: string) {
       teacherId: teacherUserId,
       status: ClassGroupStatus.ACTIVE,
       capacity: 8,
-      startDate: new Date("2026-07-01T00:00:00.000Z"),
-      endDate: new Date("2026-08-31T00:00:00.000Z"),
+      startDate: dates.startDate,
+      endDate: dates.endDate,
       students: { connect: { id: studentUserId } },
     },
   });

@@ -181,6 +181,7 @@ async function submitPublicEnrolment(page: Page): Promise<CrmRecord> {
   await page.getByRole("button", { name: "Next Step" }).click();
   await page.locator("#preferredSchedule").fill("Weekday evenings");
   await page.locator("#additionalNotes").fill("QA CRM enrolment notes");
+  await page.getByRole("checkbox", { name: /i am the parent or guardian/i }).check();
   await page.waitForTimeout(1400);
   await page.getByRole("button", { name: /submit enrolment/i }).click();
   await expect(page.getByText(/reference id/i)).toBeVisible({ timeout: 15000 });
