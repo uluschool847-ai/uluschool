@@ -2,17 +2,11 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const useActionStateMock = vi.hoisted(() => vi.fn());
-const useFormStatusMock = vi.hoisted(() => vi.fn());
 const actionMock = vi.hoisted(() => vi.fn());
 
 vi.mock("react", async () => {
   const actual = await vi.importActual<typeof import("react")>("react");
   return { ...actual, useActionState: useActionStateMock };
-});
-
-vi.mock("react-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-dom")>("react-dom");
-  return { ...actual, useFormStatus: useFormStatusMock };
 });
 
 vi.mock("@/app/enrol/actions", () => ({
@@ -70,8 +64,7 @@ function advanceToSubmitStep() {
 describe("EnrolForm accessibility and responsive behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useFormStatusMock.mockReturnValue({ pending: false });
-    useActionStateMock.mockReturnValue([{ success: false, message: "" }, actionMock]);
+    useActionStateMock.mockReturnValue([{ success: false, message: "" }, actionMock, false]);
     setViewport(1280);
   });
 
@@ -119,6 +112,7 @@ describe("EnrolForm accessibility and responsive behavior", () => {
         errors: { email: ["Enter a valid email address."] },
       },
       actionMock,
+      false,
     ]);
     render(<EnrolForm {...props} />);
 
@@ -131,7 +125,7 @@ describe("EnrolForm accessibility and responsive behavior", () => {
   });
 
   it("shows a loading state on the submit button", () => {
-    useFormStatusMock.mockReturnValue({ pending: true });
+    useActionStateMock.mockReturnValue([{ success: false, message: "" }, actionMock, true]);
     render(<EnrolForm {...props} />);
     advanceToSubmitStep();
 
@@ -143,6 +137,7 @@ describe("EnrolForm accessibility and responsive behavior", () => {
     useActionStateMock.mockReturnValue([
       { success: false, message: "Email already registered" },
       actionMock,
+      false,
     ]);
     render(<EnrolForm {...props} />);
 
@@ -154,6 +149,7 @@ describe("EnrolForm accessibility and responsive behavior", () => {
     useActionStateMock.mockReturnValue([
       { success: true, message: "Sent", referenceId: "MS-2026-0042" },
       actionMock,
+      false,
     ]);
     render(<EnrolForm {...props} />);
 

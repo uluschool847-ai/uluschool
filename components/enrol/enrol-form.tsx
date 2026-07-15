@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useEffect, useRef, useState } from "react";
-import { useFormStatus } from "react-dom";
+import { startTransition, useActionState, useCallback, useEffect, useRef, useState } from "react";
 
 import type { CatalogueLevel, CatalogueSubject } from "@/lib/repositories/catalogue-repository";
 import type { EnrolmentFormState, EnrolmentInput } from "@/lib/validations/enrolment";
@@ -29,9 +28,7 @@ type EnrolFormProps = {
   levels?: CatalogueLevel[];
 };
 
-function SubmitButton() {
-  const { pending } = useFormStatus();
-
+function SubmitButton({ pending }: { pending: boolean }) {
   return (
     <Button
       type="submit"
@@ -116,7 +113,18 @@ function SuccessMessage({ state }: { state: EnrolmentFormState }) {
 }
 
 export function EnrolForm({ subjects, levels }: EnrolFormProps) {
-  const [state, formAction] = useActionState(submitEnrolment, initialState);
+  const submissionInFlightRef = useRef(false);
+  const submitWithRelease = useCallback(
+    async (previousState: EnrolmentFormState, formData: FormData) => {
+      try {
+        return await submitEnrolment(previousState, formData);
+      } finally {
+        submissionInFlightRef.current = false;
+      }
+    },
+    [],
+  );
+  const [state, formAction, isPending] = useActionState(submitWithRelease, initialState);
   const [step, setStep] = useState(1);
   const [curriculumLevel, setCurriculumLevel] = useState("");
   const [clientValidationMessage, setClientValidationMessage] = useState("");
@@ -239,13 +247,22 @@ export function EnrolForm({ subjects, levels }: EnrolFormProps) {
 
         <form
           ref={formRef}
-          action={formAction}
           className="grid gap-6"
           noValidate
           onSubmit={(event) => {
-            if (step !== 3 || !validateStepBeforeAdvance(3)) {
-              event.preventDefault();
+            event.preventDefault();
+            if (
+              step !== 3 ||
+              isPending ||
+              submissionInFlightRef.current ||
+              !validateStepBeforeAdvance(3)
+            ) {
+              return;
             }
+
+            const formData = new FormData(event.currentTarget);
+            submissionInFlightRef.current = true;
+            startTransition(() => formAction(formData));
           }}
         >
           <input
@@ -539,7 +556,7 @@ export function EnrolForm({ subjects, levels }: EnrolFormProps) {
               ) : null}
             </div>
 
-            {step === 3 ? <SubmitButton /> : null}
+            {step === 3 ? <SubmitButton pending={isPending} /> : null}
           </div>
 
           {step === 3 ? <TurnstileWidget /> : null}
