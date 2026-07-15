@@ -27,7 +27,7 @@ const SUBJECT_CONTAINER_KEY =
   /^(?:student|students|parent|parents|guardian|guardians|recipient|recipients)(?:data|details|profile|profiles)?$/;
 const ENCODED_OCTET = /%[0-9a-f]{2}/i;
 const HTTP_METHOD_TRANSACTION =
-  /^(?:CONNECT|DELETE|GET|HEAD|OPTIONS|PATCH|POST|PUT|TRACE)\s+(.+)$/i;
+  /^((?:CONNECT|DELETE|GET|HEAD|OPTIONS|PATCH|POST|PUT|TRACE)\s+)(.+)$/i;
 
 type UnknownRecord = Record<string, unknown>;
 type RouteClassification = "safe" | "sensitive" | "unusable";
@@ -167,7 +167,27 @@ function routeFromTransaction(value: unknown) {
   }
 
   const transaction = value.trim();
-  return transaction.match(HTTP_METHOD_TRANSACTION)?.[1]?.trim() ?? transaction;
+  return transaction.match(HTTP_METHOD_TRANSACTION)?.[2]?.trim() ?? transaction;
+}
+
+function sanitizeTransaction(event: UnknownRecord) {
+  if (typeof event.transaction !== "string") {
+    return;
+  }
+
+  const transaction = event.transaction.trim();
+  const match = transaction.match(HTTP_METHOD_TRANSACTION);
+  const methodPrefix = match?.[1] ?? "";
+  const route = match?.[2]?.trim() ?? transaction;
+
+  if (!route.startsWith("/") && !route.startsWith("\\") && !/^https?:\/\//i.test(route)) {
+    return;
+  }
+
+  const sanitizedRoute = stripUrlQuery(route);
+  if (sanitizedRoute !== route) {
+    event.transaction = `${methodPrefix}${sanitizedRoute}`;
+  }
 }
 
 function isSensitiveBreadcrumbCategory(category: unknown) {
@@ -283,6 +303,7 @@ export function sanitizeSentryEvent<T extends Event>(event: T): T {
   }
 
   Reflect.deleteProperty(cloned, "user");
+  sanitizeTransaction(cloned);
   sanitizeRequest(cloned);
 
   if (Array.isArray(cloned.breadcrumbs)) {

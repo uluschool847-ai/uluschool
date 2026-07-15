@@ -407,29 +407,114 @@ describe("sanitizeSentryEvent", () => {
         body: { safeField: "query-transaction-body" },
       },
     } as Event;
+    const snapshot = JSON.parse(JSON.stringify(event)) as Event;
 
     const sanitized = sanitizeSentryEvent(event);
     const request = sanitized.request as Event["request"] & { body?: unknown };
 
+    expect(event).toEqual(snapshot);
+    expect(sanitized.transaction).toBe("POST //portal/login");
+    expect(JSON.stringify(sanitized)).not.toContain("QUERY_SECRET");
     expect(request?.data).toBeUndefined();
     expect(request?.body).toBeUndefined();
   });
 
   it("preserves a safe slash-leading transaction path with a query", () => {
     const event = {
-      transaction: "POST //portal/teacher/assignments?view=active",
+      transaction: "POST //portal/teacher/assignments?token=SAFE_ROUTE_QUERY_SECRET",
       request: {
         data: { safeField: "safe-query-transaction-payload" },
         body: { safeField: "safe-query-transaction-body" },
       },
     } as Event;
+    const snapshot = JSON.parse(JSON.stringify(event)) as Event;
 
     const sanitized = sanitizeSentryEvent(event);
     const request = sanitized.request as Event["request"] & { body?: unknown };
 
+    expect(event).toEqual(snapshot);
+    expect(sanitized.transaction).toBe("POST //portal/teacher/assignments");
+    expect(JSON.stringify(sanitized)).not.toContain("SAFE_ROUTE_QUERY_SECRET");
     expect(request?.data).toEqual({ safeField: "safe-query-transaction-payload" });
     expect(request?.body).toEqual({ safeField: "safe-query-transaction-body" });
   });
+
+  it("strips a query from an absolute HTTP transaction", () => {
+    const event = {
+      transaction: "GET https://school.example/portal/login?token=ABSOLUTE_TRANSACTION_SECRET",
+      request: {
+        data: { safeField: "absolute-transaction-payload" },
+        body: { safeField: "absolute-transaction-body" },
+      },
+    } as Event;
+    const snapshot = JSON.parse(JSON.stringify(event)) as Event;
+
+    const sanitized = sanitizeSentryEvent(event);
+    const request = sanitized.request as Event["request"] & { body?: unknown };
+
+    expect(event).toEqual(snapshot);
+    expect(sanitized.transaction).toBe("GET https://school.example/portal/login");
+    expect(JSON.stringify(sanitized)).not.toContain("ABSOLUTE_TRANSACTION_SECRET");
+    expect(request?.data).toBeUndefined();
+    expect(request?.body).toBeUndefined();
+  });
+
+  it("strips a fragment from a safe route transaction", () => {
+    const event = {
+      transaction: "PATCH /portal/teacher/assignments#FRAGMENT_TRANSACTION_SECRET",
+      request: {
+        data: { safeField: "fragment-transaction-payload" },
+        body: { safeField: "fragment-transaction-body" },
+      },
+    } as Event;
+    const snapshot = JSON.parse(JSON.stringify(event)) as Event;
+
+    const sanitized = sanitizeSentryEvent(event);
+    const request = sanitized.request as Event["request"] & { body?: unknown };
+
+    expect(event).toEqual(snapshot);
+    expect(sanitized.transaction).toBe("PATCH /portal/teacher/assignments");
+    expect(JSON.stringify(sanitized)).not.toContain("FRAGMENT_TRANSACTION_SECRET");
+    expect(request?.data).toEqual({ safeField: "fragment-transaction-payload" });
+    expect(request?.body).toEqual({ safeField: "fragment-transaction-body" });
+  });
+
+  it("strips a route transaction query without a request object", () => {
+    const event = {
+      message: "Portal login transaction failed",
+      transaction: "POST /portal/login?token=NO_REQUEST_TRANSACTION_SECRET",
+    } as Event;
+    const snapshot = JSON.parse(JSON.stringify(event)) as Event;
+
+    const sanitized = sanitizeSentryEvent(event);
+
+    expect(event).toEqual(snapshot);
+    expect(sanitized.transaction).toBe("POST /portal/login");
+    expect(JSON.stringify(sanitized)).not.toContain("NO_REQUEST_TRANSACTION_SECRET");
+    expect(sanitized.message).toBe(event.message);
+  });
+
+  it.each(["checkout.process?phase=validation#retry", "POST background.job?phase=retry#worker"])(
+    "preserves non-route technical transaction label %s",
+    (transaction) => {
+      const event = {
+        transaction,
+        request: {
+          data: { safeField: "technical-label-payload" },
+          body: { safeField: "technical-label-body" },
+        },
+      } as Event;
+      const snapshot = JSON.parse(JSON.stringify(event)) as Event;
+
+      const sanitized = sanitizeSentryEvent(event);
+      const request = sanitized.request as Event["request"] & { body?: unknown };
+
+      expect(event).toEqual(snapshot);
+      expect(sanitized.transaction).toBe(transaction);
+      expect(request?.data).toEqual({ safeField: "technical-label-payload" });
+      expect(request?.body).toEqual({ safeField: "technical-label-body" });
+    },
+  );
 
   it("continues to URL-parse a true absolute HTTP URL", () => {
     const event = {
