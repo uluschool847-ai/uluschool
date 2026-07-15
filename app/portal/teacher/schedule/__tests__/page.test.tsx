@@ -167,8 +167,8 @@ describe("Teacher schedule page", () => {
       }),
     );
     const [input] = listTeacherScheduleMock.mock.calls[0] ?? [];
-    expect(input.from).toEqual(new Date("2026-07-01T00:00:00.000Z"));
-    expect(input.to).toEqual(new Date("2026-07-31T23:59:59.999Z"));
+    expect(input.from).toEqual(new Date("2026-06-30T21:00:00.000Z"));
+    expect(input.to).toEqual(new Date("2026-07-31T20:59:59.999Z"));
 
     expect(screen.getByRole("heading", { name: /teacher schedule/i })).toBeDefined();
     expect(screen.getByLabelText(/from/i)).toHaveProperty("value", "2026-07-01");
@@ -277,8 +277,8 @@ describe("Teacher schedule page", () => {
     render(element);
 
     const [input] = listTeacherScheduleMock.mock.calls[0] ?? [];
-    expect(input.from).toEqual(new Date("2026-07-01T00:00:00.000Z"));
-    expect(input.to).toEqual(new Date("2026-07-15T23:59:59.999Z"));
+    expect(input.from).toEqual(new Date("2026-06-30T21:00:00.000Z"));
+    expect(input.to).toEqual(new Date("2026-07-15T20:59:59.999Z"));
     expect(screen.getByLabelText(/from/i)).toHaveProperty("value", "2026-07-01");
     expect(screen.getByLabelText(/to/i)).toHaveProperty("value", "2026-07-15");
   });
@@ -295,8 +295,8 @@ describe("Teacher schedule page", () => {
     render(element);
 
     const [input] = listTeacherScheduleMock.mock.calls[0] ?? [];
-    expect(input.from).toEqual(new Date("2026-07-01T00:00:00.000Z"));
-    expect(input.to).toEqual(new Date("2026-07-31T23:59:59.999Z"));
+    expect(input.from).toEqual(new Date("2026-06-30T21:00:00.000Z"));
+    expect(input.to).toEqual(new Date("2026-07-31T20:59:59.999Z"));
     expect(screen.getByText(/date range was reset/i)).toBeDefined();
   });
 
