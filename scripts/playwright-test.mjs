@@ -103,7 +103,7 @@ const nextStartFlag = "--next-start";
 const partitionFlags = new Map([
   ["--standard-partition", "standard"],
   ["--storage-partition", "storage"],
-  ["--initial-admin-2fa-partition", "initial-admin-2fa"],
+  ["--admin-2fa-partition", "admin-2fa"],
 ]);
 const rawArgs = process.argv.slice(2);
 const selectedPartitions = rawArgs
@@ -135,11 +135,15 @@ if (usesIsolatedServer) {
   console.log(`Playwright isolated server: ${process.env.PLAYWRIGHT_BASE_URL} (reuse disabled).`);
 }
 
-const runsInitialAdminTwoFactorSpec =
-  partition === "initial-admin-2fa" ||
-  expandedArgs.some((arg) => arg.replaceAll("\\", "/") === "e2e/portals/initial-admin-2fa.spec.ts");
+const adminTwoFactorSpecPaths = new Set([
+  "e2e/portals/admin-security.spec.ts",
+  "e2e/portals/initial-admin-2fa.spec.ts",
+]);
+const adminTwoFactorRequired =
+  partition === "admin-2fa" ||
+  expandedArgs.some((arg) => adminTwoFactorSpecPaths.has(arg.replaceAll("\\", "/")));
 
-process.env.E2E_ADMIN_REQUIRE_2FA = runsInitialAdminTwoFactorSpec ? "true" : "false";
+process.env.E2E_ADMIN_REQUIRE_2FA = adminTwoFactorRequired ? "true" : "false";
 process.env.ADMIN_REQUIRE_2FA = process.env.E2E_ADMIN_REQUIRE_2FA;
 process.env.E2E_PARTITION = partition;
 if (partition === "storage") process.env.STORAGE_DRIVER = "local";

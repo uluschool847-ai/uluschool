@@ -6,7 +6,7 @@ const reuseExistingServer = /^(1|true|yes)$/i.test(
 );
 const partition = process.env.E2E_PARTITION ?? "focused";
 const isStoragePartition = partition === "storage";
-const runInitialAdminTwoFactorSpec = process.env.E2E_ADMIN_REQUIRE_2FA === "true";
+const adminTwoFactorRequired = process.env.E2E_ADMIN_REQUIRE_2FA === "true";
 const serverCommand = isStoragePartition
   ? "npm run dev"
   : (process.env.E2E_PLAYWRIGHT_SERVER_COMMAND ??
@@ -14,9 +14,9 @@ const serverCommand = isStoragePartition
     "npm run dev");
 const storageSpecPattern =
   /(?:^|[\\/])(admin-teachers|teacher-academics|teacher-materials)\.spec\.ts$/;
-const initialAdminTwoFactorSpecPattern = /initial-admin-2fa\.spec\.ts$/;
+const adminTwoFactorSpecPattern = /(?:admin-security|initial-admin-2fa)\.spec\.ts$/;
 const testIgnore =
-  partition === "standard" ? [storageSpecPattern, initialAdminTwoFactorSpecPattern] : undefined;
+  partition === "standard" ? [storageSpecPattern, adminTwoFactorSpecPattern] : undefined;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -48,7 +48,8 @@ export default defineConfig({
     stderr: "pipe",
     env: {
       ...process.env,
-      ADMIN_REQUIRE_2FA: runInitialAdminTwoFactorSpec ? "true" : "false",
+      E2E_ADMIN_REQUIRE_2FA: adminTwoFactorRequired ? "true" : "false",
+      ADMIN_REQUIRE_2FA: adminTwoFactorRequired ? "true" : "false",
       ...(isStoragePartition ? { STORAGE_DRIVER: "local" } : {}),
     },
   },
