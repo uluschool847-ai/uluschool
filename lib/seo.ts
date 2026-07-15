@@ -23,6 +23,8 @@ export function constructMetadata({
   image?: string;
   noIndex?: boolean;
 } = {}): Metadata {
+  const isIndexable = (process.env.APP_ENV ?? "") === "production" && !noIndex;
+
   return {
     title: {
       default: title,
@@ -46,8 +48,8 @@ export function constructMetadata({
       creator: "@mathschool",
     },
     robots: {
-      index: !noIndex,
-      follow: !noIndex,
+      index: isIndexable,
+      follow: isIndexable,
     },
     metadataBase: new URL(siteConfig.url),
   };

@@ -260,6 +260,61 @@ describe("sanitizeSentryEvent", () => {
     expect(request?.body).toBeUndefined();
   });
 
+  it.each([
+    [undefined, "POST /portal/login"],
+    ["not a request URL", "post   /portal/login"],
+  ])("uses an HTTP-method-prefixed transaction when request URL is %s", (url, transaction) => {
+    const event = {
+      transaction,
+      request: {
+        ...(url === undefined ? {} : { url }),
+        data: { safeField: "sensitive-route-payload" },
+        body: { safeField: "sensitive-route-body" },
+      },
+    } as Event;
+
+    const sanitized = sanitizeSentryEvent(event);
+    const request = sanitized.request as Event["request"] & { body?: unknown };
+
+    expect(request?.data).toBeUndefined();
+    expect(request?.body).toBeUndefined();
+  });
+
+  it("preserves request payloads for a safe transaction fallback", () => {
+    const event = {
+      transaction: "POST /portal/teacher/assignments",
+      request: {
+        data: { safeField: "safe-transaction-payload" },
+        body: { safeField: "safe-transaction-body" },
+      },
+    } as Event;
+
+    const sanitized = sanitizeSentryEvent(event);
+    const request = sanitized.request as Event["request"] & { body?: unknown };
+
+    expect(request?.data).toEqual({ safeField: "safe-transaction-payload" });
+    expect(request?.body).toEqual({ safeField: "safe-transaction-body" });
+  });
+
+  it.each(["/portal%252Flogin", "/portal%2Flogin/%E0%A4%A"])(
+    "fails closed for encoded sensitive route %s",
+    (url) => {
+      const event = {
+        request: {
+          url,
+          data: { safeField: "encoded-route-payload" },
+          body: { safeField: "encoded-route-body" },
+        },
+      } as Event;
+
+      const sanitized = sanitizeSentryEvent(event);
+      const request = sanitized.request as Event["request"] & { body?: unknown };
+
+      expect(request?.data).toBeUndefined();
+      expect(request?.body).toBeUndefined();
+    },
+  );
+
   it.each(["/contact-us", "/portal/logins", "/api/authentication", "/api/files/auth"])(
     "preserves safe request payloads outside sensitive route boundaries for %s",
     (url) => {

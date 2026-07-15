@@ -2,6 +2,7 @@ import type { Breadcrumb, Event } from "@sentry/nextjs";
 
 const FILTERED = "[Filtered]";
 const MAX_SANITIZE_DEPTH = 32;
+const MAX_PATH_DECODE_PASSES = 4;
 const SENSITIVE_ROUTE_PREFIXES = [
   "/enrol",
   "/contact",
@@ -24,8 +25,12 @@ const SUBJECT_NAME_KEY =
 const CONTEXTUAL_NAME_KEY = /^(?:first|last|full|display|legal)?name$/;
 const SUBJECT_CONTAINER_KEY =
   /^(?:student|students|parent|parents|guardian|guardians|recipient|recipients)(?:data|details|profile|profiles)?$/;
+const ENCODED_OCTET = /%[0-9a-f]{2}/i;
+const HTTP_METHOD_TRANSACTION =
+  /^(?:CONNECT|DELETE|GET|HEAD|OPTIONS|PATCH|POST|PUT|TRACE)\s+(.+)$/i;
 
 type UnknownRecord = Record<string, unknown>;
+type RouteClassification = "safe" | "sensitive" | "unusable";
 
 function normalizeKey(key: string) {
   return key.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -70,27 +75,75 @@ function stripUrlQuery(value: string) {
   return indexes.length === 0 ? value : value.slice(0, Math.min(...indexes));
 }
 
-function pathnameFromUrl(value: string) {
+function pathnameFromRouteValue(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const candidate = value.trim();
+  if (
+    candidate === "" ||
+    (!candidate.startsWith("/") && !/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate))
+  ) {
+    return null;
+  }
+
   try {
-    return new URL(value, "https://sentry.invalid").pathname;
+    const parsed = new URL(candidate, "https://sentry.invalid");
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.pathname : null;
   } catch {
-    return stripUrlQuery(value);
+    return null;
   }
 }
 
-function isSensitiveRoute(value: string) {
-  let pathname = pathnameFromUrl(value);
+function canonicalizePathname(pathname: string) {
+  let canonical = pathname.replace(/\\/g, "/");
 
-  try {
-    pathname = decodeURIComponent(pathname);
-  } catch {
-    // Keep the encoded pathname and fail closed only on known route boundaries.
+  for (let pass = 0; pass < MAX_PATH_DECODE_PASSES; pass += 1) {
+    if (!canonical.includes("%")) {
+      return canonical;
+    }
+
+    if (!ENCODED_OCTET.test(canonical)) {
+      return pass === 0 ? null : canonical;
+    }
+
+    try {
+      canonical = decodeURIComponent(canonical).replace(/\\/g, "/");
+    } catch {
+      return null;
+    }
   }
 
-  const normalizedPathname = pathname.toLowerCase();
+  return ENCODED_OCTET.test(canonical) ? null : canonical;
+}
+
+function classifyRoute(value: unknown): RouteClassification {
+  const pathname = pathnameFromRouteValue(value);
+  if (pathname === null) {
+    return "unusable";
+  }
+
+  const canonicalPathname = canonicalizePathname(pathname);
+  if (canonicalPathname === null) {
+    return "sensitive";
+  }
+
+  const normalizedPathname = canonicalPathname.toLowerCase();
   return SENSITIVE_ROUTE_PREFIXES.some(
     (prefix) => normalizedPathname === prefix || normalizedPathname.startsWith(`${prefix}/`),
-  );
+  )
+    ? "sensitive"
+    : "safe";
+}
+
+function routeFromTransaction(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const transaction = value.trim();
+  return transaction.match(HTTP_METHOD_TRANSACTION)?.[1]?.trim() ?? transaction;
 }
 
 function isSensitiveBreadcrumbCategory(category: unknown) {
@@ -177,7 +230,13 @@ function sanitizeRequest(event: UnknownRecord) {
   const request = event.request;
   Reflect.deleteProperty(request, "query_string");
 
-  if (typeof request.url !== "string" || !isSensitiveRoute(request.url)) {
+  const requestRoute = classifyRoute(request.url);
+  const route =
+    requestRoute === "unusable"
+      ? classifyRoute(routeFromTransaction(event.transaction))
+      : requestRoute;
+
+  if (route !== "sensitive") {
     return;
   }
 

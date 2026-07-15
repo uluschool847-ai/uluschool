@@ -15,12 +15,18 @@ const supportedFeatures = [
 ];
 
 const originalSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+const originalAppEnv = process.env.APP_ENV;
 
 afterEach(() => {
   if (originalSiteUrl === undefined) {
     Reflect.deleteProperty(process.env, "NEXT_PUBLIC_SITE_URL");
   } else {
     process.env.NEXT_PUBLIC_SITE_URL = originalSiteUrl;
+  }
+  if (originalAppEnv === undefined) {
+    Reflect.deleteProperty(process.env, "APP_ENV");
+  } else {
+    process.env.APP_ENV = originalAppEnv;
   }
   vi.resetModules();
 });
@@ -115,5 +121,47 @@ describe("canonical SEO content", () => {
       logo: "https://ulu-school.example/logo.png",
     });
     expect(serialized).not.toMatch(/mathSchool|mathschool\.example\.com/i);
+  });
+
+  it.each([
+    ["staging", false, false],
+    [undefined, false, false],
+    ["production", false, true],
+    ["production", true, false],
+  ] as const)(
+    "sets crawler metadata for APP_ENV=%s and noIndex=%s",
+    async (appEnv, noIndex, indexable) => {
+      if (appEnv === undefined) {
+        Reflect.deleteProperty(process.env, "APP_ENV");
+      } else {
+        process.env.APP_ENV = appEnv;
+      }
+      vi.resetModules();
+      const { constructMetadata } = await import("@/lib/seo");
+
+      const metadata = constructMetadata({ noIndex });
+
+      expect(metadata.robots).toEqual({
+        index: indexable,
+        follow: indexable,
+      });
+    },
+  );
+
+  it("keeps the /curriculum metadata non-indexable in staging", async () => {
+    process.env.APP_ENV = "staging";
+    vi.resetModules();
+    const { constructMetadata } = await import("@/lib/seo");
+
+    const curriculumMetadata = constructMetadata({
+      title: "Curriculum",
+      description:
+        "Explore ULU's Cambridge curriculum pathways across Primary, Lower Secondary, and IGCSE.",
+    });
+
+    expect(curriculumMetadata.robots).toEqual({
+      index: false,
+      follow: false,
+    });
   });
 });
