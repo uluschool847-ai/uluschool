@@ -98,9 +98,23 @@ async function ensureBaseUrl() {
   process.env.PLAYWRIGHT_BASE_URL = `http://localhost:${port}`;
 }
 
+const isolatedServerFlag = "--isolated-server";
+const rawArgs = process.argv.slice(2);
+const usesIsolatedServer = rawArgs.includes(isolatedServerFlag);
+const expandedArgs = rawArgs.filter((arg) => arg !== isolatedServerFlag).flatMap(expandArg);
+
+if (usesIsolatedServer) {
+  Reflect.deleteProperty(process.env, "PLAYWRIGHT_BASE_URL");
+  Reflect.deleteProperty(process.env, "PORT");
+  process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER = "false";
+}
+
 await ensureBaseUrl();
 
-const expandedArgs = process.argv.slice(2).flatMap(expandArg);
+if (usesIsolatedServer) {
+  console.log(`Playwright isolated server: ${process.env.PLAYWRIGHT_BASE_URL} (reuse disabled).`);
+}
+
 const runsInitialAdminTwoFactorSpec = expandedArgs.some(
   (arg) => arg.replaceAll("\\", "/") === "e2e/portals/initial-admin-2fa.spec.ts",
 );

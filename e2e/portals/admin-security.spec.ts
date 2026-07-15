@@ -132,8 +132,11 @@ test.describe("Admin Security", () => {
     await page.goto("/admin/security");
     await expect(page.getByRole("heading", { level: 1, name: "Admin Security" })).toBeVisible();
     await expect(page.getByText(/production hardening/i)).toBeVisible();
+    const adminSecurityHeader = page
+      .getByRole("heading", { level: 1, name: "Admin Security" })
+      .locator("xpath=ancestor::header[1]");
     await expect(
-      page.getByRole("link", { name: /continue to admin dashboard/i }).first(),
+      adminSecurityHeader.getByRole("link", { name: /continue to admin dashboard/i }),
     ).toHaveAttribute("href", "/admin");
     await expect(
       page.getByRole("heading", { name: "Two-Factor Authentication (TOTP)" }),
@@ -161,7 +164,7 @@ test.describe("Admin Security", () => {
       await expect(page.getByText(/2FA setup is optional in this environment/i)).toBeVisible();
       await expect(page.getByText(/ADMIN_REQUIRE_2FA=false/i)).toBeVisible();
       await expect(
-        page.getByRole("link", { name: /continue to admin dashboard/i }).first(),
+        adminSecurityHeader.getByRole("link", { name: /continue to admin dashboard/i }),
       ).toHaveAttribute("href", "/admin/security");
     }
 
