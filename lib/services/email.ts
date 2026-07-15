@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 
 import { validateLiveLessonUrl } from "@/lib/lessons/live-lesson-url";
+import { escapeHtml, sanitizeEmailHeader } from "@/lib/security/escape-html";
 import type { ContactInput } from "@/lib/validations/contact";
 import type { EnrolmentInput } from "@/lib/validations/enrolment";
 
@@ -74,18 +75,27 @@ function buildEnrolmentMessage(payload: EnrolmentInput) {
     `Preferred Schedule: ${payload.preferredSchedule}`,
     `Additional Notes: ${payload.additionalNotes || "N/A"}`,
   ].join("\n");
+  const safeStudentName = escapeHtml(payload.studentName);
+  const safeAgeYearLevel = escapeHtml(payload.ageYearLevel);
+  const safeSubjects = escapeHtml(payload.subjects.join(", "));
+  const safeCurriculumLevel = escapeHtml(payload.curriculumLevel);
+  const safeParentGuardianName = escapeHtml(payload.parentGuardianName);
+  const safeEmail = escapeHtml(payload.email);
+  const safePhoneWhatsapp = escapeHtml(payload.phoneWhatsapp);
+  const safePreferredSchedule = escapeHtml(payload.preferredSchedule);
+  const safeAdditionalNotes = escapeHtml(payload.additionalNotes || "N/A");
 
   const html = `
     <h2>New Enrolment Enquiry</h2>
-    <p><strong>Student Name:</strong> ${payload.studentName}</p>
-    <p><strong>Age/Year Level:</strong> ${payload.ageYearLevel}</p>
-    <p><strong>Subjects:</strong> ${payload.subjects.join(", ")}</p>
-    <p><strong>Curriculum Level:</strong> ${payload.curriculumLevel}</p>
-    <p><strong>Parent/Guardian:</strong> ${payload.parentGuardianName}</p>
-    <p><strong>Email:</strong> ${payload.email}</p>
-    <p><strong>Phone/WhatsApp:</strong> ${payload.phoneWhatsapp}</p>
-    <p><strong>Preferred Schedule:</strong> ${payload.preferredSchedule}</p>
-    <p><strong>Additional Notes:</strong> ${payload.additionalNotes || "N/A"}</p>
+    <p><strong>Student Name:</strong> ${safeStudentName}</p>
+    <p><strong>Age/Year Level:</strong> ${safeAgeYearLevel}</p>
+    <p><strong>Subjects:</strong> ${safeSubjects}</p>
+    <p><strong>Curriculum Level:</strong> ${safeCurriculumLevel}</p>
+    <p><strong>Parent/Guardian:</strong> ${safeParentGuardianName}</p>
+    <p><strong>Email:</strong> ${safeEmail}</p>
+    <p><strong>Phone/WhatsApp:</strong> ${safePhoneWhatsapp}</p>
+    <p><strong>Preferred Schedule:</strong> ${safePreferredSchedule}</p>
+    <p><strong>Additional Notes:</strong> ${safeAdditionalNotes}</p>
   `;
 
   return { subject, text, html, replyTo: payload.email };
@@ -102,14 +112,19 @@ function buildContactMessage(payload: ContactInput) {
     `Student Grade: ${payload.studentGrade || "N/A"}`,
     `Message: ${payload.message}`,
   ].join("\n");
+  const safeFullName = escapeHtml(payload.fullName);
+  const safeEmail = escapeHtml(payload.email);
+  const safePhoneWhatsapp = escapeHtml(payload.phoneWhatsapp || "N/A");
+  const safeStudentGrade = escapeHtml(payload.studentGrade || "N/A");
+  const safeMessageHtml = escapeHtml(payload.message).replace(/\r?\n/g, "<br/>");
 
   const html = `
     <h2>New Contact Enquiry</h2>
-    <p><strong>Full Name:</strong> ${payload.fullName}</p>
-    <p><strong>Email:</strong> ${payload.email}</p>
-    <p><strong>Phone/WhatsApp:</strong> ${payload.phoneWhatsapp || "N/A"}</p>
-    <p><strong>Student Grade:</strong> ${payload.studentGrade || "N/A"}</p>
-    <p><strong>Message:</strong><br/>${payload.message.replace(/\n/g, "<br/>")}</p>
+    <p><strong>Full Name:</strong> ${safeFullName}</p>
+    <p><strong>Email:</strong> ${safeEmail}</p>
+    <p><strong>Phone/WhatsApp:</strong> ${safePhoneWhatsapp}</p>
+    <p><strong>Student Grade:</strong> ${safeStudentGrade}</p>
+    <p><strong>Message:</strong><br/>${safeMessageHtml}</p>
   `;
 
   return { subject, text, html, replyTo: payload.email };
@@ -137,10 +152,10 @@ async function sendWithRetry(message: {
     attempts += 1;
     try {
       await transporter.sendMail({
-        from: getFromAddress(),
-        to: getToAddress(),
-        replyTo: message.replyTo,
-        subject: message.subject,
+        from: sanitizeEmailHeader(getFromAddress()),
+        to: sanitizeEmailHeader(getToAddress()),
+        replyTo: sanitizeEmailHeader(message.replyTo),
+        subject: sanitizeEmailHeader(message.subject),
         text: message.text,
         html: message.html,
       });
@@ -189,8 +204,12 @@ export async function sendClassReminderEmail(input: {
   const safeUrl = linkValidation.ok ? linkValidation.url : null;
   const liveLessonLine = safeUrl ? `Join link: ${safeUrl}` : input.liveLessonUrl;
   const liveLessonHtml = safeUrl
-    ? `<p><a href="${safeUrl}">Join Live Lesson</a></p>`
-    : `<p>${input.liveLessonUrl}</p>`;
+    ? `<p><a href="${escapeHtml(safeUrl)}">Join Live Lesson</a></p>`
+    : `<p>${escapeHtml(input.liveLessonUrl)}</p>`;
+  const safeRecipientName = escapeHtml(input.recipientName);
+  const safeClassTitle = escapeHtml(input.classTitle);
+  const safeFormattedStart = escapeHtml(formattedStart);
+  const safeFormattedEnd = escapeHtml(formattedEnd);
 
   return sendWithRetry({
     subject: `Class reminder: ${input.classTitle}`,
@@ -207,10 +226,10 @@ export async function sendClassReminderEmail(input: {
     ].join("\n"),
     html: `
       <h2>Class Reminder</h2>
-      <p>Hello ${input.recipientName},</p>
-      <p>This is a reminder for your upcoming class: <strong>${input.classTitle}</strong></p>
-      <p><strong>Start:</strong> ${formattedStart}</p>
-      <p><strong>End:</strong> ${formattedEnd}</p>
+      <p>Hello ${safeRecipientName},</p>
+      <p>This is a reminder for your upcoming class: <strong>${safeClassTitle}</strong></p>
+      <p><strong>Start:</strong> ${safeFormattedStart}</p>
+      <p><strong>End:</strong> ${safeFormattedEnd}</p>
       ${liveLessonHtml}
       <p>ULU Online School</p>
     `,
@@ -228,6 +247,10 @@ export async function sendAssignmentReminderEmail(input: {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(input.dueDate);
+  const safeRecipientName = escapeHtml(input.recipientName);
+  const safeAssignmentTitle = escapeHtml(input.assignmentTitle);
+  const safeFormattedDueDate = escapeHtml(formattedDueDate);
+  const safeAssignmentHref = escapeHtml(input.assignmentHref);
 
   return sendWithRetry({
     subject: `Assignment overdue: ${input.assignmentTitle}`,
@@ -245,10 +268,10 @@ export async function sendAssignmentReminderEmail(input: {
     ].join("\n"),
     html: `
       <h2>Assignment Reminder</h2>
-      <p>Hello ${input.recipientName},</p>
-      <p>This is a reminder that your assignment is overdue: <strong>${input.assignmentTitle}</strong></p>
-      <p><strong>Due:</strong> ${formattedDueDate}</p>
-      <p><a href="${input.assignmentHref}">Open assignment</a></p>
+      <p>Hello ${safeRecipientName},</p>
+      <p>This is a reminder that your assignment is overdue: <strong>${safeAssignmentTitle}</strong></p>
+      <p><strong>Due:</strong> ${safeFormattedDueDate}</p>
+      <p><a href="${safeAssignmentHref}">Open assignment</a></p>
       <p>Please submit it as soon as possible.</p>
       <p>ULU Online School</p>
     `,
