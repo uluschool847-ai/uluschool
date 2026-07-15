@@ -98,6 +98,23 @@ describe("teacher schedule Nairobi timezone behavior", () => {
     expect(bounded.messages).toContain("Date range was limited. Maximum range is 6 months.");
   });
 
+  it.each(["2026-08-29", "2026-08-30", "2026-08-31"])(
+    "clamps the six-month bound from %s to non-leap February month-end",
+    (fromValue) => {
+      const bounded = getDateRange(fromValue, "2027-12-31");
+
+      expect(bounded.to).toEqual(new Date("2027-02-28T20:59:59.999Z"));
+      expect(bounded.toValue).toBe("2027-02-28");
+    },
+  );
+
+  it("clamps the six-month bound to leap-day month-end", () => {
+    const bounded = getDateRange("2027-08-31", "2028-12-31");
+
+    expect(bounded.to).toEqual(new Date("2028-02-29T20:59:59.999Z"));
+    expect(bounded.toValue).toBe("2028-02-29");
+  });
+
   it("derives the default month and quick ranges from Nairobi's current calendar date", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-30T21:30:00.000Z"));

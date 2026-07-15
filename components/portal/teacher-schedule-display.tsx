@@ -138,7 +138,11 @@ function getNairobiDateInput(date = new Date()) {
 
 function addCalendarMonths(value: string, months: number) {
   const parts = getDateParts(value);
-  return formatCalendarDate(new Date(Date.UTC(parts.year, parts.monthIndex + months, parts.day)));
+  const targetMonthEnd = new Date(Date.UTC(parts.year, parts.monthIndex + months + 1, 0));
+  const targetDay = Math.min(parts.day, targetMonthEnd.getUTCDate());
+  return formatCalendarDate(
+    new Date(Date.UTC(targetMonthEnd.getUTCFullYear(), targetMonthEnd.getUTCMonth(), targetDay)),
+  );
 }
 
 function addCalendarDays(value: string, days: number) {
