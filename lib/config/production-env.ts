@@ -11,6 +11,7 @@ export type EnvironmentValidationResult =
 const PRODUCTION_ORIGIN = "https://uluglobalacademy.com";
 const MIN_SECRET_LENGTH = 32;
 const MAX_PLACEHOLDER_ANALYSIS_LENGTH = 4096;
+const MIN_RESIDUAL_ENTROPY_LENGTH = 12;
 const R2_ENDPOINT_PATTERN =
   /^https:\/\/[a-f0-9]{32}(?:\.(?:eu|fedramp))?\.r2\.cloudflarestorage\.com\/?$/;
 const R2_BUCKET_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])$/;
@@ -103,8 +104,7 @@ const CREDENTIAL_RISK_WORDS = new Set([
   "secret",
   "token",
 ]);
-const SEGMENTED_WITHOUT_RISK = 1;
-const SEGMENTED_WITH_RISK = 2;
+const UNREACHABLE_RESIDUAL_LENGTH = 0xffff;
 
 const productionEnvironmentSchema = z
   .object({
@@ -202,7 +202,11 @@ function requireLiteral(
   if (value !== expected) addIssue(context, key, `must equal ${expected}`);
 }
 
-function isPlaceholder(value: string) {
+function isPlaceholder(
+  value: string,
+  minimumResidualEntropyLength = 1,
+  countDigitsAsEntropy = false,
+) {
   if (value.length > MAX_PLACEHOLDER_ANALYSIS_LENGTH) return true;
 
   const normalized = value.trim().toLowerCase();
@@ -218,59 +222,55 @@ function isPlaceholder(value: string) {
     /^(?:ci|test|dev|local)[-_ ]only/.test(normalized) ||
     /^<.*>$/.test(normalized) ||
     /^(.)\1+$/.test(normalized) ||
-    isComposedPlaceholder(normalized)
+    isComposedPlaceholder(compact, minimumResidualEntropyLength, countDigitsAsEntropy)
   );
 }
 
-function isComposedPlaceholder(value: string) {
-  const alphaRuns = tokenizeAlphaRuns(value);
-  let includesCredentialRisk = false;
+function isComposedPlaceholder(
+  value: string,
+  minimumResidualEntropyLength: number,
+  countDigitsAsEntropy: boolean,
+) {
+  if (!value) return false;
 
-  for (const alphaRun of alphaRuns) {
-    const segmentation = segmentReservedPlaceholderWords(alphaRun);
-    if (segmentation === 0) return false;
-    if ((segmentation & SEGMENTED_WITH_RISK) !== 0) includesCredentialRisk = true;
-  }
-
-  return alphaRuns.length > 0 && includesCredentialRisk;
-}
-
-function tokenizeAlphaRuns(value: string) {
-  const runs: string[] = [];
-  let runStart = -1;
-
-  for (let index = 0; index <= value.length; index += 1) {
-    const code = index < value.length ? value.charCodeAt(index) : 0;
-    const isLowercaseLetter = code >= 97 && code <= 122;
-
-    if (isLowercaseLetter && runStart === -1) {
-      runStart = index;
-    } else if (!isLowercaseLetter && runStart !== -1) {
-      runs.push(value.slice(runStart, index));
-      runStart = -1;
-    }
-  }
-
-  return runs;
-}
-
-function segmentReservedPlaceholderWords(value: string) {
-  const states = new Uint8Array(value.length + 1);
-  states[0] = SEGMENTED_WITHOUT_RISK;
+  const withoutRisk = new Uint16Array(value.length + 1);
+  const withRisk = new Uint16Array(value.length + 1);
+  withoutRisk.fill(UNREACHABLE_RESIDUAL_LENGTH);
+  withRisk.fill(UNREACHABLE_RESIDUAL_LENGTH);
+  withoutRisk[0] = 0;
 
   for (let index = 0; index < value.length; index += 1) {
-    const state = states[index];
-    if (state === 0) continue;
+    const residualWithoutRisk = withoutRisk[index];
+    const residualWithRisk = withRisk[index];
+
+    const code = value.charCodeAt(index);
+    const residualCost = !countDigitsAsEntropy && code >= 48 && code <= 57 ? 0 : 1;
+
+    if (residualWithoutRisk !== UNREACHABLE_RESIDUAL_LENGTH) {
+      withoutRisk[index + 1] = Math.min(withoutRisk[index + 1], residualWithoutRisk + residualCost);
+    }
+    if (residualWithRisk !== UNREACHABLE_RESIDUAL_LENGTH) {
+      withRisk[index + 1] = Math.min(withRisk[index + 1], residualWithRisk + residualCost);
+    }
 
     for (const word of RESERVED_PLACEHOLDER_WORDS) {
       if (!value.startsWith(word, index)) continue;
 
       const nextIndex = index + word.length;
-      states[nextIndex] |= CREDENTIAL_RISK_WORDS.has(word) ? SEGMENTED_WITH_RISK : state;
+      if (residualWithoutRisk !== UNREACHABLE_RESIDUAL_LENGTH) {
+        if (CREDENTIAL_RISK_WORDS.has(word)) {
+          withRisk[nextIndex] = Math.min(withRisk[nextIndex], residualWithoutRisk);
+        } else {
+          withoutRisk[nextIndex] = Math.min(withoutRisk[nextIndex], residualWithoutRisk);
+        }
+      }
+      if (residualWithRisk !== UNREACHABLE_RESIDUAL_LENGTH) {
+        withRisk[nextIndex] = Math.min(withRisk[nextIndex], residualWithRisk);
+      }
     }
   }
 
-  return states[value.length];
+  return withRisk[value.length] < minimumResidualEntropyLength;
 }
 
 function isRepeatedPlaceholderWord(value: string, word: string) {
@@ -284,13 +284,17 @@ function isRepeatedPlaceholderWord(value: string, word: string) {
 }
 
 function requireProviderValue(context: z.RefinementCtx, value: string | undefined, key: string) {
-  if (!value?.trim() || isPlaceholder(value)) {
+  if (!value || isPlaceholder(value)) {
     addIssue(context, key, "must be configured and must not be a placeholder");
   }
 }
 
 function requireSecret(context: z.RefinementCtx, value: string | undefined, key: string) {
-  if (!value || value.trim().length < MIN_SECRET_LENGTH || isPlaceholder(value)) {
+  if (
+    !value ||
+    isPlaceholder(value, MIN_RESIDUAL_ENTROPY_LENGTH, true) ||
+    value.trim().length < MIN_SECRET_LENGTH
+  ) {
     addIssue(context, key, "must contain at least 32 characters and must not be a placeholder");
   }
 }

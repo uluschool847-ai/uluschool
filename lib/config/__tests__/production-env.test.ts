@@ -14,6 +14,11 @@ const PROTECTED_SECRET_KEYS = [
   "REMINDER_CRON_TOKEN",
   "ALERT_TEST_TOKEN",
 ] as const;
+const COMPOSED_PLACEHOLDER_SECRET = "production_placeholder_credential_must_be_replaced_123";
+const PLACEHOLDER_PHRASE = "production_placeholder_credential_must_be_replaced";
+const SUBSTANTIAL_RESIDUAL_ENTROPY = "4c8f1a6d2e9b";
+const INSUFFICIENT_RESIDUAL_ENTROPY = SUBSTANTIAL_RESIDUAL_ENTROPY.slice(0, -1);
+const ANALYSIS_BOUNDARY_SECRET = "K9qV7mZ2!aR4#pL8".repeat(256);
 const OVER_LENGTH_MAILBOX = `a@${[
   "a".repeat(63),
   "b".repeat(63),
@@ -50,10 +55,22 @@ const PLACEHOLDER_SECRET_CASES = [
   ["please change prefix", "  PlEaSe-ChAnGe-ThIs-credential-before-production  "],
   ["repeated secret with suffix", "  SeCrEt-secret-production-credential-value  "],
 ] as const;
+const LOW_RESIDUAL_PLACEHOLDER_CASES = [
+  ["one-character prefix", `x-${COMPOSED_PLACEHOLDER_SECRET}`],
+  ["one-character suffix", `${COMPOSED_PLACEHOLDER_SECRET}x`],
+  ["version prefix", `v1-${COMPOSED_PLACEHOLDER_SECRET}`],
+  ["version suffix", `${COMPOSED_PLACEHOLDER_SECRET}-v1`],
+  ["below-boundary residual prefix", `${INSUFFICIENT_RESIDUAL_ENTROPY}-${PLACEHOLDER_PHRASE}`],
+  ["below-boundary residual suffix", `${PLACEHOLDER_PHRASE}-${INSUFFICIENT_RESIDUAL_ENTROPY}`],
+] as const;
 const HIGH_ENTROPY_SECRET_CONTROLS = [
   ["incidental substrings", "K9!alpha-secretary-tokenized-exampleless-Q7#v2"],
   ["reserved token between entropy", "Xqv7-placeholder-NmK9-entropy-Zp4-8472"],
   ["risk token between entropy", "Rk8-secret-Qm9-tokenized-Vx4-random-7315"],
+] as const;
+const RESIDUAL_ENTROPY_SECRET_CONTROLS = [
+  ["boundary residual prefix", `${SUBSTANTIAL_RESIDUAL_ENTROPY}-${PLACEHOLDER_PHRASE}`],
+  ["boundary residual suffix", `${PLACEHOLDER_PHRASE}-${SUBSTANTIAL_RESIDUAL_ENTROPY}`],
 ] as const;
 
 function validProductionEnv(): Record<string, string> {
@@ -288,12 +305,40 @@ describe("validateProductionEnv", () => {
     });
   });
 
+  describe.each(PROTECTED_SECRET_KEYS)("%s low-residual placeholder composition", (key) => {
+    it.each(LOW_RESIDUAL_PLACEHOLDER_CASES)("rejects %s", (_, placeholderSecret) => {
+      expect(placeholderSecret.length).toBeGreaterThanOrEqual(32);
+      expectInvalidKey(key, placeholderSecret);
+    });
+  });
+
   describe.each(PROTECTED_SECRET_KEYS)("%s high-entropy acceptance controls", (key) => {
     it.each(HIGH_ENTROPY_SECRET_CONTROLS)("accepts %s", (_, highEntropyValue) => {
       expect(highEntropyValue.length).toBeGreaterThanOrEqual(32);
       expect(validateProductionEnv({ ...validProductionEnv(), [key]: highEntropyValue }).ok).toBe(
         true,
       );
+    });
+  });
+
+  describe.each(PROTECTED_SECRET_KEYS)("%s residual entropy boundary", (key) => {
+    it.each(RESIDUAL_ENTROPY_SECRET_CONTROLS)("accepts %s", (_, highEntropyValue) => {
+      expect(INSUFFICIENT_RESIDUAL_ENTROPY).toHaveLength(11);
+      expect(SUBSTANTIAL_RESIDUAL_ENTROPY).toHaveLength(12);
+      expect(validateProductionEnv({ ...validProductionEnv(), [key]: highEntropyValue }).ok).toBe(
+        true,
+      );
+    });
+
+    it("accepts the exact analysis-length boundary", () => {
+      expect(ANALYSIS_BOUNDARY_SECRET).toHaveLength(4096);
+      expect(
+        validateProductionEnv({ ...validProductionEnv(), [key]: ANALYSIS_BOUNDARY_SECRET }).ok,
+      ).toBe(true);
+    });
+
+    it("rejects one character over the analysis-length boundary", () => {
+      expectInvalidKey(key, `${ANALYSIS_BOUNDARY_SECRET}x`);
     });
   });
 
