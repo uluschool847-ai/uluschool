@@ -101,6 +101,12 @@ async function ensureBaseUrl() {
 await ensureBaseUrl();
 
 const expandedArgs = process.argv.slice(2).flatMap(expandArg);
+const runsInitialAdminTwoFactorSpec = expandedArgs.some(
+  (arg) => arg.replaceAll("\\", "/") === "e2e/portals/initial-admin-2fa.spec.ts",
+);
+
+process.env.E2E_ADMIN_REQUIRE_2FA = runsInitialAdminTwoFactorSpec ? "true" : "false";
+
 const executable = process.platform === "win32" ? "playwright.cmd" : "playwright";
 const child = spawn(executable, ["test", ...expandedArgs], {
   shell: true,

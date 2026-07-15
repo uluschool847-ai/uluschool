@@ -132,10 +132,9 @@ test.describe("Admin Security", () => {
     await page.goto("/admin/security");
     await expect(page.getByRole("heading", { level: 1, name: "Admin Security" })).toBeVisible();
     await expect(page.getByText(/production hardening/i)).toBeVisible();
-    await expect(page.getByRole("link", { name: /continue to admin dashboard/i })).toHaveAttribute(
-      "href",
-      "/admin",
-    );
+    await expect(
+      page.getByRole("link", { name: /continue to admin dashboard/i }).first(),
+    ).toHaveAttribute("href", "/admin");
     await expect(
       page.getByRole("heading", { name: "Two-Factor Authentication (TOTP)" }),
     ).toBeVisible();

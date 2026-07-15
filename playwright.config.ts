@@ -5,6 +5,7 @@ const reuseExistingServer = /^(1|true|yes)$/i.test(
   process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER ?? "",
 );
 const serverCommand = process.env.PLAYWRIGHT_SERVER_COMMAND?.trim() || "npm run dev";
+const runInitialAdminTwoFactorSpec = process.env.E2E_ADMIN_REQUIRE_2FA === "true";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -12,6 +13,7 @@ export default defineConfig({
   retries: 1,
   workers: 1,
   timeout: 60000,
+  testIgnore: runInitialAdminTwoFactorSpec ? undefined : /initial-admin-2fa\.spec\.ts$/,
   expect: {
     timeout: 10000,
   },

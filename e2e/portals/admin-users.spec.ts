@@ -119,7 +119,11 @@ test.describe("Admin Users CRUD", () => {
     await createSection.getByLabel("Email").fill(USER_EMAIL);
     await createSection.getByLabel("Role").selectOption(UserRole.STUDENT);
     await createSection.getByRole("button", { name: "Create User" }).click();
-    await expect(createSection.getByText(/default password/i)).toBeVisible({ timeout: 15000 });
+    const credentialsPanel = page.getByRole("region", { name: /^temporary credentials$/i });
+    await expect(credentialsPanel).toBeVisible({ timeout: 15000 });
+    await expect(
+      credentialsPanel.getByText(/will not be shown after leaving this page/i),
+    ).toBeVisible();
 
     const createdUser = await prisma.appUser.findUniqueOrThrow({
       where: { email: USER_EMAIL },
@@ -132,6 +136,7 @@ test.describe("Admin Users CRUD", () => {
 
     await page.goto(`/admin/users?q=${encodeURIComponent(USER_EMAIL)}`);
     await expect(userRow(page, USER_EMAIL)).toBeVisible();
+    await expect(credentialsPanel).toHaveCount(0);
     await page.reload();
     await expect(userRow(page, USER_EMAIL)).toBeVisible();
 

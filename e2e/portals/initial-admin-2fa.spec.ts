@@ -7,13 +7,14 @@ import { prisma } from "@/lib/prisma";
 
 const password =
   process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
+const adminTwoFactorRequired = process.env.E2E_ADMIN_REQUIRE_2FA === "true";
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const email = `qa.initial-2fa.${runId}@example.com`;
 let adminId = "";
 
 test.describe("initial administrator 2FA enrollment", () => {
   test.describe.configure({ mode: "serial", timeout: 300_000 });
-  test.skip((process.env.ADMIN_REQUIRE_2FA ?? "true") === "false", "2FA enrollment is disabled");
+  test.skip(!adminTwoFactorRequired, "2FA enrollment requires the dedicated E2E partition");
 
   test.beforeAll(async () => {
     const admin = await prisma.appUser.create({
@@ -64,13 +65,16 @@ test.describe("initial administrator 2FA enrollment", () => {
       await competingTab.getByTestId("initial-2fa-manual-key").textContent()
     )?.trim();
     expect(rotatedSecret).toBeTruthy();
-    expect(rotatedSecret).not.toBe(firstSecret);
+    expect(rotatedSecret === firstSecret).toBe(false);
     await competingTab.close();
 
     await page.getByLabel(/authenticator code/i).fill(authenticator.generate(firstSecret ?? ""));
     await page.getByRole("button", { name: /confirm and enable/i }).click();
     await expect(page.locator('p[role="alert"]')).toContainText(/setup changed/i);
-    await expect(page.getByText(firstSecret ?? "missing-secret")).toHaveCount(0);
+    const staleSecretIsVisible = await page
+      .locator("body")
+      .evaluate((body, secret) => body.textContent?.includes(secret) ?? false, firstSecret ?? "");
+    expect(staleSecretIsVisible).toBe(false);
     await page.getByRole("button", { name: /start setup again/i }).click();
 
     const currentSecret = (await page.getByTestId("initial-2fa-manual-key").textContent())?.trim();
