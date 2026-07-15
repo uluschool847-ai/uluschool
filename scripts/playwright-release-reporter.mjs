@@ -13,8 +13,10 @@ export default class PlaywrightReleaseReporter {
 
   onEnd(result) {
     const completedTests = this.tests.filter((test) => test.results.length > 0);
-    const skippedTests = completedTests.filter((test) =>
-      test.results.some((testResult) => testResult.status === "skipped"),
+    const skippedTests = completedTests.filter(
+      (test) =>
+        test.expectedStatus === "skipped" &&
+        test.results.some((testResult) => testResult.status === "skipped"),
     );
     const retriedOrFlakyTests = completedTests.filter(
       (test) =>

@@ -52,6 +52,15 @@ function withReleaseReporter(args, reporterPath) {
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+    if (
+      arg === "--config" ||
+      arg.startsWith("--config=") ||
+      arg === "-c" ||
+      arg.startsWith("-c=") ||
+      (arg.startsWith("-c") && arg.length > 2)
+    ) {
+      throw new Error("Release Playwright partitions do not accept caller --config/-c overrides.");
+    }
     if (arg === "--reporter") {
       const value = args[index + 1];
       if (!value || value.startsWith("-")) {

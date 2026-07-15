@@ -8,6 +8,8 @@ const ROOT = process.cwd();
 const RUNNER = join(ROOT, "scripts", "playwright-test.mjs");
 const RELEASE_REPORTER = join(ROOT, "scripts", "playwright-release-reporter.mjs");
 const HOSTILE_REPORTER_MARKER = "Hostile status reporter restored passed status.";
+const RELEASE_CONFIG_ERROR =
+  "Release Playwright partitions do not accept caller --config/-c overrides.";
 const SUBPROCESS_TEST_TIMEOUT_MS = 30_000;
 const temporaryDirectories: string[] = [];
 
@@ -179,10 +181,7 @@ process.exit(Number(process.env.PLAYWRIGHT_TEST_EXIT_CODE ?? "0"));
   return cli;
 }
 
-function runRunner(
-  args: string[],
-  environment: Record<string, string> = {},
-): { capture: Capture; status: number | null } {
+function invokeRunner(args: string[], environment: Record<string, string> = {}) {
   const directory = mkdtempSync(join(tmpdir(), "ulu-playwright-runner-"));
   temporaryDirectories.push(directory);
   const captureFile = join(directory, "capture.json");
@@ -205,6 +204,15 @@ function runRunner(
       },
     },
   );
+
+  return { captureFile, result };
+}
+
+function runRunner(
+  args: string[],
+  environment: Record<string, string> = {},
+): { capture: Capture; status: number | null } {
+  const { captureFile, result } = invokeRunner(args, environment);
 
   if (!existsSync(captureFile)) {
     throw new Error(`Capture CLI did not run. stderr: ${result.stderr}`);
@@ -243,25 +251,36 @@ function runActualPlaywrightFixture(
   source: string,
   options: {
     args?: string[];
+    callerConfig?: "equals" | "separate";
     callerReporter?: "hostile";
     environmentReporter?: "hostile";
     partition?: "focused" | "standard";
   } = {},
-): { output: string; status: number | null } {
+): {
+  bridgeRan: boolean;
+  hostileConfigRan: boolean;
+  output: string;
+  status: number | null;
+} {
   const directory = mkdtempSync(join(ROOT, ".playwright-release-contract-"));
   temporaryDirectories.push(directory);
   const configFile = join(directory, "playwright.config.mjs");
+  const bridgeFile = join(directory, "fixture-playwright-cli.mjs");
+  const bridgeMarkerFile = join(directory, "fixture-playwright-cli-ran.txt");
+  const hostileConfigFile = join(directory, "hostile-playwright.config.mjs");
+  const hostileConfigMarkerFile = join(directory, "hostile-playwright-config-ran.txt");
   const hostileReporterFile = join(directory, "hostile-reporter.mjs");
   const specFile = join(directory, "release-gate.spec.mjs");
+  const realPlaywrightCli = join(ROOT, "node_modules", "@playwright", "test", "cli.js");
 
   writeFileSync(
     configFile,
     `import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
-  outputDir: "./results",
+  outputDir: ${JSON.stringify(join(directory, "results"))},
   reporter: "line",
-  testDir: ".",
+  testDir: ${JSON.stringify(directory)},
   workers: 1,
 });
 `,
@@ -280,17 +299,68 @@ export default defineConfig({
 }
 `,
   );
+  writeFileSync(
+    hostileConfigFile,
+    `import { writeFileSync } from "node:fs";
+import { defineConfig } from "@playwright/test";
+
+writeFileSync(${JSON.stringify(hostileConfigMarkerFile)}, "ran");
+process.env.PW_TEST_REPORTER = ${JSON.stringify(hostileReporterFile)};
+
+export default defineConfig({
+  outputDir: ${JSON.stringify(join(directory, "hostile-results"))},
+  reporter: "line",
+  testDir: ${JSON.stringify(directory)},
+  workers: 1,
+});
+`,
+  );
+  writeFileSync(
+    bridgeFile,
+    `import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+
+writeFileSync(${JSON.stringify(bridgeMarkerFile)}, "ran");
+const args = process.argv.slice(2);
+const hasCallerConfig = args.some(
+  (arg) =>
+    arg === "--config" ||
+    arg.startsWith("--config=") ||
+    arg === "-c" ||
+    arg.startsWith("-c=") ||
+    (arg.startsWith("-c") && arg.length > 2),
+);
+const forwardedArgs = hasCallerConfig
+  ? args
+  : [...args, ${JSON.stringify(`--config=${configFile}`)}];
+const result = spawnSync(
+  process.execPath,
+  [${JSON.stringify(realPlaywrightCli)}, ...forwardedArgs],
+  { env: process.env, stdio: "inherit" },
+);
+
+if (result.error) throw result.error;
+process.exit(result.status ?? 1);
+`,
+  );
   writeFileSync(specFile, source);
 
   const partitionArgs = options.partition === "focused" ? [] : ["--standard-partition"];
+  const callerConfigArgs =
+    options.callerConfig === "separate"
+      ? ["--config", hostileConfigFile]
+      : options.callerConfig === "equals"
+        ? [`--config=${hostileConfigFile}`]
+        : [];
   const callerReporterArgs =
     options.callerReporter === "hostile" ? [`--reporter=${hostileReporterFile}`] : [];
   const result = spawnSync(
     process.execPath,
     [
       RUNNER,
+      `--test-playwright-cli=${bridgeFile}`,
       ...partitionArgs,
-      `--config=${configFile}`,
+      ...callerConfigArgs,
       ...(options.args ?? []),
       ...callerReporterArgs,
     ],
@@ -308,6 +378,8 @@ export default defineConfig({
   );
 
   return {
+    bridgeRan: existsSync(bridgeMarkerFile),
+    hostileConfigRan: existsSync(hostileConfigMarkerFile),
     output: `${result.stdout}\n${result.stderr}`,
     status: result.status,
   };
@@ -385,6 +457,26 @@ function readPackageScripts() {
 function cliIt(name: string, callback: () => void) {
   it(name, callback, SUBPROCESS_TEST_TIMEOUT_MS);
 }
+
+const releaseConfigOverrideCases = [
+  ["standard", "--standard-partition"],
+  ["admin 2FA", "--admin-2fa-partition"],
+  ["signed delivery", "--signed-delivery-partition"],
+  ["storage", "--storage-partition"],
+].flatMap(([partitionName, partitionFlag]) => [
+  {
+    configArgs: ["--config", "hostile-release-config.mjs"],
+    formName: "separate",
+    partitionFlag,
+    partitionName,
+  },
+  {
+    configArgs: ["--config=hostile-release-config.mjs"],
+    formName: "equals",
+    partitionFlag,
+    partitionName,
+  },
+]);
 
 describe("Playwright E2E partition contract", () => {
   cliIt("retries only focused browser tests", () => {
@@ -504,6 +596,46 @@ test.skip("controlled mixed skipped release test", () => {});
     expect(playwrightSummaryCounts(output)).toEqual(["1 failed", "1 skipped"]);
   });
 
+  cliIt("does not classify a serial did-not-run placeholder as an explicit skip", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test.describe.serial("controlled serial release suite", () => {
+  test("controlled serial ordinary failure", () => {
+    throw new Error("controlled serial failure detail");
+  });
+
+  test("controlled serial did not run", () => {});
+});
+`,
+    );
+    const output = normalizePlaywrightOutput(result.output);
+
+    expect(result.status, result.output).toBe(1);
+    expect(output).toContain("Error: controlled serial failure detail");
+    expect(output).not.toContain("Skipped release test");
+    expect(output).not.toContain("Release browser gate rejected: 1 skipped");
+    expect(playwrightSummaryCounts(output)).toEqual(["1 failed", "1 did not run"]);
+  });
+
+  cliIt("accepts a completed expected failure without a skip diagnostic", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test("controlled expected release failure", () => {
+  test.fail();
+  throw new Error("controlled expected failure detail");
+});
+`,
+    );
+    const output = normalizePlaywrightOutput(result.output);
+
+    expect(result.status, result.output).toBe(0);
+    expect(output).not.toContain("Skipped release test");
+    expect(output).not.toContain("Release browser gate rejected");
+    expect(playwrightSummaryCounts(output)).toEqual(["1 passed"]);
+  });
+
   cliIt("rejects an ordinary failure despite a hostile caller reporter", () => {
     const result = runActualPlaywrightFixture(
       `import { test } from "@playwright/test";
@@ -521,6 +653,40 @@ test("hostile caller ordinary release failure", () => {
     expect(output).toContain("release-gate.spec.mjs:3:1 › hostile caller ordinary release failure");
     expect(output).toContain("Error: hostile caller ordinary failure detail");
     expect(playwrightSummaryCounts(output)).toEqual(["1 failed"]);
+  });
+
+  cliIt("rejects before a hostile separate-argument config can restore an ordinary failure", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test("hostile config ordinary release failure", () => {
+  throw new Error("hostile config ordinary failure detail");
+});
+`,
+      { callerConfig: "separate" },
+    );
+
+    expect(result.status, result.output).toBe(1);
+    expect(result.bridgeRan).toBe(false);
+    expect(result.hostileConfigRan).toBe(false);
+    expect(result.output).toContain(RELEASE_CONFIG_ERROR);
+    expect(result.output).not.toContain(HOSTILE_REPORTER_MARKER);
+  });
+
+  cliIt("rejects before a hostile equals config can restore an explicit skip", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test.skip("hostile config skipped release test", () => {});
+`,
+      { callerConfig: "equals" },
+    );
+
+    expect(result.status, result.output).toBe(1);
+    expect(result.bridgeRan).toBe(false);
+    expect(result.hostileConfigRan).toBe(false);
+    expect(result.output).toContain(RELEASE_CONFIG_ERROR);
+    expect(result.output).not.toContain(HOSTILE_REPORTER_MARKER);
   });
 
   cliIt("rejects a timed-out result despite a hostile caller reporter", () => {
@@ -781,6 +947,34 @@ test.skip("controlled focused skipped test", () => {});
     expect(capture.args).toEqual(["test", "--list", `--reporter=${RELEASE_REPORTER}`]);
     expectWrapperFlagsRemoved(capture);
   });
+
+  it.each(releaseConfigOverrideCases)(
+    "rejects the $partitionName release partition $formName config form before Playwright spawn",
+    ({ configArgs, partitionFlag }) => {
+      const { captureFile, result } = invokeRunner([partitionFlag, ...configArgs, "--list"]);
+
+      expect(result.status).toBe(1);
+      expect(existsSync(captureFile)).toBe(false);
+      expect(result.stderr).toContain(RELEASE_CONFIG_ERROR);
+      expect(result.stderr).not.toContain("hostile-release-config.mjs");
+    },
+    SUBPROCESS_TEST_TIMEOUT_MS,
+  );
+
+  it.each([
+    ["separate", ["--config", "focused-config.mjs"]],
+    ["equals", ["--config=focused-config.mjs"]],
+  ])(
+    "forwards the focused $0 config form unchanged",
+    (_formName, configArgs) => {
+      const { capture, status } = runRunner([...configArgs, "--list"]);
+
+      expect(status).toBe(0);
+      expect(capture.args).toEqual(["test", ...configArgs, "--list"]);
+      expect(capture.args).not.toContain(`--reporter=${RELEASE_REPORTER}`);
+    },
+    SUBPROCESS_TEST_TIMEOUT_MS,
+  );
 
   cliIt("ignores hostile ambient CLI injection outside test mode", () => {
     const { captureFile, result } = runProductionRunner(false);
