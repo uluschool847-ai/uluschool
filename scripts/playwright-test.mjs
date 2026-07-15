@@ -105,6 +105,7 @@ const partitionFlags = new Map([
   ["--standard-partition", "standard"],
   ["--storage-partition", "storage"],
   ["--admin-2fa-partition", "admin-2fa"],
+  ["--signed-delivery-partition", "signed-delivery"],
 ]);
 const rawArgs = process.argv.slice(2);
 const testPlaywrightCliFlags = rawArgs.filter((arg) => arg.startsWith(testPlaywrightCliFlagPrefix));
@@ -171,6 +172,16 @@ process.env.E2E_ADMIN_REQUIRE_2FA = adminTwoFactorRequired ? "true" : "false";
 process.env.ADMIN_REQUIRE_2FA = process.env.E2E_ADMIN_REQUIRE_2FA;
 process.env.E2E_PARTITION = partition;
 if (partition === "storage") process.env.STORAGE_DRIVER = "local";
+if (partition === "signed-delivery") {
+  Object.assign(process.env, {
+    RUN_S4_SIGNED_DELIVERY_E2E: "1",
+    STORAGE_DRIVER: "r2",
+    R2_ENDPOINT: "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com",
+    R2_ACCESS_KEY_ID: "r2-access-key-value",
+    R2_SECRET_ACCESS_KEY: "r2-secret-key-value",
+    R2_BUCKET_NAME: "s4-private-files",
+  });
+}
 if (usesNextStart) process.env.E2E_PLAYWRIGHT_SERVER_COMMAND = "npx next start";
 
 const playwrightCli = testPlaywrightCli

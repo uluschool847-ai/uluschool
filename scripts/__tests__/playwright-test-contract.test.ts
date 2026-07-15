@@ -21,6 +21,11 @@ const hostileEnvironment = {
   PLAYWRIGHT_SERVER_COMMAND: "hostile-playwright-server",
   E2E_PLAYWRIGHT_SERVER_COMMAND: "hostile-e2e-playwright-server",
   STORAGE_DRIVER: "hostile-storage",
+  RUN_S4_SIGNED_DELIVERY_E2E: "0",
+  R2_ENDPOINT: "https://hostile.example.test",
+  R2_ACCESS_KEY_ID: "hostile-access-key",
+  R2_SECRET_ACCESS_KEY: "hostile-secret-key",
+  R2_BUCKET_NAME: "hostile-bucket",
 };
 
 afterEach(() => {
@@ -54,6 +59,11 @@ const capturedEnvironment = Object.fromEntries(
     "ADMIN_REQUIRE_2FA",
     "E2E_PARTITION",
     "STORAGE_DRIVER",
+    "RUN_S4_SIGNED_DELIVERY_E2E",
+    "R2_ENDPOINT",
+    "R2_ACCESS_KEY_ID",
+    "R2_SECRET_ACCESS_KEY",
+    "R2_BUCKET_NAME",
   ].map((name) => [name, process.env[name] ?? null]),
 );
 
@@ -145,6 +155,7 @@ function expectWrapperFlagsRemoved(capture: Capture) {
   expect(capture.args).not.toContain("--admin-2fa-partition");
   expect(capture.args).not.toContain("--standard-partition");
   expect(capture.args).not.toContain("--storage-partition");
+  expect(capture.args).not.toContain("--signed-delivery-partition");
   expect(capture.args.some((arg) => arg.startsWith("--test-playwright-cli="))).toBe(false);
 }
 
@@ -164,14 +175,17 @@ describe("Playwright E2E partition contract", () => {
     const configSource = readConfigSource();
 
     expect(scripts["test:e2e"]).toBe(
-      "npm run test:e2e:standard && npm run test:e2e:admin-2fa && npm run test:e2e:storage",
+      "npm run test:e2e:standard && npm run test:e2e:admin-2fa && npm run test:e2e:signed-delivery && npm run test:e2e:storage",
     );
     expect(scripts["test:e2e:release"]).toBe(
-      "npm run test:e2e:standard && npm run test:e2e:admin-2fa && npm run test:e2e:storage",
+      "npm run test:e2e:standard && npm run test:e2e:admin-2fa && npm run test:e2e:signed-delivery && npm run test:e2e:storage",
     );
     expect(scripts["test:e2e:standard"]).toContain("--next-start");
     expect(scripts["test:e2e:admin-2fa"]).toBe(
       "node scripts/playwright-test.mjs --isolated-server --admin-2fa-partition --next-start e2e/portals/admin-security.spec.ts e2e/portals/initial-admin-2fa.spec.ts",
+    );
+    expect(scripts["test:e2e:signed-delivery"]).toBe(
+      "node scripts/playwright-test.mjs --isolated-server --signed-delivery-partition --next-start e2e/storage/signed-file-delivery.spec.ts",
     );
     expect(scripts["test:e2e:initial-admin-2fa"]).toBe(
       "node scripts/playwright-test.mjs --isolated-server --admin-2fa-partition --next-start e2e/portals/initial-admin-2fa.spec.ts",
@@ -181,7 +195,10 @@ describe("Playwright E2E partition contract", () => {
       "const adminTwoFactorSpecPattern = /(?:admin-security|initial-admin-2fa)\\.spec\\.ts$/;",
     );
     expect(configSource).toContain(
-      'partition === "standard" ? [storageSpecPattern, adminTwoFactorSpecPattern] : undefined',
+      "const signedDeliverySpecPattern = /(?:^|[\\\\/])signed-file-delivery\\.spec\\.ts$/;",
+    );
+    expect(configSource).toContain(
+      'partition === "standard"\n    ? [storageSpecPattern, adminTwoFactorSpecPattern, signedDeliverySpecPattern]\n    : undefined',
     );
     expect(configSource).toContain(
       'E2E_ADMIN_REQUIRE_2FA: adminTwoFactorRequired ? "true" : "false",',
@@ -249,6 +266,32 @@ describe("Playwright E2E partition contract", () => {
       STORAGE_DRIVER: "local",
     });
     expect(capture.args).toEqual(["test", "e2e/portals/teacher-materials.spec.ts"]);
+    expectWrapperFlagsRemoved(capture);
+  });
+
+  it("forces deterministic offline signed-delivery storage and forwards only the exact spec", () => {
+    const { capture, status } = runRunner([
+      "--isolated-server",
+      "--signed-delivery-partition",
+      "--next-start",
+      "e2e/storage/signed-file-delivery.spec.ts",
+    ]);
+
+    expect(status).toBe(0);
+    expectIsolatedServer(capture);
+    expect(capture.environment).toMatchObject({
+      ADMIN_REQUIRE_2FA: "false",
+      E2E_ADMIN_REQUIRE_2FA: "false",
+      E2E_PARTITION: "signed-delivery",
+      E2E_PLAYWRIGHT_SERVER_COMMAND: "npx next start",
+      RUN_S4_SIGNED_DELIVERY_E2E: "1",
+      STORAGE_DRIVER: "r2",
+      R2_ENDPOINT: "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com",
+      R2_ACCESS_KEY_ID: "r2-access-key-value",
+      R2_SECRET_ACCESS_KEY: "r2-secret-key-value",
+      R2_BUCKET_NAME: "s4-private-files",
+    });
+    expect(capture.args).toEqual(["test", "e2e/storage/signed-file-delivery.spec.ts"]);
     expectWrapperFlagsRemoved(capture);
   });
 

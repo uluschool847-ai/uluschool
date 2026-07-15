@@ -15,8 +15,11 @@ const serverCommand = isStoragePartition
 const storageSpecPattern =
   /(?:^|[\\/])(admin-teachers|teacher-academics|teacher-materials)\.spec\.ts$/;
 const adminTwoFactorSpecPattern = /(?:admin-security|initial-admin-2fa)\.spec\.ts$/;
+const signedDeliverySpecPattern = /(?:^|[\\/])signed-file-delivery\.spec\.ts$/;
 const testIgnore =
-  partition === "standard" ? [storageSpecPattern, adminTwoFactorSpecPattern] : undefined;
+  partition === "standard"
+    ? [storageSpecPattern, adminTwoFactorSpecPattern, signedDeliverySpecPattern]
+    : undefined;
 
 export default defineConfig({
   testDir: "./e2e",
