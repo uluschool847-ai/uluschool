@@ -64,6 +64,7 @@ function buildEnrolFormData() {
   formData.set("phoneWhatsapp", "+254711111111");
   formData.set("preferredSchedule", "Weekdays after 4pm");
   formData.set("additionalNotes", "Interested in a trial class next week.");
+  formData.set("consentAccepted", "true");
   formData.set("companyWebsite", "");
   formData.set("startedAt", "1");
   formData.set("cf-turnstile-response", "token");
@@ -93,16 +94,17 @@ describe("enrolment action success traceability", () => {
     sendEnquiryEmailMock.mockResolvedValue({ delivered: true });
   });
 
-  it("returns success with a traceable referenceId and admin deep link", async () => {
+  it("does not expose adminPath or enquiry database ID in public action state", async () => {
     const { submitEnrolment } = await loadEnrolActions();
     const result = await submitEnrolment({ success: false, message: "" }, buildEnrolFormData());
 
     expect(result).toMatchObject({
       success: true,
       referenceId: "MS-2026-2001",
-      adminPath: "/admin/enquiries/enquiry-2001",
       submittedAt: "2026-05-04T10:45:00.000Z",
     });
+    expect(result).not.toHaveProperty("adminPath");
+    expect(JSON.stringify(result)).not.toContain("enquiry-2001");
   });
 
   it("persists the generated referenceId in the enquiry record", async () => {
@@ -121,5 +123,21 @@ describe("enrolment action success traceability", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it("does not log raw enrolment values when persistence fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    createEnquiryMock.mockRejectedValueOnce(new Error("Grace Parent grace@example.com"));
+
+    const { submitEnrolment } = await loadEnrolActions();
+    await submitEnrolment({ success: false, message: "" }, buildEnrolFormData());
+
+    expect(errorSpy).toHaveBeenCalledWith("Enrolment submission failed", {
+      errorType: "Error",
+    });
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toMatch(
+      /grace parent|grace@example\.com|\+254711111111|interested in a trial/i,
+    );
+    errorSpy.mockRestore();
   });
 });

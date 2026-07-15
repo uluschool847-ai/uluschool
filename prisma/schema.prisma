@@ -176,6 +176,8 @@ model Enquiry {
   utmMedium          String?
   utmCampaign        String?
   referrer           String?
+  consentVersion     String?
+  consentGivenAt     DateTime?
   convertedAt        DateTime?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt

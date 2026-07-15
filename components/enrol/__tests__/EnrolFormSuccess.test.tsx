@@ -95,5 +95,6 @@ describe("Enrolment form success state", () => {
     expect(
       screen.getByText(/we will contact you within 24 hours to arrange the trial class/i),
     ).toBeDefined();
+    expect(screen.queryByText(/\/admin\//i)).toBeNull();
   });
 });

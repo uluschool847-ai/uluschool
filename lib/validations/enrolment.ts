@@ -14,6 +14,9 @@ export const enrolmentSchema = z.object({
     .max(1000, "Additional notes are too long.")
     .optional()
     .or(z.literal("")),
+  consentAccepted: z.literal(true, {
+    errorMap: () => ({ message: "Parent or guardian consent is required." }),
+  }),
 });
 
 export type EnrolmentInput = z.infer<typeof enrolmentSchema>;
@@ -23,7 +26,6 @@ export type EnrolmentFormState = {
   message: string;
   referenceId?: string;
   submittedAt?: string;
-  adminPath?: string;
   nextSteps?: string;
   errors?: Partial<Record<keyof EnrolmentInput, string[]>>;
 };

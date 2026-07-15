@@ -197,4 +197,48 @@ describe("Strict Schema Validation - Server Actions", () => {
       expect(result.errors).toHaveProperty("message");
     });
   });
+
+  describe("Public enrolment consent", () => {
+    function buildValidEnrolmentFormData(consentAccepted?: string) {
+      const formData = new FormData();
+      formData.set("studentName", "Daniel Student");
+      formData.set("ageYearLevel", "Grade 6");
+      formData.append("subjects", "Biology");
+      formData.set("curriculumLevel", "grade-6");
+      formData.set("parentGuardianName", "Grace Parent");
+      formData.set("email", "grace@example.com");
+      formData.set("phoneWhatsapp", "+254711111111");
+      formData.set("preferredSchedule", "Weekdays after 4pm");
+      formData.set("additionalNotes", "Interested in a trial class next week.");
+      formData.set("cf-turnstile-response", "token");
+      if (consentAccepted !== undefined) {
+        formData.set("consentAccepted", consentAccepted);
+      }
+      return formData;
+    }
+
+    it("rejects an enrolment without parent or guardian consent", async () => {
+      const result = await submitEnrolment(
+        { success: false, message: "" },
+        buildValidEnrolmentFormData(),
+      );
+
+      expect(result).toMatchObject({
+        success: false,
+        errors: { consentAccepted: ["Parent or guardian consent is required."] },
+      });
+    });
+
+    it("rejects a false consent value even when the rest of the form is valid", async () => {
+      const result = await submitEnrolment(
+        { success: false, message: "" },
+        buildValidEnrolmentFormData("false"),
+      );
+
+      expect(result).toMatchObject({
+        success: false,
+        errors: { consentAccepted: ["Parent or guardian consent is required."] },
+      });
+    });
+  });
 });

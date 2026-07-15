@@ -100,6 +100,17 @@ describe("EnrolForm accessibility and responsive behavior", () => {
     expect(document.body.textContent ?? "").toMatch(/\*|required/i);
   });
 
+  it("renders a required consent checkbox linked to the privacy policy", () => {
+    render(<EnrolForm {...props} />);
+    advanceToSubmitStep();
+
+    const consent = screen.getByRole("checkbox", { name: /i am the parent or guardian/i });
+    expect((consent as HTMLInputElement).required).toBe(true);
+    expect(screen.getByRole("link", { name: /privacy policy/i }).getAttribute("href")).toBe(
+      "/privacy-policy",
+    );
+  });
+
   it("links field errors with aria-describedby", () => {
     useActionStateMock.mockReturnValue([
       {

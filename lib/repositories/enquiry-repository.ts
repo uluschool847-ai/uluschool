@@ -2,6 +2,7 @@ import { EnquiryStatus } from "@prisma/client";
 
 import type { AttributionInput } from "@/lib/analytics/attribution";
 import { prisma } from "@/lib/prisma";
+import { ENROLMENT_CONSENT_VERSION } from "@/lib/privacy/enrolment-consent";
 import type { EnrolmentInput } from "@/lib/validations/enrolment";
 
 export async function createEnquiry(
@@ -35,6 +36,8 @@ export async function createEnquiry(
       utmMedium: attribution?.utmMedium || null,
       utmCampaign: attribution?.utmCampaign || null,
       referrer: attribution?.referrer || null,
+      consentVersion: ENROLMENT_CONSENT_VERSION,
+      consentGivenAt: new Date(),
     },
   });
 }

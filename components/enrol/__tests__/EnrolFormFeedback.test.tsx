@@ -102,6 +102,21 @@ describe("EnrolForm action feedback", () => {
     expect((screen.getByLabelText(/email address/i) as HTMLInputElement).value).toBe("bad@email");
   });
 
+  it("shows the server consent error on the required checkbox", () => {
+    useActionStateMock.mockReturnValue([
+      {
+        success: false,
+        message: "Please enter valid details in the highlighted fields.",
+        errors: { consentAccepted: ["Parent or guardian consent is required."] },
+      },
+      vi.fn(),
+    ]);
+    render(<EnrolForm {...props} />);
+    advanceToSubmitStep();
+
+    expect(screen.getByText(/parent or guardian consent is required/i)).toBeDefined();
+  });
+
   it("shows generic error feedback for unexpected failures", () => {
     useActionStateMock.mockReturnValue([
       { success: false, message: "Something went wrong" },

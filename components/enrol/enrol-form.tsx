@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 
@@ -186,9 +187,11 @@ export function EnrolForm({ subjects, levels }: EnrolFormProps) {
       ),
     );
 
-    const hasInvalidRequiredControl = requiredControls.some((control) => {
-      return !control.value.trim();
-    });
+    const hasInvalidRequiredControl = requiredControls.some((control) =>
+      control instanceof HTMLInputElement && control.type === "checkbox"
+        ? !control.checked
+        : !control.value.trim(),
+    );
 
     if (currentStep === 2) {
       const selectedSubjects = form.querySelectorAll('input[name="subjects"]:checked').length;
@@ -478,6 +481,25 @@ export function EnrolForm({ subjects, levels }: EnrolFormProps) {
                 id="enrol-additional-notes-error"
                 errors={state.errors?.additionalNotes}
               />
+            </div>
+
+            <div>
+              <label className="flex items-start gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  name="consentAccepted"
+                  value="true"
+                  required
+                  aria-describedby="enrol-consent-help enrol-consent-error"
+                  className={cn("mt-0.5 h-4 w-4", fieldTone("consentAccepted"))}
+                />
+                <span id="enrol-consent-help">
+                  I am the parent or guardian, or I am authorized to submit this child&apos;s
+                  information, and I have read the{" "}
+                  <Link href="/privacy-policy">Privacy Policy</Link>.
+                </span>
+              </label>
+              <FieldError id="enrol-consent-error" errors={state.errors?.consentAccepted} />
             </div>
           </section>
 

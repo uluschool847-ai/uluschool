@@ -88,7 +88,7 @@ describe("contact action success traceability", () => {
     sendContactEmailMock.mockResolvedValue({ delivered: true });
   });
 
-  it("returns success with a traceable referenceId and admin deep link", async () => {
+  it("does not expose adminPath or lead database ID from the contact action", async () => {
     const { submitContactEnquiry } = await loadContactActions();
     const result = await submitContactEnquiry(
       { success: false, message: "" },
@@ -98,9 +98,10 @@ describe("contact action success traceability", () => {
     expect(result).toMatchObject({
       success: true,
       referenceId: "MS-2026-1001",
-      adminPath: "/admin/leads/lead-1001",
       submittedAt: "2026-05-04T09:15:00.000Z",
     });
+    expect(result).not.toHaveProperty("adminPath");
+    expect(JSON.stringify(result)).not.toContain("lead-1001");
   });
 
   it("persists the generated referenceId in the contact lead record", async () => {
@@ -119,5 +120,21 @@ describe("contact action success traceability", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it("does not log raw contact values when persistence fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    createContactLeadMock.mockRejectedValueOnce(new Error("Amina Parent amina@example.com"));
+
+    const { submitContactEnquiry } = await loadContactActions();
+    await submitContactEnquiry({ success: false, message: "" }, buildContactFormData());
+
+    expect(errorSpy).toHaveBeenCalledWith("Contact submission failed", {
+      errorType: "Error",
+    });
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toMatch(
+      /amina parent|amina@example\.com|\+254700000000|live classes/i,
+    );
+    errorSpy.mockRestore();
   });
 });

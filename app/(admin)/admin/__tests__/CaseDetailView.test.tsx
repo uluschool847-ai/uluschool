@@ -62,6 +62,8 @@ describe("Admin CRM case detail pages", () => {
         parentGuardianName: "Maria Parent",
         email: "maria@example.com",
         phoneWhatsapp: "+100000000",
+        consentVersion: "enrolment-consent-v1",
+        consentGivenAt: new Date("2026-07-13T09:30:00.000Z"),
         status: "IN_PROGRESS",
         notes: [
           {
@@ -88,6 +90,55 @@ describe("Admin CRM case detail pages", () => {
       expect(
         screen.getByRole("link", { name: /back to enrolment submissions/i }).getAttribute("href"),
       ).toBe("/admin/submissions");
+    },
+    SERVER_COMPONENT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "shows captured consent version and time to an authenticated admin",
+    async () => {
+      getEnquiryCaseByIdMock.mockResolvedValueOnce({
+        id: "enq-1",
+        studentName: "Alice Student",
+        parentGuardianName: "Maria Parent",
+        email: "maria@example.com",
+        phoneWhatsapp: "+100000000",
+        status: "NEW",
+        consentVersion: "enrolment-consent-v1",
+        consentGivenAt: new Date("2026-07-13T09:30:00.000Z"),
+        notes: [],
+        timeline: [],
+      });
+
+      const page = await importFutureModule<PageModule>("@/app/(admin)/admin/enquiries/[id]/page");
+      render(await page.default({ params: { id: "enq-1" } }));
+
+      expect(screen.getByText(/captured: enrolment-consent-v1 at/i)).toBeDefined();
+      expect(requireRoleMock).toHaveBeenCalledWith(["ADMIN"]);
+    },
+    SERVER_COMPONENT_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "labels a null-consent enquiry as a legacy record",
+    async () => {
+      getEnquiryCaseByIdMock.mockResolvedValueOnce({
+        id: "enq-legacy",
+        studentName: "Legacy Student",
+        parentGuardianName: "Legacy Parent",
+        email: "legacy@example.com",
+        phoneWhatsapp: "+100000001",
+        status: "NEW",
+        consentVersion: null,
+        consentGivenAt: null,
+        notes: [],
+        timeline: [],
+      });
+
+      const page = await importFutureModule<PageModule>("@/app/(admin)/admin/enquiries/[id]/page");
+      render(await page.default({ params: { id: "enq-legacy" } }));
+
+      expect(screen.getByText("Legacy record - consent evidence not captured.")).toBeDefined();
     },
     SERVER_COMPONENT_TEST_TIMEOUT_MS,
   );
