@@ -8,6 +8,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "npm run lint && next build",
+    "env:check": "tsx scripts/check-production-env.ts",
+    "prestart": "npm run env:check",
     "start": "next start",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -22,7 +22,13 @@ function readPackageJson() {
   return JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
+    scripts?: Record<string, string>;
   };
+}
+
+function envValue(key: string) {
+  const match = readEnvExample().match(new RegExp(`^${key}=(.*)$`, "m"));
+  return match?.[1]?.trim();
 }
 
 function walk(dir: string): string[] {
@@ -188,5 +194,110 @@ describe("Google Calendar environment and dependency readiness", () => {
       .map((filePath) => relative(ROOT, filePath));
 
     expect(offenders, offenders.join("\n")).toEqual([]);
+  });
+});
+
+describe("production environment startup contract", () => {
+  const requiredKeys = [
+    "RENDER",
+    "NODE_ENV",
+    "APP_ENV",
+    "DATABASE_URL",
+    "DIRECT_URL",
+    "AUTH_SESSION_SECRET",
+    "ADMIN_REQUIRE_2FA",
+    "GOOGLE_TIMEZONE",
+    "NEXT_PUBLIC_SITE_URL",
+    "TURNSTILE_ENFORCE",
+    "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+    "TURNSTILE_SECRET_KEY",
+    "SMTP_HOST",
+    "SMTP_PORT",
+    "SMTP_USER",
+    "SMTP_PASS",
+    "SMTP_FROM",
+    "SCHOOL_INBOX_EMAIL",
+    "STORAGE_DRIVER",
+    "R2_ENDPOINT",
+    "R2_ACCESS_KEY_ID",
+    "R2_SECRET_ACCESS_KEY",
+    "R2_BUCKET_NAME",
+    "PRIVACY_CONTACT_EMAIL",
+    "PRIVACY_EMAIL_PROCESSOR_NAME",
+    "CRON_SECRET",
+    "REMINDER_CRON_TOKEN",
+    "ALERT_WEBHOOK_URL",
+    "ALERT_TEST_TOKEN",
+    "SENTRY_ENABLED",
+    "SENTRY_DSN",
+    "NEXT_PUBLIC_SENTRY_DSN",
+  ] as const;
+
+  it("declares every production contract variable in .env.example", () => {
+    const envExample = readEnvExample();
+    const missing = requiredKeys.filter((key) => !new RegExp(`^${key}=`, "m").test(envExample));
+
+    expect(missing, `Missing production environment keys: ${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("keeps local-safe defaults and empty provider placeholders", () => {
+    expect(envValue("APP_ENV")).toBe('""');
+    expect(envValue("SENTRY_ENABLED")).toBe('"false"');
+    expect(envValue("PRIVACY_CONTACT_EMAIL")).toBe('"info@uluglobalacademy.com"');
+    expect(envValue("STORAGE_DRIVER")).toBe('"local"');
+
+    for (const key of [
+      "RENDER",
+      "SMTP_HOST",
+      "SMTP_USER",
+      "SMTP_PASS",
+      "R2_ENDPOINT",
+      "R2_ACCESS_KEY_ID",
+      "R2_SECRET_ACCESS_KEY",
+      "R2_BUCKET_NAME",
+      "NEXT_PUBLIC_TURNSTILE_SITE_KEY",
+      "TURNSTILE_SECRET_KEY",
+      "PRIVACY_EMAIL_PROCESSOR_NAME",
+      "SENTRY_DSN",
+      "NEXT_PUBLIC_SENTRY_DSN",
+    ]) {
+      expect(envValue(key), `${key} must use an empty placeholder`).toBe('""');
+    }
+  });
+
+  it("does not declare platform PORT or the removed shared portal password", () => {
+    const envExample = readEnvExample();
+    expect(envExample).not.toMatch(/^PORT\s*=/m);
+    expect(envExample).not.toMatch(/^DEFAULT_PORTAL_PASSWORD\s*=/m);
+  });
+
+  it("does not contain real provider credentials or provider endpoints", () => {
+    const envExample = readEnvExample();
+    expect(envExample).not.toMatch(/\.r2\.cloudflarestorage\.com/i);
+    expect(envExample).not.toMatch(/^SMTP_HOST=".+"/m);
+    expect(envExample).not.toMatch(/^SMTP_USER=".+"/m);
+    expect(envExample).not.toMatch(/^SMTP_PASS=".+"/m);
+    expect(envExample).not.toMatch(/^SENTRY_DSN=".+"/m);
+    expect(envExample).not.toMatch(/^NEXT_PUBLIC_SENTRY_DSN=".+"/m);
+    expect(envExample).not.toMatch(/-----BEGIN PRIVATE KEY-----/);
+  });
+
+  it("gates startup through env:check without changing start or introducing recursion", () => {
+    const scripts = readPackageJson().scripts;
+    expect(scripts?.["env:check"]).toBe("tsx scripts/check-production-env.ts");
+    expect(scripts?.prestart).toBe("npm run env:check");
+    expect(scripts?.start).toBe("next start");
+    expect(scripts?.["env:check"]).not.toContain("npm run start");
+    expect(scripts?.prestart).not.toContain("npm run start");
+  });
+
+  it("keeps validation pure and process access isolated to the CLI adapter", () => {
+    const validatorSource = readFileSync(join(ROOT, "lib/config/production-env.ts"), "utf8");
+    const cliSource = readFileSync(join(ROOT, "scripts/check-production-env.ts"), "utf8");
+
+    expect(validatorSource).not.toMatch(/process\.env|process\.exit|console\.|\bfetch\s*\(/);
+    expect(validatorSource).not.toMatch(/lib\/(?:prisma|storage)|@aws-sdk|@prisma/);
+    expect(cliSource.match(/process\.env/g)).toHaveLength(1);
+    expect(cliSource).toContain("validateProductionEnv(process.env)");
   });
 });
