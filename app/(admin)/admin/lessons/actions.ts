@@ -237,7 +237,7 @@ const recurringSchema = z
       .string()
       .trim()
       .regex(/^\d{2}:\d{2}$/, "End time is required."),
-    timezone: z.string().trim().default("Africa/Nairobi"),
+    timezone: timezoneSchema,
     teacherId: optionalId,
     subjectId: optionalId,
     liveLessonUrl: z.string().trim(),
@@ -774,6 +774,7 @@ export async function updateLessonAction(formData: FormData): Promise<LessonActi
             {
               startAt: lessonInput.startAt,
               endAt: lessonInput.endAt,
+              timezone: lessonInput.timezone,
               teacherId: lessonInput.teacherId,
               liveLessonUrl: lessonInput.liveLessonUrl,
               ...meetingUpdate,
@@ -890,6 +891,7 @@ export async function rescheduleLessonAction(formData: FormData): Promise<Lesson
         {
           startAt: lessonInput.startAt,
           endAt: lessonInput.endAt,
+          timezone: lessonInput.timezone,
           teacherId: lessonInput.teacherId,
           liveLessonUrl: lessonInput.liveLessonUrl,
           ...meetingUpdate,

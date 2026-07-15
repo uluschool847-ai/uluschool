@@ -12,15 +12,19 @@ const MIGRATION_PATH = join(
 
 describe("Nairobi timezone data migration", () => {
   it("normalizes only legacy Kyiv timezone values for lessons and availability rules", () => {
-    const sql = readFileSync(MIGRATION_PATH, "utf8");
+    const sql = readFileSync(MIGRATION_PATH, "utf8").replace(/\r\n/g, "\n");
 
-    for (const table of ["ScheduledClass", "TeacherAvailabilityRule"]) {
-      expect(sql).toMatch(
-        new RegExp(
-          `UPDATE\\s+"${table}"[\\s\\S]*?SET\\s+"timezone"\\s*=\\s*'Africa/Nairobi'[\\s\\S]*?WHERE\\s+"timezone"\\s+IN\\s*\\(\\s*'Europe/Kiev'\\s*,\\s*'Europe/Kyiv'\\s*\\)`,
-          "i",
-        ),
-      );
-    }
+    expect(sql).toBe(
+      [
+        'UPDATE "ScheduledClass"',
+        "SET \"timezone\" = 'Africa/Nairobi'",
+        "WHERE \"timezone\" IN ('Europe/Kiev', 'Europe/Kyiv');",
+        "",
+        'UPDATE "TeacherAvailabilityRule"',
+        "SET \"timezone\" = 'Africa/Nairobi'",
+        "WHERE \"timezone\" IN ('Europe/Kiev', 'Europe/Kyiv');",
+        "",
+      ].join("\n"),
+    );
   });
 });

@@ -440,13 +440,22 @@ describe("Admin lesson actions", () => {
   });
 
   it("converts Africa/Nairobi datetime-local values to UTC before availability and persistence", async () => {
-    createLessonMock.mockResolvedValueOnce(lessonRecord());
+    const formData = lessonForm({
+      startAt: "2026-01-20T10:00",
+      endAt: "2026-01-20T11:00",
+    });
+    createLessonMock.mockResolvedValueOnce(
+      lessonRecord({
+        startAt: new Date("2026-01-20T07:00:00.000Z"),
+        endAt: new Date("2026-01-20T08:00:00.000Z"),
+      }),
+    );
 
     const { createLessonAction } = await loadLessonActions();
-    const result = await createLessonAction(lessonForm());
+    const result = await createLessonAction(formData);
 
-    const expectedStartAt = new Date("2026-06-01T07:00:00.000Z");
-    const expectedEndAt = new Date("2026-06-01T08:00:00.000Z");
+    const expectedStartAt = new Date("2026-01-20T07:00:00.000Z");
+    const expectedEndAt = new Date("2026-01-20T08:00:00.000Z");
     expect(checkTeacherAvailabilityMock).toHaveBeenCalledWith(
       {
         teacherId: "teacher-1",
@@ -464,6 +473,27 @@ describe("Admin lesson actions", () => {
       transactionClientMock,
     );
     expect(result.success).toBe(true);
+  });
+
+  it.each([
+    ["absolute Z timestamp", "2026-01-20T10:00:00Z"],
+    ["offset timestamp", "2026-01-20T10:00:00+03:00"],
+    ["impossible date", "2026-02-30T10:00"],
+    ["rollover hour", "2026-01-20T25:00"],
+  ])("rejects tampered datetime-local %s before opening a transaction", async (_label, startAt) => {
+    const { createLessonAction } = await loadLessonActions();
+
+    const result = await createLessonAction(lessonForm({ startAt }));
+
+    expect(result).toEqual({
+      success: false,
+      errors: {
+        startAt: expect.arrayContaining([expect.stringMatching(/date|valid/i)]),
+      },
+    });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(createLessonMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -559,9 +589,37 @@ describe("Admin lesson actions", () => {
     expect(result.success).toBe(true);
   });
 
+  it("passes the validated timezone when update intent reschedules a lesson", async () => {
+    const formData = lessonForm({
+      startAt: "2026-01-20T10:00",
+      endAt: "2026-01-20T11:00",
+      timezone: "Asia/Tokyo",
+    });
+    formData.set("intent", "reschedule");
+    rescheduleLessonMock.mockResolvedValueOnce({
+      ...lessonRecord({ status: "RESCHEDULED", timezone: "Asia/Tokyo" }),
+      before: lessonRecord(),
+      after: lessonRecord({ status: "RESCHEDULED", timezone: "Asia/Tokyo" }),
+    });
+
+    const { updateLessonAction } = await loadLessonActions();
+    const result = await updateLessonAction(formData);
+
+    expect(rescheduleLessonMock).toHaveBeenCalledWith(
+      "lesson-1",
+      expect.objectContaining({
+        startAt: new Date("2026-01-20T01:00:00.000Z"),
+        endAt: new Date("2026-01-20T02:00:00.000Z"),
+        timezone: "Asia/Tokyo",
+      }),
+      transactionClientMock,
+    );
+    expect(result.success).toBe(true);
+  });
+
   it("reschedules a lesson, writes LESSON_RESCHEDULED audit, and revalidates lesson routes", async () => {
-    const newStart = new Date("2026-06-08T07:00:00.000Z");
-    const newEnd = new Date("2026-06-08T08:00:00.000Z");
+    const newStart = new Date("2026-01-20T01:00:00.000Z");
+    const newEnd = new Date("2026-01-20T02:00:00.000Z");
     rescheduleLessonMock.mockResolvedValueOnce({
       ...lessonRecord({
         startAt: newStart,
@@ -580,7 +638,11 @@ describe("Admin lesson actions", () => {
 
     const { rescheduleLessonAction } = await loadLessonActions();
     const result = await rescheduleLessonAction(
-      lessonForm({ startAt: "2026-06-08T10:00", endAt: "2026-06-08T11:00" }),
+      lessonForm({
+        startAt: "2026-01-20T10:00",
+        endAt: "2026-01-20T11:00",
+        timezone: "Asia/Tokyo",
+      }),
     );
 
     expect(checkTeacherAvailabilityMock).toHaveBeenCalledWith(
@@ -594,7 +656,11 @@ describe("Admin lesson actions", () => {
     );
     expect(rescheduleLessonMock).toHaveBeenCalledWith(
       "lesson-1",
-      expect.objectContaining({ startAt: newStart, endAt: newEnd }),
+      expect.objectContaining({
+        startAt: newStart,
+        endAt: newEnd,
+        timezone: "Asia/Tokyo",
+      }),
       transactionClientMock,
     );
     expectLessonAudit("LESSON_RESCHEDULED");
@@ -849,6 +915,12 @@ describe("Admin lesson actions", () => {
     { field: "weekdays", value: null, errorKey: "weekdays", pattern: /weekday|required/i },
     { field: "endDate", value: "2026-05-01", errorKey: "endDate", pattern: /after|range/i },
     { field: "endTime", value: "09:00", errorKey: "endTime", pattern: /duration|after/i },
+    {
+      field: "timezone",
+      value: "Invalid/Timezone",
+      errorKey: "timezone",
+      pattern: /timezone|valid/i,
+    },
   ])(
     "validates recurring lesson generation for invalid $field",
     async ({ field, value, errorKey, pattern }) => {
@@ -866,6 +938,23 @@ describe("Admin lesson actions", () => {
       expect(createAdminAuditLogMock).not.toHaveBeenCalled();
     },
   );
+
+  it("normalizes a blank recurring timezone before persistence", async () => {
+    createRecurringLessonsMock.mockResolvedValueOnce({
+      createdCount: 1,
+      skippedCount: 0,
+      created: [lessonRecord()],
+    });
+
+    const { createRecurringLessonsAction } = await loadLessonActions();
+    const result = await createRecurringLessonsAction(recurringForm({ timezone: "" }));
+
+    expect(createRecurringLessonsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ timezone: "Africa/Nairobi" }),
+      transactionClientMock,
+    );
+    expect(result.success).toBe(true);
+  });
 
   it("creates recurring lessons, skips duplicate dates, and writes LESSON_BULK_CREATED audit", async () => {
     createRecurringLessonsMock.mockResolvedValueOnce({
