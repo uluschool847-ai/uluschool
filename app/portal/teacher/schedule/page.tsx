@@ -6,6 +6,7 @@ import {
   ActiveFilterSummary,
   TeacherLessonCard,
   TeacherScheduleFilters,
+  formatNairobiDate,
   getDateRange,
 } from "@/components/portal/teacher-schedule-display";
 import { requireRole } from "@/lib/auth/session";
@@ -56,7 +57,7 @@ export default async function TeacherSchedulePage({ searchParams }: TeacherSched
           <div>
             <h1 className="text-3xl font-bold">Teacher Schedule</h1>
             <p className="text-sm text-muted-foreground">
-              Lessons from {range.from.toLocaleDateString()} to {range.to.toLocaleDateString()}.
+              Lessons from {formatNairobiDate(range.from)} to {formatNairobiDate(range.to)}.
             </p>
           </div>
           <Link
