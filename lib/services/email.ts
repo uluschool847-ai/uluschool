@@ -1,7 +1,12 @@
 import nodemailer from "nodemailer";
 
 import { validateLiveLessonUrl } from "@/lib/lessons/live-lesson-url";
-import { escapeHtml, sanitizeEmailHeader } from "@/lib/security/escape-html";
+import {
+  escapeHtml,
+  parseEmailSender,
+  parseSingleMailbox,
+  sanitizeEmailSubject,
+} from "@/lib/security/escape-html";
 import type { ContactInput } from "@/lib/validations/contact";
 import type { EnrolmentInput } from "@/lib/validations/enrolment";
 
@@ -98,7 +103,7 @@ function buildEnrolmentMessage(payload: EnrolmentInput) {
     <p><strong>Additional Notes:</strong> ${safeAdditionalNotes}</p>
   `;
 
-  return { subject, text, html, replyTo: payload.email };
+  return { subject, text, html, to: getToAddress(), replyTo: payload.email };
 }
 
 function buildContactMessage(payload: ContactInput) {
@@ -116,7 +121,7 @@ function buildContactMessage(payload: ContactInput) {
   const safeEmail = escapeHtml(payload.email);
   const safePhoneWhatsapp = escapeHtml(payload.phoneWhatsapp || "N/A");
   const safeStudentGrade = escapeHtml(payload.studentGrade || "N/A");
-  const safeMessageHtml = escapeHtml(payload.message).replace(/\r?\n/g, "<br/>");
+  const safeMessageHtml = escapeHtml(payload.message).replace(/\r\n|\r|\n/g, "<br/>");
 
   const html = `
     <h2>New Contact Enquiry</h2>
@@ -127,13 +132,14 @@ function buildContactMessage(payload: ContactInput) {
     <p><strong>Message:</strong><br/>${safeMessageHtml}</p>
   `;
 
-  return { subject, text, html, replyTo: payload.email };
+  return { subject, text, html, to: getToAddress(), replyTo: payload.email };
 }
 
 async function sendWithRetry(message: {
   subject: string;
   text: string;
   html: string;
+  to: string;
   replyTo: string;
 }): Promise<EmailDeliveryResult> {
   const smtp = getSmtpConfig();
@@ -144,6 +150,13 @@ async function sendWithRetry(message: {
     return { delivered: false, reason: "SMTP_NOT_CONFIGURED", attempts: 0 };
   }
 
+  const from = parseEmailSender(getFromAddress());
+  const to = parseSingleMailbox(message.to);
+  const replyTo = parseSingleMailbox(message.replyTo);
+  if (!from || !to || !replyTo) {
+    return { delivered: false, reason: "SEND_FAILED", attempts: 0 };
+  }
+
   const transporter = nodemailer.createTransport(smtp);
   const maxAttempts = Number(process.env.SMTP_MAX_RETRIES ?? "3");
 
@@ -152,10 +165,10 @@ async function sendWithRetry(message: {
     attempts += 1;
     try {
       await transporter.sendMail({
-        from: sanitizeEmailHeader(getFromAddress()),
-        to: sanitizeEmailHeader(getToAddress()),
-        replyTo: sanitizeEmailHeader(message.replyTo),
-        subject: sanitizeEmailHeader(message.subject),
+        from,
+        to,
+        replyTo,
+        subject: sanitizeEmailSubject(message.subject),
         text: message.text,
         html: message.html,
       });
@@ -213,6 +226,7 @@ export async function sendClassReminderEmail(input: {
 
   return sendWithRetry({
     subject: `Class reminder: ${input.classTitle}`,
+    to: input.recipientEmail,
     replyTo: getToAddress(),
     text: [
       `Hello ${input.recipientName},`,
@@ -254,6 +268,7 @@ export async function sendAssignmentReminderEmail(input: {
 
   return sendWithRetry({
     subject: `Assignment overdue: ${input.assignmentTitle}`,
+    to: input.recipientEmail,
     replyTo: getToAddress(),
     text: [
       `Hello ${input.recipientName},`,

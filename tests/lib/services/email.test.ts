@@ -50,12 +50,18 @@ const SMTP_KEYS = [
 
 const HTML_PAYLOAD = `<img src=x onerror="alert(1)"> & Guardian`;
 const SCRIPT_MESSAGE = "First line\n<script>steal()</script>";
+const MIXED_NEWLINE_MESSAGE = "CRLF\r\nLone CR\rLone LF\n<script>steal()</script>";
 const HEADER_PAYLOAD = `Student\r\nBcc: attacker@example.com${"x".repeat(250)}`;
 
+type StructuredAddress = {
+  name: string;
+  address: string;
+};
+
 type SentMessage = {
-  from: string;
-  to: string;
-  replyTo: string;
+  from: StructuredAddress;
+  to: StructuredAddress;
+  replyTo: StructuredAddress;
   subject: string;
   text: string;
   html: string;
@@ -134,9 +140,12 @@ describe("lib/services/email.ts env handling", () => {
     expect(sendMailMock).toHaveBeenCalledTimes(1);
     expect(sendMailMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        from: "ULU Online School <no-reply@uluglobalacademy.com>",
-        to: "info@uluglobalacademy.com",
-        replyTo: ENROL_PAYLOAD.email,
+        from: {
+          name: "ULU Online School",
+          address: "no-reply@uluglobalacademy.com",
+        },
+        to: { name: "", address: "info@uluglobalacademy.com" },
+        replyTo: { name: "", address: ENROL_PAYLOAD.email },
       }),
     );
   });
@@ -216,16 +225,36 @@ describe("lib/services/email.ts env handling", () => {
     }
   });
 
+  it("logs exactly UnknownError without a sensitive non-Error rejection or payload", async () => {
+    configureSmtp();
+    process.env.SMTP_MAX_RETRIES = "1";
+    const sensitiveRejection = {
+      secret: "synthetic-private-rejection",
+      payload: CONTACT_PAYLOAD,
+    };
+    sendMailMock.mockRejectedValueOnce(sensitiveRejection);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const { sendContactEmail } = await import("../../../lib/services/email");
+    const result = await sendContactEmail(CONTACT_PAYLOAD);
+
+    expect(result).toEqual({ delivered: false, reason: "SEND_FAILED", attempts: 1 });
+    expect(errorSpy.mock.calls).toEqual([["Email delivery failed", { errorType: "UnknownError" }]]);
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    expect(logged).not.toContain(sensitiveRejection.secret);
+    expect(logged).not.toContain(CONTACT_PAYLOAD.email);
+    expect(logged).not.toContain(CONTACT_PAYLOAD.message);
+  });
+
   it("escapes every enrolment HTML field while preserving plain text", async () => {
     configureSmtp();
     const payload = {
       ...ENROL_PAYLOAD,
-      studentName: `${HEADER_PAYLOAD} ${HTML_PAYLOAD}`,
+      studentName: `${"😀".repeat(205)}\r\nBcc: attacker@example.com ${HTML_PAYLOAD}`,
       ageYearLevel: HTML_PAYLOAD,
       subjects: [HTML_PAYLOAD, "Math & Science"],
       curriculumLevel: HTML_PAYLOAD,
       parentGuardianName: HTML_PAYLOAD,
-      email: "guardian@example.com\r\nBcc: attacker@example.com",
       phoneWhatsapp: HTML_PAYLOAD,
       preferredSchedule: HTML_PAYLOAD,
       additionalNotes: SCRIPT_MESSAGE,
@@ -242,33 +271,35 @@ describe("lib/services/email.ts env handling", () => {
     expect(message.text).toContain(HTML_PAYLOAD);
     expect(message.text).toContain(SCRIPT_MESSAGE);
     expect(message.subject).not.toMatch(/[\r\n]/);
-    expect(message.subject.length).toBeLessThanOrEqual(200);
-    expect(message.replyTo).not.toMatch(/[\r\n]/);
-    expect(message.replyTo.length).toBeLessThanOrEqual(200);
+    expect(Array.from(message.subject)).toHaveLength(200);
+    expect(message.to).toEqual({ name: "", address: "info@uluglobalacademy.com" });
+    expect(message.replyTo).toEqual({ name: "", address: ENROL_PAYLOAD.email });
   });
 
-  it("escapes contact HTML before converting message newlines to breaks", async () => {
+  it("escapes contact HTML before converting CRLF, lone CR, and LF to one break each", async () => {
     configureSmtp();
     const payload = {
       ...CONTACT_PAYLOAD,
       fullName: `${HEADER_PAYLOAD} ${HTML_PAYLOAD}`,
-      email: "parent@example.com\r\nBcc: attacker@example.com",
       phoneWhatsapp: HTML_PAYLOAD,
       studentGrade: HTML_PAYLOAD,
-      message: SCRIPT_MESSAGE,
+      message: MIXED_NEWLINE_MESSAGE,
     };
 
     const { sendContactEmail } = await import("../../../lib/services/email");
     await sendContactEmail(payload);
 
     const message = sentMessage();
-    expect(message.html).toContain("First line<br/>&lt;script&gt;steal()&lt;/script&gt;");
+    expect(message.html).toContain(
+      "CRLF<br/>Lone CR<br/>Lone LF<br/>&lt;script&gt;steal()&lt;/script&gt;",
+    );
     expect(message.html).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt; &amp; Guardian");
     expect(message.html).not.toMatch(/<img|<script>/i);
-    expect(message.text).toContain(SCRIPT_MESSAGE);
+    expect(message.text).toContain(MIXED_NEWLINE_MESSAGE);
     expect(message.subject).not.toMatch(/[\r\n]/);
-    expect(message.subject.length).toBeLessThanOrEqual(200);
-    expect(message.replyTo).not.toMatch(/[\r\n]/);
+    expect(Array.from(message.subject).length).toBeLessThanOrEqual(200);
+    expect(message.to).toEqual({ name: "", address: "info@uluglobalacademy.com" });
+    expect(message.replyTo).toEqual({ name: "", address: CONTACT_PAYLOAD.email });
   });
 
   it("escapes class reminder names, titles, dates, and validated or fallback link content", async () => {
@@ -292,7 +323,12 @@ describe("lib/services/email.ts env handling", () => {
     expect(fallbackMessage.html).not.toMatch(/<img|<script>/i);
     expect(fallbackMessage.text).toContain(HTML_PAYLOAD);
     expect(fallbackMessage.subject).not.toMatch(/[\r\n]/);
-    expect(fallbackMessage.subject.length).toBeLessThanOrEqual(200);
+    expect(Array.from(fallbackMessage.subject).length).toBeLessThanOrEqual(200);
+    expect(fallbackMessage.to).toEqual({ name: "", address: "student@example.com" });
+    expect(fallbackMessage.replyTo).toEqual({
+      name: "",
+      address: "info@uluglobalacademy.com",
+    });
 
     await sendClassReminderEmail({
       recipientEmail: "student@example.com",
@@ -304,6 +340,7 @@ describe("lib/services/email.ts env handling", () => {
     });
 
     expect(sentMessage().html).toContain(`href="https://example.com/live?one=1&amp;two=2"`);
+    expect(sentMessage().to).toEqual({ name: "", address: "student@example.com" });
   });
 
   it("escapes assignment reminder names, titles, dates, and generated URL attributes", async () => {
@@ -326,21 +363,92 @@ describe("lib/services/email.ts env handling", () => {
     expect(message.text).toContain(HTML_PAYLOAD);
     expect(message.text).toContain("https://school.example.com/assignment?one=1&two=2");
     expect(message.subject).not.toMatch(/[\r\n]/);
-    expect(message.subject.length).toBeLessThanOrEqual(200);
+    expect(Array.from(message.subject).length).toBeLessThanOrEqual(200);
+    expect(message.to).toEqual({ name: "", address: "student@example.com" });
+    expect(message.replyTo).toEqual({
+      name: "",
+      address: "info@uluglobalacademy.com",
+    });
   });
 
-  it("sanitizes environment-backed mail headers before delivery", async () => {
+  it("uses structured sender and exact mailbox objects for configured valid addresses", async () => {
     configureSmtp();
-    process.env.SMTP_FROM = `ULU School\r\nBcc: attacker@example.com${"x".repeat(250)}`;
-    process.env.SCHOOL_INBOX_EMAIL = "inbox@example.com\nBcc: attacker@example.com";
+    process.env.SMTP_FROM = "Admissions Team <admissions@example.com>";
+    process.env.SCHOOL_INBOX_EMAIL = "inbox@example.com";
 
     const { sendContactEmail } = await import("../../../lib/services/email");
-    await sendContactEmail(CONTACT_PAYLOAD);
+    const result = await sendContactEmail(CONTACT_PAYLOAD);
 
+    expect(result).toEqual({ delivered: true, attempts: 1 });
     const message = sentMessage();
-    expect(message.from).not.toMatch(/[\r\n]/);
-    expect(message.from.length).toBeLessThanOrEqual(200);
-    expect(message.to).not.toMatch(/[\r\n]/);
-    expect(message.to.length).toBeLessThanOrEqual(200);
+    expect(message.from).toEqual({ name: "Admissions Team", address: "admissions@example.com" });
+    expect(message.to).toEqual({ name: "", address: "inbox@example.com" });
+    expect(message.replyTo).toEqual({ name: "", address: CONTACT_PAYLOAD.email });
+  });
+
+  it("fails closed without retrying or sending for every invalid dynamic mailbox caller", async () => {
+    configureSmtp();
+    const overLengthMailbox = `${"a".repeat(243)}@example.com`;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const {
+      sendAssignmentReminderEmail,
+      sendClassReminderEmail,
+      sendContactEmail,
+      sendEnquiryEmail,
+    } = await import("../../../lib/services/email");
+
+    const results = [
+      await sendEnquiryEmail({
+        ...ENROL_PAYLOAD,
+        email: "victim@example.com\r\nBcc: attacker@example.com",
+      }),
+      await sendContactEmail({ ...CONTACT_PAYLOAD, email: "" }),
+      await sendClassReminderEmail({
+        recipientEmail: "not-an-email",
+        recipientName: "Student",
+        classTitle: "Mathematics",
+        startAt: new Date("2026-07-15T08:00:00.000Z"),
+        endAt: new Date("2026-07-15T09:00:00.000Z"),
+        liveLessonUrl: "https://example.com/live",
+      }),
+      await sendAssignmentReminderEmail({
+        recipientEmail: overLengthMailbox,
+        recipientName: "Student",
+        assignmentTitle: "Algebra",
+        dueDate: new Date("2026-07-14T08:00:00.000Z"),
+        assignmentHref: "https://school.example.com/assignment",
+      }),
+    ];
+
+    expect(results).toEqual(
+      Array.from({ length: 4 }, () => ({
+        delivered: false,
+        reason: "SEND_FAILED",
+        attempts: 0,
+      })),
+    );
+    expect(createTransportMock).not.toHaveBeenCalled();
+    expect(sendMailMock).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for injected sender or school mailbox configuration", async () => {
+    configureSmtp();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { sendContactEmail } = await import("../../../lib/services/email");
+
+    process.env.SMTP_FROM =
+      "ULU Online School <no-reply@uluglobalacademy.com>\r\nBcc: attacker@example.com";
+    const senderResult = await sendContactEmail(CONTACT_PAYLOAD);
+
+    process.env.SMTP_FROM = "ULU Online School <no-reply@uluglobalacademy.com>";
+    process.env.SCHOOL_INBOX_EMAIL = "Staff: victim@example.com;";
+    const inboxResult = await sendContactEmail(CONTACT_PAYLOAD);
+
+    expect(senderResult).toEqual({ delivered: false, reason: "SEND_FAILED", attempts: 0 });
+    expect(inboxResult).toEqual({ delivered: false, reason: "SEND_FAILED", attempts: 0 });
+    expect(createTransportMock).not.toHaveBeenCalled();
+    expect(sendMailMock).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 });

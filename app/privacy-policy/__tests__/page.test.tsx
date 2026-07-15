@@ -72,4 +72,35 @@ describe("Privacy Policy", () => {
     );
     expect(document.body.textContent).toMatch(/configured email delivery provider/i);
   });
+
+  it.each([
+    { contact: "", processor: "" },
+    { contact: " \t ", processor: " \n " },
+  ])("uses nonblank fallbacks for blank privacy values %#", ({ contact, processor }) => {
+    process.env.PRIVACY_CONTACT_EMAIL = contact;
+    process.env.PRIVACY_EMAIL_PROCESSOR_NAME = processor;
+
+    render(<PrivacyPolicyPage />);
+
+    expect(screen.getByRole("link", { name: "info@uluglobalacademy.com" })).toHaveAttribute(
+      "href",
+      "mailto:info@uluglobalacademy.com",
+    );
+    expect(document.body.textContent).toMatch(/configured email delivery provider/i);
+    expect(document.querySelector('a[href="mailto:"]')).toBeNull();
+  });
+
+  it("trims configured privacy contact and processor disclosures", () => {
+    process.env.PRIVACY_CONTACT_EMAIL = "  privacy@example.com  ";
+    process.env.PRIVACY_EMAIL_PROCESSOR_NAME = "  Example Mail Provider  ";
+
+    render(<PrivacyPolicyPage />);
+
+    expect(screen.getByRole("link", { name: "privacy@example.com" })).toHaveAttribute(
+      "href",
+      "mailto:privacy@example.com",
+    );
+    expect(document.body.textContent).toContain("Example Mail Provider");
+    expect(document.body.textContent).not.toContain("  Example Mail Provider  ");
+  });
 });

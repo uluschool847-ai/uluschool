@@ -8,9 +8,9 @@ export const metadata: Metadata = {
 };
 
 export default function PrivacyPolicyPage() {
-  const privacyEmail = process.env.PRIVACY_CONTACT_EMAIL ?? "info@uluglobalacademy.com";
+  const privacyEmail = process.env.PRIVACY_CONTACT_EMAIL?.trim() || "info@uluglobalacademy.com";
   const emailProcessor =
-    process.env.PRIVACY_EMAIL_PROCESSOR_NAME ?? "the configured email delivery provider";
+    process.env.PRIVACY_EMAIL_PROCESSOR_NAME?.trim() || "the configured email delivery provider";
 
   return (
     <>
