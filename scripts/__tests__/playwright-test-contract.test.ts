@@ -1,17 +1,87 @@
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
+const RUNNER = join(ROOT, "scripts", "playwright-test.mjs");
+const CAPTURE_CLI = join(ROOT, "scripts", "__tests__", "fixtures", "playwright-cli-capture.mjs");
+const temporaryDirectories: string[] = [];
+
+type Capture = {
+  args: string[];
+  environment: Record<string, string | null>;
+};
+
+const hostileEnvironment = {
+  PLAYWRIGHT_BASE_URL: "http://hostile.example.test:4444",
+  PORT: "4444",
+  PLAYWRIGHT_REUSE_EXISTING_SERVER: "true",
+  PLAYWRIGHT_SERVER_COMMAND: "hostile-playwright-server",
+  E2E_PLAYWRIGHT_SERVER_COMMAND: "hostile-e2e-playwright-server",
+  STORAGE_DRIVER: "hostile-storage",
+};
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+function runRunner(
+  args: string[],
+  environment: Record<string, string> = {},
+): { capture: Capture; status: number | null } {
+  const directory = mkdtempSync(join(tmpdir(), "ulu-playwright-runner-"));
+  temporaryDirectories.push(directory);
+  const captureFile = join(directory, "capture.json");
+  const result = spawnSync(process.execPath, [RUNNER, ...args], {
+    cwd: directory,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ...hostileEnvironment,
+      ...environment,
+      NODE_ENV: "test",
+      PLAYWRIGHT_TEST_CAPTURE_FILE: captureFile,
+      PLAYWRIGHT_TEST_CLI: CAPTURE_CLI,
+    },
+  });
+
+  if (!existsSync(captureFile)) {
+    throw new Error(`Capture CLI did not run. stderr: ${result.stderr}`);
+  }
+
+  return {
+    capture: JSON.parse(readFileSync(captureFile, "utf8")) as Capture,
+    status: result.status,
+  };
+}
+
+function expectIsolatedServer(capture: Capture) {
+  const baseUrl = new URL(capture.environment.PLAYWRIGHT_BASE_URL ?? "");
+
+  expect(baseUrl.hostname).toBe("localhost");
+  expect(baseUrl.port).toMatch(/^\d+$/);
+  expect(baseUrl.port).not.toBe("4444");
+  expect(capture.environment.PORT).toBe(baseUrl.port);
+  expect(capture.environment.PLAYWRIGHT_REUSE_EXISTING_SERVER).toBe("false");
+  expect(capture.environment.PLAYWRIGHT_SERVER_COMMAND).toBeNull();
+}
+
+function expectWrapperFlagsRemoved(capture: Capture) {
+  expect(capture.args).not.toContain("--isolated-server");
+  expect(capture.args).not.toContain("--next-start");
+  expect(capture.args).not.toContain("--admin-2fa-partition");
+  expect(capture.args).not.toContain("--standard-partition");
+  expect(capture.args).not.toContain("--storage-partition");
+}
 
 function readPackageScripts() {
   return JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
     scripts: Record<string, string>;
   };
-}
-
-function readRunnerSource() {
-  return readFileSync(join(ROOT, "scripts", "playwright-test.mjs"), "utf8");
 }
 
 function readConfigSource() {
@@ -21,7 +91,6 @@ function readConfigSource() {
 describe("Playwright E2E partition contract", () => {
   it("runs the production release partitions with required admin 2FA isolated", () => {
     const scripts = readPackageScripts().scripts;
-    const runnerSource = readRunnerSource();
     const configSource = readConfigSource();
 
     expect(scripts["test:e2e"]).toBe(
@@ -38,17 +107,6 @@ describe("Playwright E2E partition contract", () => {
       "node scripts/playwright-test.mjs --isolated-server --admin-2fa-partition --next-start e2e/portals/initial-admin-2fa.spec.ts",
     );
     expect(scripts["test:e2e:focused"]).toBe("node scripts/playwright-test.mjs --isolated-server");
-    expect(runnerSource).toContain('["--admin-2fa-partition", "admin-2fa"],');
-    expect(runnerSource).toContain('partition === "admin-2fa"');
-    expect(runnerSource).toContain('"e2e/portals/admin-security.spec.ts"');
-    expect(runnerSource).toContain('"e2e/portals/initial-admin-2fa.spec.ts"');
-    expect(runnerSource).toContain(
-      'if (partition === "storage") process.env.STORAGE_DRIVER = "local";',
-    );
-    expect(runnerSource).toContain(
-      "process.env.ADMIN_REQUIRE_2FA = process.env.E2E_ADMIN_REQUIRE_2FA;",
-    );
-    expect(runnerSource).toContain("arg !== nextStartFlag && !partitionFlags.has(arg)");
     expect(configSource).toContain(
       "const adminTwoFactorSpecPattern = /(?:admin-security|initial-admin-2fa)\\.spec\\.ts$/;",
     );
@@ -60,5 +118,97 @@ describe("Playwright E2E partition contract", () => {
     );
     expect(configSource).toContain('ADMIN_REQUIRE_2FA: adminTwoFactorRequired ? "true" : "false",');
     expect(configSource).toContain('...(isStoragePartition ? { STORAGE_DRIVER: "local" } : {})');
+  });
+
+  it("normalizes an isolated admin-2fa child and forwards only Playwright arguments", () => {
+    const { capture, status } = runRunner(
+      [
+        "--isolated-server",
+        "--admin-2fa-partition",
+        "--next-start",
+        "e2e/portals/admin-security.spec.ts",
+        "--grep",
+        "TOTP",
+      ],
+      { ADMIN_REQUIRE_2FA: "false", E2E_ADMIN_REQUIRE_2FA: "false" },
+    );
+
+    expect(status).toBe(0);
+    expectIsolatedServer(capture);
+    expect(capture.environment).toMatchObject({
+      ADMIN_REQUIRE_2FA: "true",
+      E2E_ADMIN_REQUIRE_2FA: "true",
+      E2E_PARTITION: "admin-2fa",
+      E2E_PLAYWRIGHT_SERVER_COMMAND: "npx next start",
+    });
+    expect(capture.args).toEqual(["test", "e2e/portals/admin-security.spec.ts", "--grep", "TOTP"]);
+    expectWrapperFlagsRemoved(capture);
+  });
+
+  it("forces standard policy false while retaining the partition next-start command", () => {
+    const { capture, status } = runRunner(
+      ["--isolated-server", "--standard-partition", "--next-start", "--list"],
+      { ADMIN_REQUIRE_2FA: "true", E2E_ADMIN_REQUIRE_2FA: "true" },
+    );
+
+    expect(status).toBe(0);
+    expectIsolatedServer(capture);
+    expect(capture.environment).toMatchObject({
+      ADMIN_REQUIRE_2FA: "false",
+      E2E_ADMIN_REQUIRE_2FA: "false",
+      E2E_PARTITION: "standard",
+      E2E_PLAYWRIGHT_SERVER_COMMAND: "npx next start",
+    });
+    expect(capture.args).toEqual(["test", "--list"]);
+    expectWrapperFlagsRemoved(capture);
+  });
+
+  it("forces storage policy and local storage without retaining hostile server commands", () => {
+    const { capture, status } = runRunner(
+      ["--isolated-server", "--storage-partition", "e2e/portals/teacher-materials.spec.ts"],
+      { ADMIN_REQUIRE_2FA: "true", E2E_ADMIN_REQUIRE_2FA: "true" },
+    );
+
+    expect(status).toBe(0);
+    expectIsolatedServer(capture);
+    expect(capture.environment).toMatchObject({
+      ADMIN_REQUIRE_2FA: "false",
+      E2E_ADMIN_REQUIRE_2FA: "false",
+      E2E_PARTITION: "storage",
+      E2E_PLAYWRIGHT_SERVER_COMMAND: null,
+      STORAGE_DRIVER: "local",
+    });
+    expect(capture.args).toEqual(["test", "e2e/portals/teacher-materials.spec.ts"]);
+    expectWrapperFlagsRemoved(capture);
+  });
+
+  it.each(["e2e/portals/admin-security.spec.ts", "e2e/portals/initial-admin-2fa.spec.ts"])(
+    "infers required 2FA for the focused exact path %s",
+    (specPath) => {
+      const { capture, status } = runRunner(["--isolated-server", specPath, "--reporter=line"], {
+        ADMIN_REQUIRE_2FA: "false",
+        E2E_ADMIN_REQUIRE_2FA: "false",
+      });
+
+      expect(status).toBe(0);
+      expectIsolatedServer(capture);
+      expect(capture.environment).toMatchObject({
+        ADMIN_REQUIRE_2FA: "true",
+        E2E_ADMIN_REQUIRE_2FA: "true",
+        E2E_PARTITION: "focused",
+        E2E_PLAYWRIGHT_SERVER_COMMAND: null,
+      });
+      expect(capture.args).toEqual(["test", specPath, "--reporter=line"]);
+    },
+  );
+
+  it("propagates the Playwright child numeric exit code", () => {
+    const { capture, status } = runRunner(
+      ["--isolated-server", "--standard-partition", "--next-start"],
+      { PLAYWRIGHT_TEST_EXIT_CODE: "23" },
+    );
+
+    expect(capture.args).toEqual(["test"]);
+    expect(status).toBe(23);
   });
 });

@@ -149,7 +149,10 @@ process.env.E2E_PARTITION = partition;
 if (partition === "storage") process.env.STORAGE_DRIVER = "local";
 if (usesNextStart) process.env.E2E_PLAYWRIGHT_SERVER_COMMAND = "npx next start";
 
-const playwrightCli = path.resolve("node_modules", "@playwright", "test", "cli.js");
+const playwrightCli =
+  process.env.NODE_ENV === "test" && process.env.PLAYWRIGHT_TEST_CLI
+    ? path.resolve(process.env.PLAYWRIGHT_TEST_CLI)
+    : path.resolve("node_modules", "@playwright", "test", "cli.js");
 const child = spawn(process.execPath, [playwrightCli, "test", ...expandedArgs], {
   shell: false,
   stdio: "inherit",
