@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
 const RUNNER = join(ROOT, "scripts", "playwright-test.mjs");
+const RELEASE_REPORTER = join(ROOT, "scripts", "playwright-release-reporter.mjs");
 const SUBPROCESS_TEST_TIMEOUT_MS = 30_000;
 const temporaryDirectories: string[] = [];
 
@@ -13,6 +14,7 @@ type Capture = {
   args: string[];
   environment: Record<string, string | null>;
   matcherResults: Record<string, boolean>;
+  reporters: string[];
   retries: number;
   source: string;
   webServerEnvironment: Record<string, string | null>;
@@ -98,8 +100,11 @@ const matcherResults = Object.fromEntries(
     ignorePatterns.some((pattern) => pattern.test(filePath)),
   ]),
 );
+const reporters = (
+  Array.isArray(config.reporter) ? config.reporter : config.reporter ? [config.reporter] : []
+).map((reporter) => Array.isArray(reporter) ? reporter[0] : reporter);
 
-process.stdout.write(JSON.stringify({ matcherResults, retries: config.retries, webServerEnvironment }));
+process.stdout.write(JSON.stringify({ matcherResults, reporters, retries: config.retries, webServerEnvironment }));
 `,
   );
 
@@ -128,7 +133,7 @@ if (configCapture.status !== 0) {
   throw new Error("Unable to capture Playwright config: " + configCapture.stderr);
 }
 
-const { matcherResults, retries, webServerEnvironment } = JSON.parse(configCapture.stdout);
+const { matcherResults, reporters, retries, webServerEnvironment } = JSON.parse(configCapture.stdout);
 const environmentKeys = [
   "PLAYWRIGHT_BASE_URL",
   "PORT",
@@ -157,6 +162,7 @@ writeFileSync(
     args: process.argv.slice(2),
     environment: capturedEnvironment,
     matcherResults,
+    reporters,
     retries,
     webServerEnvironment,
   }),
@@ -229,7 +235,52 @@ function runProductionRunner(useExplicitHook: boolean) {
   return { captureFile, result };
 }
 
-function configFor(partition: "focused" | "standard" | "admin-2fa" | "signed-delivery" | "storage") {
+function runActualPlaywrightFixture(
+  source: string,
+  args: string[] = [],
+): { output: string; status: number | null } {
+  const directory = mkdtempSync(join(ROOT, ".playwright-release-contract-"));
+  temporaryDirectories.push(directory);
+  const configFile = join(directory, "playwright.config.mjs");
+  const specFile = join(directory, "release-gate.spec.mjs");
+
+  writeFileSync(
+    configFile,
+    `import { defineConfig } from "@playwright/test";
+
+export default defineConfig({
+  outputDir: "./results",
+  reporter: "line",
+  testDir: ".",
+  workers: 1,
+});
+`,
+  );
+  writeFileSync(specFile, source);
+
+  const result = spawnSync(
+    process.execPath,
+    [RUNNER, "--standard-partition", `--config=${configFile}`, ...args],
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        PW_TEST_REPORTER: "",
+      },
+    },
+  );
+
+  return {
+    output: `${result.stdout}\n${result.stderr}`,
+    status: result.status,
+  };
+}
+
+function configFor(
+  partition: "focused" | "standard" | "admin-2fa" | "signed-delivery" | "storage",
+) {
   const partitionFlags = {
     "admin-2fa": "--admin-2fa-partition",
     "signed-delivery": "--signed-delivery-partition",
@@ -237,7 +288,11 @@ function configFor(partition: "focused" | "standard" | "admin-2fa" | "signed-del
     storage: "--storage-partition",
   } as const;
   const { capture, status } = runRunner(
-    ["--isolated-server", ...(partition === "focused" ? [] : [partitionFlags[partition]]), "--list"],
+    [
+      "--isolated-server",
+      ...(partition === "focused" ? [] : [partitionFlags[partition]]),
+      "--list",
+    ],
     { E2E_PARTITION: partition },
   );
 
@@ -267,6 +322,10 @@ function expectWrapperFlagsRemoved(capture: Capture) {
   expect(capture.args.some((arg) => arg.startsWith("--test-playwright-cli="))).toBe(false);
 }
 
+function expectReleaseReporterArgs(capture: Capture, expectedArgs: string[]) {
+  expect(capture.args).toEqual([...expectedArgs, `--reporter=${RELEASE_REPORTER}`]);
+}
+
 function readPackageScripts() {
   return JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
     scripts: Record<string, string>;
@@ -279,10 +338,55 @@ function cliIt(name: string, callback: () => void) {
 
 describe("Playwright E2E partition contract", () => {
   cliIt("retries only focused browser tests", () => {
-    expect(configFor("focused").retries).toBe(1);
+    const focusedConfig = configFor("focused");
+    expect(focusedConfig.reporters).toEqual([]);
+    expect(focusedConfig.retries).toBe(1);
     for (const partition of ["standard", "admin-2fa", "signed-delivery", "storage"] as const) {
-      expect(configFor(partition).retries).toBe(0);
+      const releaseConfig = configFor(partition);
+      expect(releaseConfig.reporters).toEqual(["./scripts/playwright-release-reporter.mjs"]);
+      expect(releaseConfig.retries).toBe(0);
     }
+  });
+
+  cliIt("rejects a release run with an actual skipped Playwright result", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test.skip("controlled skipped release test", () => {});
+`,
+    );
+
+    expect(result.status, result.output).toBe(1);
+    expect(result.output).toContain("Release browser gate rejected");
+    expect(result.output).toContain("1 skipped");
+  });
+
+  cliIt("rejects a release run with an actual flaky retry result", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test("controlled flaky release test", ({}, testInfo) => {
+  if (testInfo.retry === 0) throw new Error("controlled first-attempt failure");
+});
+`,
+      ["--retries=1"],
+    );
+
+    expect(result.status, result.output).toBe(1);
+    expect(result.output).toContain("Release browser gate rejected");
+    expect(result.output).toContain("1 retried or flaky");
+  });
+
+  cliIt("accepts a release run with only passing non-retried Playwright results", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test("controlled passing release test", () => {});
+`,
+    );
+
+    expect(result.status, result.output).toBe(0);
+    expect(result.output).not.toContain("Release browser gate rejected");
   });
 
   it("runs the production release partitions with required admin 2FA isolated", () => {
@@ -377,7 +481,12 @@ describe("Playwright E2E partition contract", () => {
       E2E_PARTITION: "admin-2fa",
       E2E_PLAYWRIGHT_SERVER_COMMAND: "npx next start",
     });
-    expect(capture.args).toEqual(["test", "e2e/portals/admin-security.spec.ts", "--grep", "TOTP"]);
+    expectReleaseReporterArgs(capture, [
+      "test",
+      "e2e/portals/admin-security.spec.ts",
+      "--grep",
+      "TOTP",
+    ]);
     expectWrapperFlagsRemoved(capture);
   });
 
@@ -395,7 +504,7 @@ describe("Playwright E2E partition contract", () => {
       E2E_PARTITION: "standard",
       E2E_PLAYWRIGHT_SERVER_COMMAND: "npx next start",
     });
-    expect(capture.args).toEqual(["test", "--list"]);
+    expectReleaseReporterArgs(capture, ["test", "--list"]);
     expectWrapperFlagsRemoved(capture);
   });
 
@@ -414,7 +523,7 @@ describe("Playwright E2E partition contract", () => {
       E2E_PLAYWRIGHT_SERVER_COMMAND: null,
       STORAGE_DRIVER: "local",
     });
-    expect(capture.args).toEqual(["test", "e2e/portals/teacher-materials.spec.ts"]);
+    expectReleaseReporterArgs(capture, ["test", "e2e/portals/teacher-materials.spec.ts"]);
     expectWrapperFlagsRemoved(capture);
   });
 
@@ -438,7 +547,7 @@ describe("Playwright E2E partition contract", () => {
         ...signedDeliveryEnvironment,
       });
       expect(capture.webServerEnvironment).toMatchObject(signedDeliveryEnvironment);
-      expect(capture.args).toEqual(["test", "e2e/storage/signed-file-delivery.spec.ts"]);
+      expectReleaseReporterArgs(capture, ["test", "e2e/storage/signed-file-delivery.spec.ts"]);
       expectWrapperFlagsRemoved(capture);
     },
   );
@@ -472,8 +581,16 @@ describe("Playwright E2E partition contract", () => {
     );
 
     expectWrapperFlagsRemoved(capture);
-    expect(capture.args).toEqual(["test"]);
+    expectReleaseReporterArgs(capture, ["test"]);
     expect(status).toBe(23);
+  });
+
+  cliIt("preserves an explicit terminal reporter while enforcing the release reporter", () => {
+    const { capture, status } = runRunner(["--standard-partition", "--list", "--reporter=line"]);
+
+    expect(status).toBe(0);
+    expect(capture.args).toEqual(["test", "--list", `--reporter=line,${RELEASE_REPORTER}`]);
+    expectWrapperFlagsRemoved(capture);
   });
 
   cliIt("ignores hostile ambient CLI injection outside test mode", () => {

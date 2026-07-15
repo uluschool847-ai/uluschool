@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 function escapeRegExp(value) {
   return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
@@ -44,6 +45,33 @@ function expandArg(arg) {
     .sort();
 
   return matches.length > 0 ? matches : [arg];
+}
+
+function withReleaseReporter(args, reporterPath) {
+  const forwardedArgs = [];
+  let configuredReporters = "";
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--reporter") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("-")) {
+        throw new Error("--reporter requires a reporter value.");
+      }
+      configuredReporters = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--reporter=")) {
+      configuredReporters = arg.slice("--reporter=".length);
+      if (!configuredReporters) throw new Error("--reporter requires a reporter value.");
+      continue;
+    }
+    forwardedArgs.push(arg);
+  }
+
+  const reporters = configuredReporters ? `${configuredReporters},${reporterPath}` : reporterPath;
+  return [...forwardedArgs, `--reporter=${reporters}`];
 }
 
 function portFromBaseUrl(baseUrl) {
@@ -134,6 +162,10 @@ if (selectedPartitions.length > 1) {
 }
 
 const partition = selectedPartitions[0] ?? "focused";
+const releaseReporterPath = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "playwright-release-reporter.mjs",
+);
 const usesIsolatedServer = rawArgs.includes(isolatedServerFlag) || partition !== "focused";
 const usesNextStart = rawArgs.includes(nextStartFlag);
 const expandedArgs = rawArgs
@@ -187,7 +219,9 @@ if (usesNextStart) process.env.E2E_PLAYWRIGHT_SERVER_COMMAND = "npx next start";
 const playwrightCli = testPlaywrightCli
   ? path.resolve(testPlaywrightCli)
   : path.resolve("node_modules", "@playwright", "test", "cli.js");
-const child = spawn(process.execPath, [playwrightCli, "test", ...expandedArgs], {
+const playwrightArgs =
+  partition === "focused" ? expandedArgs : withReleaseReporter(expandedArgs, releaseReporterPath);
+const child = spawn(process.execPath, [playwrightCli, "test", ...playwrightArgs], {
   shell: false,
   stdio: "inherit",
 });
