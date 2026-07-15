@@ -14,6 +14,7 @@ import {
   setTeacherActive,
   updateTeacher,
 } from "@/lib/repositories/cms-repository";
+import { isStorageObjectReferenced } from "@/lib/repositories/storage-reference-repository";
 import {
   createStorageService,
   legacyStorageKeyFromUrl,
@@ -191,12 +192,13 @@ function persistedTeacherPhotoStorageKey(photoUrl: unknown) {
   }
 }
 
-async function deleteUploadedTeacherPhotoBestEffort(storageKey: string | undefined) {
+async function deleteTeacherPhotoStorageKeyBestEffort(storageKey: string | undefined) {
   if (!storageKey) return;
   try {
+    if (await isStorageObjectReferenced(storageKey)) return;
     await createStorageService().delete(storageKey);
   } catch {
-    // Rollback cleanup must not replace the audited transaction error.
+    // Cleanup must not replace an audited transaction error or a committed mutation.
   }
 }
 
@@ -304,7 +306,7 @@ export async function createTeacherAction(
         );
       });
     } catch (error) {
-      await deleteUploadedTeacherPhotoBestEffort(photoResult.uploadedStorageKey);
+      await deleteTeacherPhotoStorageKeyBestEffort(photoResult.uploadedStorageKey);
       throw error;
     }
     revalidateTeacherPages();
@@ -449,7 +451,7 @@ export async function updateTeacherAction(
         return teacherUpdateResult;
       });
     } catch (error) {
-      await deleteUploadedTeacherPhotoBestEffort(photoResult.uploadedStorageKey);
+      await deleteTeacherPhotoStorageKeyBestEffort(photoResult.uploadedStorageKey);
       throw error;
     }
 
@@ -461,13 +463,7 @@ export async function updateTeacherAction(
     const nextPhotoUrl = persistedResult?.after?.photoUrl;
     const cleanupKey =
       previousPhotoUrl !== nextPhotoUrl ? persistedTeacherPhotoStorageKey(previousPhotoUrl) : null;
-    if (cleanupKey) {
-      try {
-        await createStorageService().delete(cleanupKey);
-      } catch {
-        // Ignore local cleanup failures.
-      }
-    }
+    await deleteTeacherPhotoStorageKeyBestEffort(cleanupKey ?? undefined);
 
     revalidateTeacherPages();
   } catch (error) {
@@ -664,13 +660,7 @@ export async function deleteTeacherAction(
     const cleanupKey = persistedTeacherPhotoStorageKey(
       (deletedTeacher as { photoUrl?: unknown } | null)?.photoUrl,
     );
-    if (cleanupKey) {
-      try {
-        await createStorageService().delete(cleanupKey);
-      } catch {
-        // Persisted photo cleanup is post-commit and best-effort.
-      }
-    }
+    await deleteTeacherPhotoStorageKeyBestEffort(cleanupKey ?? undefined);
     revalidateTeacherPages();
   } catch (error) {
     if (flashMode && errorRedirect) {

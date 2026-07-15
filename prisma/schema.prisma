@@ -311,6 +311,7 @@ model AppUser {
   reportSnapshotsAsStudent ReportSnapshot[] @relation("ReportSnapshotStudent")
   reportSnapshotsAsTeacher ReportSnapshot[] @relation("ReportSnapshotTeacher")
   courseMaterials      CourseMaterial[]
+  pendingUploads       PendingUpload[]
   cabinetTeacher       Teacher?         @relation("TeacherCabinetAccess")
   aiDraftsCreated      AiDraft[]        @relation("AiDraftCreatedBy")
   aiDraftsReviewed     AiDraft[]        @relation("AiDraftReviewedBy")
@@ -753,6 +754,22 @@ model Attachment {
   @@index([submissionId])
   @@index([courseMaterialId])
   @@index([storageKey])
+}
+
+model PendingUpload {
+  id         String   @id @default(cuid())
+  ownerId    String
+  owner      AppUser  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  purpose    String
+  storageKey String   @unique
+  filename   String
+  mimeType   String
+  byteSize   Int
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([ownerId, purpose, expiresAt])
+  @@index([expiresAt])
 }
 
 model StudentProgress {

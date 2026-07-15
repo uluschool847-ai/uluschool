@@ -160,6 +160,17 @@ export function MaterialForm({
     setIsHydrated(true);
   }, []);
 
+  function releasePendingAttachment(pendingAttachment: UploadedAttachment | null) {
+    if (!pendingAttachment) return;
+
+    void fetch("/api/upload", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ storageKey: pendingAttachment.storageKey }),
+      keepalive: true,
+    }).catch(() => undefined);
+  }
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
@@ -211,6 +222,7 @@ export function MaterialForm({
   }
 
   function onFileChange(file: File | null) {
+    releasePendingAttachment(attachment);
     setSelectedFile(file);
     setAttachment(null);
     setUploadStatus("idle");
@@ -244,6 +256,8 @@ export function MaterialForm({
       setUploadError("Unsupported file type.");
       return;
     }
+    releasePendingAttachment(attachment);
+    setAttachment(null);
     setUploadStatus("uploading");
     setUploadError("");
 
@@ -309,6 +323,7 @@ export function MaterialForm({
           value={fileUrl}
           onChange={(event) => {
             setFileUrl(event.target.value);
+            releasePendingAttachment(attachment);
             setAttachment(null);
           }}
         />
@@ -379,7 +394,9 @@ export function MaterialForm({
             ? "Save changes"
             : "Create material"}
       </button>
-      <a href={cancelHref}>Cancel</a>
+      <a href={cancelHref} onClick={() => releasePendingAttachment(attachment)}>
+        Cancel
+      </a>
     </form>
   );
 }

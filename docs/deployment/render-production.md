@@ -170,6 +170,20 @@ After every first deployment or storage change, upload a disposable teacher mate
 as the authorized student and linked parent, trigger one Render redeploy, and download the same
 record again. Record the file record ID, deploy IDs, and result, then remove the disposable record.
 
+## Scheduled automation and pending-upload cleanup
+
+Create one Render Cron Job for each environment. Schedule it every ten minutes with
+`*/10 * * * *` and invoke the matching web-service origin at `GET /api/cron/automation` with the
+header `Authorization: Bearer <CRON_SECRET>`. Keep `CRON_SECRET` private to the environment; never
+place it in a URL, shell history, repository file, screenshot, or public scheduler configuration.
+
+The route runs the existing rule-based automation and a bounded expired pending-upload sweep on
+every successful invocation. Each sweep claims records before deleting objects and processes a
+small batch, so an outage or backlog drains over later runs without a broad unbounded storage
+operation. Alert on any non-2xx job result and investigate through Render logs without printing
+the authorization header or object URLs. Do not use a public, unauthenticated health check as a
+substitute for this job.
+
 ## Deploy and service verification
 
 1. Confirm the GitHub commit and environment-specific resources before clicking deploy.

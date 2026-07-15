@@ -161,6 +161,11 @@ test.describe("Teacher course materials portal", () => {
       mimeType: "application/pdf",
       buffer: createTinyPdf(),
     };
+    const supersededFile = {
+      name: "worksheet-superseded.pdf",
+      mimeType: "application/pdf",
+      buffer: createTinyPdf(),
+    };
     const replacementFile = {
       name: "worksheet-replacement.pdf",
       mimeType: "application/pdf",
@@ -201,21 +206,40 @@ test.describe("Teacher course materials portal", () => {
       0,
     );
 
+    const [releaseResponse] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "DELETE" && response.url().includes("/api/upload"),
+      ),
+      page.getByLabel(/upload file|file upload|choose file/i).setInputFiles(supersededFile),
+    ]);
+    expect(releaseResponse.status()).toBe(200);
+
+    const [supersededUploadResponse] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" && response.url().includes("/api/upload"),
+      ),
+      page.getByRole("button", { name: /^(upload|retry upload|replace upload)$/i }).click(),
+    ]);
+    expect(supersededUploadResponse.status()).toBe(201);
+    await expect(page.getByText(supersededFile.name).first()).toBeVisible();
+
     await Promise.all([
       page.waitForURL(/\/portal\/teacher\/materials\?updated=/, { timeout: 30_000 }),
       page.getByRole("button", { name: /create material/i }).click(),
     ]);
-    await expect(page.getByRole("link", { name: /view worksheet-upload\.pdf/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /view worksheet-superseded\.pdf/i })).toBeVisible();
 
     const uploadedCard = page.locator("article").filter({ hasText: uploadedTitle });
     const uploadedFileLink = uploadedCard.getByRole("link", {
-      name: /view file|worksheet-upload\.pdf/i,
+      name: /view file|worksheet-superseded\.pdf/i,
     });
     await expect(uploadedFileLink).toBeVisible();
     const uploadedHref = await uploadedFileLink.getAttribute("href");
     expect(uploadedHref).toMatch(/^\/api\/files\/[A-Za-z0-9_-]+$/);
     expect(storageKeyFromUrl(uploadedHref ?? "")).toMatch(
-      new RegExp(`^private/teachers/${fixture.teacherId}/materials/.+-worksheet-upload\\.pdf$`),
+      new RegExp(`^private/teachers/${fixture.teacherId}/materials/.+-worksheet-superseded\\.pdf$`),
     );
     const uploadedEditHref = await uploadedCard
       .getByRole("link", { name: /edit/i })

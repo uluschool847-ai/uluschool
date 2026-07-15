@@ -1,7 +1,13 @@
 import { UserRole } from "@prisma/client";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { getSession } from "@/lib/auth/session";
+import {
+  consumePendingUploadRequestRateLimit,
+  releasePendingUpload,
+  reservePendingUpload,
+} from "@/lib/repositories/pending-upload-repository";
 import {
   createStorageService,
   publicTeacherPhotoNamespace,
@@ -13,6 +19,10 @@ import { UploadValidationError, validateUploadMetadata } from "@/lib/storage/upl
 export const MAX_UPLOAD_FILE_COUNT = 10;
 export const MAX_UPLOAD_AGGREGATE_BYTES = 20 * 1024 * 1024;
 export const MAX_UPLOAD_REQUEST_BYTES = 21 * 1024 * 1024;
+
+const cancelUploadSchema = z.object({
+  storageKey: z.string().trim().min(1).max(1024),
+});
 
 function filenameFromStorageKey(storageKey: string) {
   return sanitizeStorageFilename(storageKey.split(/[\\/]+/).at(-1) ?? "file");
@@ -114,6 +124,54 @@ function uploadSuccessPayload(input: {
   };
 }
 
+async function reserveCompletedUpload(input: {
+  file: FileLike;
+  ownerId: string;
+  purpose: "course-material" | "teacher-photo";
+  service: ReturnType<typeof createStorageService>;
+  storageKey: string;
+}) {
+  const filename = responseFilename(input.file, input.storageKey);
+
+  try {
+    await reservePendingUpload({
+      ownerId: input.ownerId,
+      purpose: input.purpose,
+      storage: input.service,
+      storageKey: input.storageKey,
+      filename,
+      mimeType: input.file.type,
+      byteSize: input.file.size,
+    });
+  } catch (error) {
+    try {
+      await input.service.delete(input.storageKey);
+    } catch {
+      // No reservation exists, so no durable cleanup retry can be scheduled here.
+    }
+
+    throw error;
+  }
+
+  return filename;
+}
+
+async function releaseUploadAfterResponseFailure(input: {
+  ownerId: string;
+  service: ReturnType<typeof createStorageService>;
+  storageKey: string;
+}) {
+  try {
+    await releasePendingUpload({
+      ownerId: input.ownerId,
+      storage: input.service,
+      storageKey: input.storageKey,
+    });
+  } catch {
+    // The reservation remains available for the expired-upload sweeper.
+  }
+}
+
 export async function POST(request: Request) {
   const session = await getSession();
   if (!session) {
@@ -145,6 +203,14 @@ export async function POST(request: Request) {
       { success: false, error: "Upload purpose is not allowed" },
       { status: 403 },
     );
+  }
+  const reservationPurpose =
+    purpose === "teacher-photo" ? ("teacher-photo" as const) : ("course-material" as const);
+
+  try {
+    consumePendingUploadRequestRateLimit(session.uid);
+  } catch {
+    return NextResponse.json({ success: false, error: "Upload failed" }, { status: 429 });
   }
 
   const namespace =
@@ -202,12 +268,29 @@ export async function POST(request: Request) {
         namespace,
         contentType: current.type,
       });
-      const url = service.getURL(fileId);
+      const filename = await reserveCompletedUpload({
+        file: current,
+        ownerId: session.uid,
+        purpose: reservationPurpose,
+        service,
+        storageKey: fileId,
+      });
+      let url: string;
+      try {
+        url = service.getURL(fileId);
+      } catch (error) {
+        await releaseUploadAfterResponseFailure({
+          ownerId: session.uid,
+          service,
+          storageKey: fileId,
+        });
+        throw error;
+      }
       return NextResponse.json(
         uploadSuccessPayload({
           storageKey: fileId,
           publicUrl: url,
-          filename: responseFilename(current, fileId),
+          filename,
           mimeType: current.type,
           size: current.size,
         }),
@@ -242,16 +325,33 @@ export async function POST(request: Request) {
         namespace,
         contentType: current.type,
       });
-      const url = service.getURL(fileId);
+      const filename = await reserveCompletedUpload({
+        file: current,
+        ownerId: session.uid,
+        purpose: reservationPurpose,
+        service,
+        storageKey: fileId,
+      });
+      let url: string;
+      try {
+        url = service.getURL(fileId);
+      } catch (error) {
+        await releaseUploadAfterResponseFailure({
+          ownerId: session.uid,
+          service,
+          storageKey: fileId,
+        });
+        throw error;
+      }
       uploaded.push({
         fileId,
         storageKey: fileId,
         url,
         publicUrl: url,
-        filename: responseFilename(current, fileId),
+        filename,
         mimeType: current.type,
         size: current.size,
-        name: responseFilename(current, fileId),
+        name: filename,
       });
     } catch (error) {
       failed.push({
@@ -273,4 +373,34 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ success: true, uploaded }, { status: 201 });
+}
+
+export async function DELETE(request: Request) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (session.role !== UserRole.ADMIN && session.role !== UserRole.TEACHER) {
+    return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
+  }
+
+  let input: z.infer<typeof cancelUploadSchema>;
+  try {
+    input = cancelUploadSchema.parse(await request.json());
+  } catch {
+    return NextResponse.json({ success: false, error: "Upload failed" }, { status: 400 });
+  }
+
+  try {
+    const service = createStorageService();
+    await releasePendingUpload({
+      ownerId: session.uid,
+      storage: service,
+      storageKey: input.storageKey,
+    });
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json({ success: false, error: "Upload failed" }, { status: 500 });
+  }
 }

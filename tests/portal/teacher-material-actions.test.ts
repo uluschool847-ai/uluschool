@@ -25,6 +25,8 @@ const legacyUpdateCourseMaterialMock = vi.hoisted(() => vi.fn());
 const legacyDeleteCourseMaterialMock = vi.hoisted(() => vi.fn());
 const revalidatePathMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
+const releasePendingUploadMock = vi.hoisted(() => vi.fn());
+const isStorageObjectReferencedMock = vi.hoisted(() => vi.fn());
 const storageDeleteMock = vi.hoisted(() => vi.fn());
 const transactionClientMock = vi.hoisted(() => ({ transaction: "material-write" }));
 const prismaMock = vi.hoisted(() => ({
@@ -68,6 +70,14 @@ vi.mock("@/lib/repositories/portal-repository", () => ({
 
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   createAdminAuditLog: createAdminAuditLogMock,
+}));
+
+vi.mock("@/lib/repositories/pending-upload-repository", () => ({
+  releasePendingUpload: releasePendingUploadMock,
+}));
+
+vi.mock("@/lib/repositories/storage-reference-repository", () => ({
+  isStorageObjectReferenced: isStorageObjectReferencedMock,
 }));
 
 vi.mock("next/cache", () => ({
@@ -188,6 +198,8 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
         callback(transactionClientMock),
     );
     createAdminAuditLogMock.mockResolvedValue(undefined);
+    releasePendingUploadMock.mockResolvedValue({ claimed: true, deleted: true });
+    isStorageObjectReferencedMock.mockResolvedValue(false);
     createCourseMaterialForTeacherMock.mockResolvedValue(material());
     updateCourseMaterialForTeacherMock.mockResolvedValue(
       material({ title: validMaterialUpdate.title, ...validMaterialUpdate }),
@@ -427,6 +439,12 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
         createAdminAuditLogMock.mock.calls.every((call) => call[1] === transactionClientMock),
       ).toBe(true);
       expect(revalidatePathMock).not.toHaveBeenCalled();
+      expect(releasePendingUploadMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ownerId: "teacher-123",
+          storageKey,
+        }),
+      );
     });
 
     it("attempts storage deletion only once for a duplicated orphan cleanup key", async () => {

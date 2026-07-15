@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const submitCourseMaterialActionMock = vi.hoisted(() => vi.fn());
@@ -339,6 +339,50 @@ describe("MaterialForm", () => {
         },
       }),
     );
+  });
+
+  it("releases a superseded pending upload before selecting a replacement", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          success: true,
+          storageKey: uploadedStorageKey,
+          publicUrl: uploadedPublicUrl,
+          filename: "worksheet.pdf",
+          mimeType: "application/pdf",
+          size: 5,
+        }),
+        { status: 201, headers: { "content-type": "application/json" } },
+      ),
+    );
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MaterialForm mode="create" lessons={lessons} />);
+    const fileInput = screen.getByLabelText(/upload file|file upload|choose file/i);
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["first"], "worksheet.pdf", { type: "application/pdf" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    expect(await screen.findByText(/uploaded|upload complete/i)).toBeDefined();
+
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["second"], "replacement.pdf", { type: "application/pdf" })] },
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenLastCalledWith(
+        "/api/upload",
+        expect.objectContaining({
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ storageKey: uploadedStorageKey }),
+          keepalive: true,
+        }),
+      );
+    });
   });
 
   it("submits an opaque private application URL returned by the upload route", async () => {

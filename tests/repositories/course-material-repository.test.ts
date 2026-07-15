@@ -25,6 +25,8 @@ const prismaMock = vi.hoisted(() => ({
 }));
 
 const storageDeleteMock = vi.hoisted(() => vi.fn());
+const finalizePendingUploadsMock = vi.hoisted(() => vi.fn());
+const findUnreferencedStorageKeysMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/prisma", () => ({
   prisma: prismaMock,
@@ -36,8 +38,19 @@ vi.mock("@/lib/storage", () => ({
   }),
 }));
 
+vi.mock("@/lib/repositories/pending-upload-repository", () => ({
+  finalizePendingUploads: finalizePendingUploadsMock,
+}));
+
+vi.mock("@/lib/repositories/storage-reference-repository", () => ({
+  findUnreferencedStorageKeys: findUnreferencedStorageKeysMock,
+}));
+
 type CourseMaterialRepositoryModule = {
-  createCourseMaterialForTeacher: (input: Record<string, unknown>) => Promise<unknown>;
+  createCourseMaterialForTeacher: (
+    input: Record<string, unknown>,
+    database?: unknown,
+  ) => Promise<unknown>;
   updateCourseMaterialForTeacher: (
     id: string,
     teacherId: string,
@@ -102,6 +115,10 @@ describe("course-material-repository teacher ownership contract", () => {
     vi.resetAllMocks();
     prismaMock.attachment.findMany.mockResolvedValue([]);
     prismaMock.courseMaterial.findUnique.mockResolvedValue(material());
+    finalizePendingUploadsMock.mockResolvedValue(undefined);
+    findUnreferencedStorageKeysMock.mockImplementation(async (storageKeys: string[]) => [
+      ...new Set(storageKeys),
+    ]);
   });
 
   it("exports the dedicated Course Materials repository API", async () => {
@@ -173,6 +190,52 @@ describe("course-material-repository teacher ownership contract", () => {
     );
     expect(JSON.stringify(prismaMock.courseMaterial.create.mock.calls[0][0])).not.toContain(
       "teacher-2",
+    );
+  });
+
+  it("finalizes exact pending attachment metadata through the supplied material transaction", async () => {
+    const storageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-algebra.pdf";
+    prismaMock.scheduledClass.findFirst.mockResolvedValueOnce({
+      id: "lesson-1",
+      teacherId: "teacher-1",
+      classGroup: null,
+    });
+    prismaMock.courseMaterial.create.mockResolvedValueOnce(material());
+    const attachment = {
+      filename: "algebra.pdf",
+      storageKey,
+      mimeType: "application/pdf",
+      size: 128,
+    };
+
+    const { createCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+    await createCourseMaterialForTeacher(
+      {
+        ...createInput,
+        fileUrl: storageUrlForKey(storageKey),
+        attachments: [attachment],
+      },
+      prismaMock,
+    );
+
+    expect(finalizePendingUploadsMock).toHaveBeenCalledWith(
+      {
+        ownerId: "teacher-1",
+        purpose: "course-material",
+        uploads: [
+          {
+            storageKey,
+            filename: "algebra.pdf",
+            mimeType: "application/pdf",
+            byteSize: 128,
+          },
+        ],
+      },
+      prismaMock,
+    );
+    expect(finalizePendingUploadsMock.mock.invocationCallOrder[0]).toBeLessThan(
+      prismaMock.courseMaterial.create.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
   });
 
@@ -418,15 +481,12 @@ describe("course-material-repository teacher ownership contract", () => {
       material({ attachments: [{ id: "attachment-1", storageKey }] }),
     );
     prismaMock.courseMaterial.delete.mockResolvedValueOnce(material());
-    prismaMock.attachment.findMany.mockResolvedValueOnce([{ storageKey }]);
+    findUnreferencedStorageKeysMock.mockResolvedValueOnce([]);
     const { deleteCourseMaterialForTeacher } = await loadCourseMaterialRepository();
 
     const result = await deleteCourseMaterialForTeacher("material-1", "teacher-1");
 
-    expect(prismaMock.attachment.findMany).toHaveBeenCalledWith({
-      where: { storageKey: { in: [storageKey] } },
-      select: { storageKey: true },
-    });
+    expect(findUnreferencedStorageKeysMock).toHaveBeenCalledWith([storageKey], prismaMock);
     expect(result).toEqual(
       expect.objectContaining({
         cleanup: expect.objectContaining({ queued: false, storageKeys: [] }),
@@ -449,10 +509,10 @@ describe("course-material-repository teacher ownership contract", () => {
 
     const result = await deleteCourseMaterialForTeacher("material-1", "teacher-1");
 
-    expect(prismaMock.attachment.findMany).toHaveBeenCalledWith({
-      where: { storageKey: { in: [storageKey] } },
-      select: { storageKey: true },
-    });
+    expect(findUnreferencedStorageKeysMock).toHaveBeenCalledWith(
+      [storageKey, storageKey],
+      prismaMock,
+    );
     expect(result).toEqual(
       expect.objectContaining({
         cleanup: expect.objectContaining({ queued: true, storageKeys: [storageKey] }),
@@ -965,6 +1025,7 @@ describe("course-material-repository teacher ownership contract", () => {
     prismaMock.courseMaterial.findUnique.mockResolvedValueOnce(
       material({ attachments: [newAttachment] }),
     );
+    findUnreferencedStorageKeysMock.mockResolvedValueOnce([]);
     const { updateCourseMaterialForTeacher } = await loadCourseMaterialRepository();
 
     const result = await updateCourseMaterialForTeacher("material-1", "teacher-1", {
@@ -1085,7 +1146,7 @@ describe("course-material-repository teacher ownership contract", () => {
     });
     prismaMock.attachment.delete.mockResolvedValueOnce({ id: "attachment-1", storageKey });
     prismaMock.courseMaterial.findUnique.mockResolvedValueOnce(material({ attachments: [] }));
-    prismaMock.attachment.findMany.mockResolvedValueOnce([{ storageKey }]);
+    findUnreferencedStorageKeysMock.mockResolvedValueOnce([]);
     const { unlinkCourseMaterialAttachmentForTeacher } = await loadCourseMaterialRepository();
 
     const result = await unlinkCourseMaterialAttachmentForTeacher(
@@ -1122,10 +1183,7 @@ describe("course-material-repository teacher ownership contract", () => {
       "attachment-1",
     );
 
-    expect(prismaMock.attachment.findMany).toHaveBeenCalledWith({
-      where: { storageKey: { in: [storageKey] } },
-      select: { storageKey: true },
-    });
+    expect(findUnreferencedStorageKeysMock).toHaveBeenCalledWith([storageKey], prismaMock);
     expect(result).toEqual(
       expect.objectContaining({
         cleanup: expect.objectContaining({ queued: true, storageKeys: [storageKey] }),

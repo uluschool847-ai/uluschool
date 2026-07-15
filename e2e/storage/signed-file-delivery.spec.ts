@@ -20,6 +20,9 @@ const bucket = "s4-private-files";
 
 const keys = {
   material: `private/teachers/${id("teacher")}/materials/material.pdf`,
+  report: `private/teachers/${id("teacher")}/reports/report.pdf`,
+  submission: `private/students/${id("student")}/submissions/submission.pdf`,
+  unreferenced: `private/teachers/${id("teacher")}/materials/unreferenced.pdf`,
   photo: `public/teachers/${id("admin")}/active.webp`,
   inactivePhoto: `public/teachers/${id("admin")}/inactive.webp`,
 };
@@ -74,11 +77,21 @@ suite("signed file delivery composition", () => {
     try {
       await prisma.appUser.createMany({
         data: [
+          user(id("admin"), UserRole.ADMIN),
           user(id("teacher"), UserRole.TEACHER),
           user(id("other-teacher"), UserRole.TEACHER),
           user(id("student"), UserRole.STUDENT),
           user(id("other-student"), UserRole.STUDENT),
         ],
+      });
+      await prisma.appUser.create({
+        data: {
+          ...user(id("parent"), UserRole.PARENT),
+          children: { connect: { id: id("student") } },
+        },
+      });
+      await prisma.appUser.create({
+        data: user(id("other-parent"), UserRole.PARENT),
       });
       await prisma.classGroup.create({
         data: {
@@ -116,6 +129,52 @@ suite("signed file delivery composition", () => {
           },
         },
       });
+      await prisma.academicTerm.create({
+        data: {
+          id: id("term"),
+          name: "S4 signed delivery term",
+          startDate: new Date("2026-01-01T00:00:00.000Z"),
+          endDate: new Date("2026-12-31T00:00:00.000Z"),
+        },
+      });
+      await prisma.reportSnapshot.create({
+        data: {
+          id: id("report"),
+          studentId: id("student"),
+          classGroupId: id("group"),
+          academicTermId: id("term"),
+          generatedByTeacherId: id("teacher"),
+          snapshotData: { source: "signed-delivery-e2e" },
+          pdfStorageKey: keys.report,
+        },
+      });
+      await prisma.assignment.create({
+        data: {
+          id: id("assignment"),
+          title: "S4 signed delivery assignment",
+          description: "S4 signed delivery assignment description",
+          dueDate: new Date("2026-07-20T12:00:00.000Z"),
+          scheduledClassId: id("class"),
+          teacherId: id("teacher"),
+        },
+      });
+      await prisma.submission.create({
+        data: {
+          id: id("submission"),
+          studentId: id("student"),
+          assignmentId: id("assignment"),
+          contentUrl: storageUrlForKey(keys.submission),
+          attachments: {
+            create: {
+              id: id("submission-attachment"),
+              filename: "submission.pdf",
+              storageKey: keys.submission,
+              mimeType: "application/pdf",
+              size: 20,
+            },
+          },
+        },
+      });
       await prisma.teacher.createMany({
         data: [
           {
@@ -137,18 +196,31 @@ suite("signed file delivery composition", () => {
         ],
       });
 
-      for (const [userId, role, expectedStatus] of [
-        [id("teacher"), UserRole.TEACHER, 302],
-        [id("other-teacher"), UserRole.TEACHER, 404],
-        [id("student"), UserRole.STUDENT, 302],
-        [id("other-student"), UserRole.STUDENT, 404],
+      for (const [userId, role, storageKey, expectedStatus] of [
+        [id("teacher"), UserRole.TEACHER, keys.material, 302],
+        [id("other-teacher"), UserRole.TEACHER, keys.material, 404],
+        [id("student"), UserRole.STUDENT, keys.material, 302],
+        [id("other-student"), UserRole.STUDENT, keys.material, 404],
+        [id("parent"), UserRole.PARENT, keys.material, 302],
+        [id("other-parent"), UserRole.PARENT, keys.material, 404],
+        [id("admin"), UserRole.ADMIN, keys.material, 302],
+        [id("admin"), UserRole.ADMIN, keys.unreferenced, 404],
+        [id("teacher"), UserRole.TEACHER, keys.report, 302],
+        [id("student"), UserRole.STUDENT, keys.report, 302],
+        [id("parent"), UserRole.PARENT, keys.report, 302],
+        [id("other-parent"), UserRole.PARENT, keys.report, 404],
+        [id("admin"), UserRole.ADMIN, keys.report, 302],
+        [id("teacher"), UserRole.TEACHER, keys.submission, 302],
+        [id("student"), UserRole.STUDENT, keys.submission, 302],
+        [id("parent"), UserRole.PARENT, keys.submission, 302],
+        [id("other-parent"), UserRole.PARENT, keys.submission, 404],
       ] as const) {
         const context = await playwrightRequest.newContext({
           baseURL,
           extraHTTPHeaders: { Cookie: await sessionCookie(userId, role) },
         });
         contexts.push(context);
-        const response = await context.get(storageUrlForKey(keys.material), { maxRedirects: 0 });
+        const response = await context.get(storageUrlForKey(storageKey), { maxRedirects: 0 });
         expect(response.status()).toBe(expectedStatus);
         expectNoStore(response.headers());
         if (expectedStatus === 302) {
@@ -174,7 +246,11 @@ suite("signed file delivery composition", () => {
       const fixtureIds = { startsWith: `s4-${runId}-` };
       await prisma.teacher.deleteMany({ where: { id: fixtureIds } });
       await prisma.attachment.deleteMany({ where: { id: fixtureIds } });
+      await prisma.submission.deleteMany({ where: { id: fixtureIds } });
+      await prisma.assignment.deleteMany({ where: { id: fixtureIds } });
       await prisma.courseMaterial.deleteMany({ where: { id: fixtureIds } });
+      await prisma.reportSnapshot.deleteMany({ where: { id: fixtureIds } });
+      await prisma.academicTerm.deleteMany({ where: { id: fixtureIds } });
       await prisma.scheduledClass.deleteMany({ where: { id: fixtureIds } });
       await prisma.classGroup.deleteMany({ where: { id: fixtureIds } });
       await prisma.appUser.deleteMany({ where: { id: fixtureIds } });

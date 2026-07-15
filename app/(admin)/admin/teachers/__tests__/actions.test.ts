@@ -14,6 +14,7 @@ const storageUploadMock = vi.hoisted(() => vi.fn());
 const storageDeleteMock = vi.hoisted(() => vi.fn());
 const storageGetUrlMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
+const isStorageObjectReferencedMock = vi.hoisted(() => vi.fn());
 const transactionClientMock = vi.hoisted(() => ({ tx: true }));
 const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(async (callback: (tx: unknown) => unknown) =>
@@ -41,6 +42,10 @@ vi.mock("@/lib/repositories/cms-repository", () => ({
 
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   createAdminAuditLog: createAdminAuditLogMock,
+}));
+
+vi.mock("@/lib/repositories/storage-reference-repository", () => ({
+  isStorageObjectReferenced: isStorageObjectReferencedMock,
 }));
 
 vi.mock("next/cache", () => ({
@@ -151,6 +156,7 @@ describe("Admin teacher profile actions", () => {
     storageUploadMock.mockReset();
     storageDeleteMock.mockReset();
     storageGetUrlMock.mockImplementation((key: string) => storageUrlForKey(key));
+    isStorageObjectReferencedMock.mockResolvedValue(false);
   });
 
   it("returns validation errors for empty or short teacher fields", async () => {
@@ -560,6 +566,27 @@ describe("Admin teacher profile actions", () => {
         }),
       }),
     );
+  });
+
+  it("retains a replaced teacher photo when the shared reference check finds a live alias", async () => {
+    const oldStorageKey = "uploads/teacher-1/shared-photo.webp";
+    updateTeacherMock.mockResolvedValueOnce({
+      id: "teacher-1",
+      before: { id: "teacher-1", photoUrl: `/${oldStorageKey}` },
+      after: { id: "teacher-1", photoUrl: null },
+    });
+    isStorageObjectReferencedMock.mockResolvedValueOnce(true);
+
+    const { updateTeacherAction } = await loadTeachersActions();
+    const formData = buildBaseFormData();
+    formData.set("id", "teacher-1");
+    formData.set("photoUrl", "");
+
+    await expect(updateTeacherAction(formData)).resolves.toEqual(
+      expect.objectContaining({ success: true }),
+    );
+    expect(isStorageObjectReferencedMock).toHaveBeenCalledWith(oldStorageKey);
+    expect(storageDeleteMock).not.toHaveBeenCalled();
   });
 
   it("best-effort deletes only the newly uploaded update photo after audit rollback", async () => {

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 import { listAttendanceHistoryForStudent } from "@/lib/repositories/attendance-repository";
 import { getTeacherStudentGradebook } from "@/lib/repositories/gradebook-repository";
+import { isStorageObjectReferenced } from "@/lib/repositories/storage-reference-repository";
 import { listProgressNotesForTeacherStudent } from "@/lib/repositories/student-progress-repository";
 import { renderReportSnapshotPdf } from "@/lib/services/report-pdf";
 import {
@@ -426,49 +427,11 @@ async function deleteReportStorageKeyBestEffort(
   storageKey: string,
 ) {
   try {
+    if (await isStorageObjectReferenced(storageKey)) return;
     await storage.delete(storageKey);
   } catch {
     // Storage cleanup must not replace a transaction error or a committed export.
   }
-}
-
-async function hasLiveStorageReference(aliases: string[]) {
-  const lookups = [
-    () =>
-      prisma.reportSnapshot.findFirst({
-        where: { pdfStorageKey: { in: aliases } },
-        select: { id: true },
-      }),
-    () =>
-      prisma.attachment.findFirst({
-        where: { storageKey: { in: aliases } },
-        select: { id: true },
-      }),
-    () =>
-      prisma.courseMaterial.findFirst({
-        where: { fileUrl: { in: aliases } },
-        select: { id: true },
-      }),
-    () =>
-      prisma.submission.findFirst({
-        where: { contentUrl: { in: aliases } },
-        select: { id: true },
-      }),
-    () =>
-      prisma.teacher.findFirst({
-        where: { photoUrl: { in: aliases } },
-        select: { id: true },
-      }),
-  ];
-
-  for (const lookup of lookups) {
-    try {
-      if (await lookup()) return true;
-    } catch {
-      return true;
-    }
-  }
-  return false;
 }
 
 async function cleanupPreviousReportPdfBestEffort(input: {
@@ -486,7 +449,7 @@ async function cleanupPreviousReportPdfBestEffort(input: {
   if (previousReference.storageKey === replacementReference.storageKey) return;
 
   try {
-    if (await hasLiveStorageReference(previousReference.aliases)) return;
+    if (await isStorageObjectReferenced(previousReference.storageKey)) return;
     await input.storage.delete(previousReference.storageKey);
   } catch {
     // The export is committed; reference checks and old-object cleanup are best-effort.

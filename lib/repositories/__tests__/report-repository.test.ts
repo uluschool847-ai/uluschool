@@ -8,6 +8,7 @@ const storageGetUrlMock = vi.hoisted(() => vi.fn());
 const storageDeleteMock = vi.hoisted(() => vi.fn());
 const renderReportSnapshotPdfMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
+const isStorageObjectReferencedMock = vi.hoisted(() => vi.fn());
 const transactionClientMock = vi.hoisted(() => ({
   reportSnapshot: {
     findFirst: vi.fn(),
@@ -28,6 +29,9 @@ vi.mock("@/lib/services/report-pdf", () => ({
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   createAdminAuditLog: createAdminAuditLogMock,
 }));
+vi.mock("@/lib/repositories/storage-reference-repository", () => ({
+  isStorageObjectReferenced: isStorageObjectReferencedMock,
+}));
 vi.mock("@/lib/storage", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/storage")>()),
   createStorageService: () => ({
@@ -45,6 +49,7 @@ describe("report PDF storage", () => {
         callback(transactionClientMock),
     );
     createAdminAuditLogMock.mockResolvedValue(undefined);
+    isStorageObjectReferencedMock.mockResolvedValue(false);
     storageDeleteMock.mockResolvedValue(undefined);
   });
 
@@ -106,5 +111,38 @@ describe("report PDF storage", () => {
     expect(storageDeleteMock).not.toHaveBeenCalled();
     expect(result.publicUrl).toBe(publicUrl);
     expect(storageGetUrlMock).toHaveBeenCalledWith(storageKey);
+  });
+
+  it("uses the shared reference helper before deleting a superseded report PDF", async () => {
+    const oldStorageKey = "private/teachers/teacher-1/reports/old-report.pdf";
+    const newStorageKey = "private/teachers/teacher-1/reports/new-report.pdf";
+    const persistedSnapshot = {
+      id: "snapshot-1",
+      studentId: "student-1",
+      snapshotData: { student: { fullName: "Student One" } },
+      generatedByTeacherId: "teacher-1",
+      pdfGeneratedAt: null,
+      pdfStorageKey: oldStorageKey,
+      updatedAt: new Date("2026-07-14T09:00:00.000Z"),
+    };
+    prismaMock.reportSnapshot.findFirst.mockResolvedValueOnce(persistedSnapshot);
+    transactionClientMock.reportSnapshot.findFirst.mockResolvedValueOnce(persistedSnapshot);
+    transactionClientMock.reportSnapshot.update.mockResolvedValueOnce({
+      ...persistedSnapshot,
+      pdfStorageKey: newStorageKey,
+    });
+    renderReportSnapshotPdfMock.mockResolvedValueOnce({
+      bytes: Uint8Array.from([0x25, 0x50, 0x44, 0x46]),
+      filename: "report.pdf",
+      contentType: "application/pdf",
+    });
+    storageUploadMock.mockResolvedValueOnce(newStorageKey);
+    storageGetUrlMock.mockReturnValueOnce(storageUrlForKey(newStorageKey));
+
+    const { exportReportSnapshotPdf } = await import("@/lib/repositories/report-repository");
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    expect(isStorageObjectReferencedMock).toHaveBeenCalledWith(oldStorageKey);
+    expect(storageDeleteMock).toHaveBeenCalledWith(oldStorageKey);
   });
 });

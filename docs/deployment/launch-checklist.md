@@ -74,7 +74,16 @@ carrying `Set-Cookie`, private data, or authorization-dependent content. Cache o
 assets such as versioned `/_next/static/*` files, public fonts, and public images, while respecting
 origin cache-control headers.
 
-## 6. Verify DNS, TLS, canonical behavior, and the app
+## 6. Verify scheduled cleanup
+
+- [ ] Configure one environment-scoped Render Cron Job on `*/10 * * * *` to call
+      `GET /api/cron/automation` with `Authorization: Bearer <CRON_SECRET>`.
+- [ ] Confirm the job has only the matching environment origin and secret, returns HTTP 2xx, and
+      never logs the authorization header, a raw storage URL, or object key.
+- [ ] Verify the job remains enabled after the first deploy and configure an operations alert for
+      non-2xx results so bounded pending-upload cleanup continues after storage failures.
+
+## 7. Verify DNS, TLS, canonical behavior, and the app
 
 Run from PowerShell and save only non-sensitive output:
 
@@ -96,7 +105,7 @@ npm run smoke:deployment -- --base-url https://uluglobalacademy.com --environmen
 - [ ] Static assets load through the proxy without browser console or network errors.
 - [ ] Alerts reach the private operations channel without form, session, or credential payloads.
 
-## 7. Launch decision
+## 8. Launch decision
 
 The launch owner records **GO** only when every checkbox has evidence and no Critical or Important
 issue remains. On **NO-GO**, stop DNS promotion or return the DNS records to DNS only, keep the last

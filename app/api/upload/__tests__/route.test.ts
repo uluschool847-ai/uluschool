@@ -6,6 +6,9 @@ const uploadMock = vi.hoisted(() => vi.fn());
 const getURLMock = vi.hoisted(() => vi.fn());
 const deleteMock = vi.hoisted(() => vi.fn());
 const getSessionMock = vi.hoisted(() => vi.fn());
+const consumePendingUploadRequestRateLimitMock = vi.hoisted(() => vi.fn());
+const releasePendingUploadMock = vi.hoisted(() => vi.fn());
+const reservePendingUploadMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/storage", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/storage")>()),
@@ -20,6 +23,12 @@ vi.mock("@/lib/auth/session", () => ({
   getSession: getSessionMock,
 }));
 
+vi.mock("@/lib/repositories/pending-upload-repository", () => ({
+  consumePendingUploadRequestRateLimit: consumePendingUploadRequestRateLimitMock,
+  releasePendingUpload: releasePendingUploadMock,
+  reservePendingUpload: reservePendingUploadMock,
+}));
+
 vi.mock("next/server", () => ({
   NextResponse: {
     json: (body: unknown, init?: ResponseInit) =>
@@ -30,7 +39,7 @@ vi.mock("next/server", () => ({
   },
 }));
 
-import { POST } from "@/app/api/upload/route";
+import { DELETE, POST } from "@/app/api/upload/route";
 import { storageUrlForKey } from "@/lib/storage/storage-url";
 
 const MAX_UPLOAD_FILE_COUNT = 10;
@@ -71,6 +80,8 @@ describe("app/api/upload/route local-first upload integration", () => {
       mfaVerified: true,
       authMethod: "password",
     });
+    reservePendingUploadMock.mockResolvedValue(undefined);
+    releasePendingUploadMock.mockResolvedValue({ claimed: true, deleted: true });
   });
 
   it("returns 201 with upload metadata for an authorized teacher", async () => {
@@ -91,6 +102,19 @@ describe("app/api/upload/route local-first upload integration", () => {
       namespace: "private/teachers/teacher-1/materials",
       contentType: "application/pdf",
     });
+    expect(reservePendingUploadMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerId: "teacher-1",
+        purpose: "course-material",
+        storageKey,
+        filename: "homework.pdf",
+        mimeType: "application/pdf",
+        byteSize: 5,
+      }),
+    );
+    expect(uploadMock.mock.invocationCallOrder[0]).toBeLessThan(
+      reservePendingUploadMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
     expect(await response.json()).toEqual(
       expect.objectContaining({
         success: true,
@@ -717,5 +741,35 @@ describe("app/api/upload/route local-first upload integration", () => {
       success: false,
       error: expect.stringMatching(/upload failed/i),
     });
+  });
+
+  it("deletes a completed object and returns only a generic failure when reservation persistence fails", async () => {
+    const storageKey = "private/teachers/teacher-1/materials/reservation-failure.pdf";
+    uploadMock.mockResolvedValueOnce(storageKey);
+    reservePendingUploadMock.mockRejectedValueOnce(new Error("database unavailable"));
+
+    const response = await POST(buildUploadRequest());
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ success: false, error: "Upload failed" });
+    expect(deleteMock).toHaveBeenCalledWith(storageKey);
+  });
+
+  it("releases only the authenticated owner pending upload through DELETE", async () => {
+    const storageKey = "private/teachers/teacher-1/materials/cancelled.pdf";
+
+    const response = await DELETE(
+      new Request("http://localhost/api/upload", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ storageKey }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true });
+    expect(releasePendingUploadMock).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerId: "teacher-1", storageKey }),
+    );
   });
 });

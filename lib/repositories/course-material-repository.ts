@@ -2,6 +2,8 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
+import { finalizePendingUploads } from "@/lib/repositories/pending-upload-repository";
+import { findUnreferencedStorageKeys } from "@/lib/repositories/storage-reference-repository";
 import { preferredStoredFileHref, storageHrefForKey } from "@/lib/security/storage-links";
 import { isTeacherMaterialStorageKey, validateLegacyStorageKey } from "@/lib/storage/storage-key";
 import {
@@ -221,16 +223,28 @@ function validateStoredCleanupKeys(attachments: Array<{ storageKey: unknown }>, 
 }
 
 async function findOrphanStorageKeys(storageKeys: string[], database: MaterialDatabase) {
-  const uniqueStorageKeys = [...new Set(storageKeys)];
-  if (uniqueStorageKeys.length === 0) return [];
-  const remainingReferences = await database.attachment.findMany({
-    where: { storageKey: { in: uniqueStorageKeys } },
-    select: { storageKey: true },
-  });
-  const referencedStorageKeys = new Set(
-    remainingReferences.map((attachment) => attachment.storageKey),
+  return findUnreferencedStorageKeys(storageKeys, database);
+}
+
+async function finalizeMaterialAttachmentReservations(
+  teacherId: string,
+  attachments: CourseMaterialAttachmentInput[] | null | undefined,
+  database: MaterialDatabase,
+) {
+  if (!attachments?.length) return;
+  await finalizePendingUploads(
+    {
+      ownerId: teacherId,
+      purpose: "course-material",
+      uploads: attachments.map((attachment) => ({
+        storageKey: attachment.storageKey.trim(),
+        filename: attachment.filename.trim(),
+        mimeType: attachment.mimeType.trim(),
+        byteSize: attachment.size,
+      })),
+    },
+    database,
   );
-  return uniqueStorageKeys.filter((storageKey) => !referencedStorageKeys.has(storageKey));
 }
 
 function validateUpdateFileUrl(
@@ -349,6 +363,7 @@ export async function createCourseMaterialForTeacher(
     database,
   );
   await assertAttachmentInputKeysAvailable(input.attachments, database);
+  await finalizeMaterialAttachmentReservations(input.teacherId, input.attachments, database);
 
   return database.courseMaterial.create({
     data: {
@@ -424,6 +439,7 @@ export async function updateCourseMaterialForTeacher(
       database,
       existing.attachments.map((attachment) => attachment.id),
     );
+    await finalizeMaterialAttachmentReservations(teacherId, input.attachments, database);
   }
 
   const updated = await database.courseMaterial.update({

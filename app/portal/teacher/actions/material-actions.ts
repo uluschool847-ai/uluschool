@@ -15,6 +15,8 @@ import {
   updateCourseMaterialForTeacher,
   validateCourseMaterialFileUrl,
 } from "@/lib/repositories/course-material-repository";
+import { releasePendingUpload } from "@/lib/repositories/pending-upload-repository";
+import { isStorageObjectReferenced } from "@/lib/repositories/storage-reference-repository";
 import {
   createStorageService,
   isTeacherMaterialStorageKey,
@@ -223,16 +225,34 @@ async function cleanupStorageKeysBestEffort(storageKeys: unknown, teacherId: str
     ...new Set(validatedKeys.filter((storageKey): storageKey is string => Boolean(storageKey))),
   ];
   const invalidKeyCount = validatedKeys.filter((storageKey) => !storageKey).length;
+  const unreferencedKeys: string[] = [];
+  let retained = 0;
+  for (const storageKey of keys) {
+    if (await isStorageObjectReferenced(storageKey)) {
+      retained += 1;
+    } else {
+      unreferencedKeys.push(storageKey);
+    }
+  }
+  if (unreferencedKeys.length === 0) {
+    return { attempted: 0, deleted: 0, failed: invalidKeyCount, retained };
+  }
+
   let storage: ReturnType<typeof createStorageService>;
   try {
     storage = createStorageService();
   } catch {
-    return { attempted: keys.length, deleted: 0, failed: keys.length + invalidKeyCount };
+    return {
+      attempted: unreferencedKeys.length,
+      deleted: 0,
+      failed: unreferencedKeys.length + invalidKeyCount,
+      retained,
+    };
   }
 
   let deleted = 0;
   let failed = invalidKeyCount;
-  for (const storageKey of keys) {
+  for (const storageKey of unreferencedKeys) {
     try {
       await storage.delete(storageKey);
       deleted += 1;
@@ -240,12 +260,41 @@ async function cleanupStorageKeysBestEffort(storageKeys: unknown, teacherId: str
       failed += 1;
     }
   }
-  return { attempted: keys.length, deleted, failed };
+  return { attempted: unreferencedKeys.length, deleted, failed, retained };
+}
+
+async function releasePendingMaterialUploadsBestEffort(
+  attachments: Array<{ storageKey: string }> | undefined,
+  teacherId: string,
+) {
+  if (!attachments?.length) return;
+
+  let storage: ReturnType<typeof createStorageService>;
+  try {
+    storage = createStorageService();
+  } catch {
+    return;
+  }
+
+  for (const attachment of attachments) {
+    try {
+      await releasePendingUpload({
+        ownerId: teacherId,
+        storageKey: attachment.storageKey,
+        storage,
+      });
+    } catch {
+      // Cleanup cannot replace the original material transaction failure.
+    }
+  }
 }
 
 export async function submitCourseMaterialAction(
   data: unknown,
 ): Promise<ActionResult<{ id: string; title: string }>> {
+  let pendingAttachments: Array<z.infer<typeof attachmentSchema>> | undefined;
+  let pendingOwnerId: string | null = null;
+  let materialTransactionStarted = false;
   try {
     const session = await requireRole([UserRole.TEACHER]);
 
@@ -267,6 +316,9 @@ export async function submitCourseMaterialAction(
       throw new Error("Legacy upload URLs cannot be submitted as new material files.");
     }
 
+    pendingAttachments = attachments;
+    pendingOwnerId = session.uid;
+    materialTransactionStarted = true;
     const material = await prisma.$transaction(async (transaction) => {
       const created = await createCourseMaterialForTeacher(
         {
@@ -322,6 +374,9 @@ export async function submitCourseMaterialAction(
     return { success: true, data: { id: material.id, title: material.title } };
   } catch (error: unknown) {
     if (isNextRedirectError(error)) throw error;
+    if (materialTransactionStarted && pendingOwnerId) {
+      await releasePendingMaterialUploadsBestEffort(pendingAttachments, pendingOwnerId);
+    }
     const message = error instanceof Error ? error.message : "Failed to create material";
     return { success: false, error: message };
   }
@@ -337,6 +392,9 @@ export async function updateCourseMaterialAction(
   id: string,
   data: unknown,
 ): Promise<ActionResult<{ id: string; title: string }>> {
+  let pendingAttachments: Array<z.infer<typeof attachmentSchema>> | undefined;
+  let pendingOwnerId: string | null = null;
+  let materialTransactionStarted = false;
   try {
     const session = await requireRole([UserRole.TEACHER]);
 
@@ -348,6 +406,9 @@ export async function updateCourseMaterialAction(
     const attachments = normalizeAttachments(parsed.data);
     assertTeacherOwnsAttachments(attachments, session.uid);
     assertAttachmentUrlMatchesStorageKey(parsed.data.fileUrl, attachments);
+    pendingAttachments = attachments;
+    pendingOwnerId = session.uid;
+    materialTransactionStarted = true;
     const material = await prisma.$transaction(async (transaction) => {
       const updated = await updateCourseMaterialForTeacher(
         id,
@@ -405,6 +466,9 @@ export async function updateCourseMaterialAction(
     return { success: true, data: { id: material.id, title: material.title }, cleanup };
   } catch (error: unknown) {
     if (isNextRedirectError(error)) throw error;
+    if (materialTransactionStarted && pendingOwnerId) {
+      await releasePendingMaterialUploadsBestEffort(pendingAttachments, pendingOwnerId);
+    }
     const message = error instanceof Error ? error.message : "Failed to update material";
     return { success: false, error: message };
   }
