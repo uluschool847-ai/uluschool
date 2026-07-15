@@ -32,6 +32,7 @@ const signedDeliveryEnvironment = {
 const hostileEnvironment = {
   PLAYWRIGHT_BASE_URL: "http://hostile.example.test:4444",
   PORT: "4444",
+  PW_TEST_REPORTER: "hostile-playwright-reporter",
   PLAYWRIGHT_REUSE_EXISTING_SERVER: "true",
   PLAYWRIGHT_SERVER_COMMAND: "hostile-playwright-server",
   E2E_PLAYWRIGHT_SERVER_COMMAND: "hostile-e2e-playwright-server",
@@ -70,6 +71,7 @@ const webServer = Array.isArray(config.webServer) ? config.webServer[0] : config
 const environmentKeys = [
   "PLAYWRIGHT_BASE_URL",
   "PORT",
+  "PW_TEST_REPORTER",
   "PLAYWRIGHT_REUSE_EXISTING_SERVER",
   "PLAYWRIGHT_SERVER_COMMAND",
   "E2E_PLAYWRIGHT_SERVER_COMMAND",
@@ -137,6 +139,7 @@ const { matcherResults, reporters, retries, webServerEnvironment } = JSON.parse(
 const environmentKeys = [
   "PLAYWRIGHT_BASE_URL",
   "PORT",
+  "PW_TEST_REPORTER",
   "PLAYWRIGHT_REUSE_EXISTING_SERVER",
   "PLAYWRIGHT_SERVER_COMMAND",
   "E2E_PLAYWRIGHT_SERVER_COMMAND",
@@ -237,11 +240,16 @@ function runProductionRunner(useExplicitHook: boolean) {
 
 function runActualPlaywrightFixture(
   source: string,
-  args: string[] = [],
+  options: {
+    args?: string[];
+    environmentReporter?: "hostile";
+    partition?: "focused" | "standard";
+  } = {},
 ): { output: string; status: number | null } {
   const directory = mkdtempSync(join(ROOT, ".playwright-release-contract-"));
   temporaryDirectories.push(directory);
   const configFile = join(directory, "playwright.config.mjs");
+  const hostileReporterFile = join(directory, "hostile-reporter.mjs");
   const specFile = join(directory, "release-gate.spec.mjs");
 
   writeFileSync(
@@ -256,18 +264,35 @@ export default defineConfig({
 });
 `,
   );
+  writeFileSync(
+    hostileReporterFile,
+    `export default class HostileEnvironmentReporter {
+  onEnd() {
+    process.stderr.write("Hostile environment reporter restored passed status.\\n");
+    return { status: "passed" };
+  }
+
+  printsToStdio() {
+    return false;
+  }
+}
+`,
+  );
   writeFileSync(specFile, source);
 
+  const partitionArgs = options.partition === "focused" ? [] : ["--standard-partition"];
   const result = spawnSync(
     process.execPath,
-    [RUNNER, "--standard-partition", `--config=${configFile}`, ...args],
+    [RUNNER, ...partitionArgs, `--config=${configFile}`, ...(options.args ?? [])],
     {
       cwd: ROOT,
       encoding: "utf8",
       env: {
         ...process.env,
+        CI: "1",
+        FORCE_COLOR: "0",
         NODE_ENV: "test",
-        PW_TEST_REPORTER: "",
+        PW_TEST_REPORTER: options.environmentReporter === "hostile" ? hostileReporterFile : "",
       },
     },
   );
@@ -276,6 +301,21 @@ export default defineConfig({
     output: `${result.stdout}\n${result.stderr}`,
     status: result.status,
   };
+}
+
+function normalizePlaywrightOutput(output: string) {
+  const ansiEscapeSequence = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
+  return output.replaceAll(ansiEscapeSequence, "").replaceAll("\\", "/");
+}
+
+function playwrightSummaryCounts(output: string) {
+  return normalizePlaywrightOutput(output)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) =>
+      /^\d+ (?:did not run|failed|flaky|interrupted|passed|skipped)(?: \([^)]+\))?$/.test(line),
+    )
+    .map((line) => line.replace(/ \([^)]+\)$/, ""));
 }
 
 function configFor(
@@ -339,10 +379,12 @@ function cliIt(name: string, callback: () => void) {
 describe("Playwright E2E partition contract", () => {
   cliIt("retries only focused browser tests", () => {
     const focusedConfig = configFor("focused");
+    expect(focusedConfig.environment.PW_TEST_REPORTER).toBe(hostileEnvironment.PW_TEST_REPORTER);
     expect(focusedConfig.reporters).toEqual([]);
     expect(focusedConfig.retries).toBe(1);
     for (const partition of ["standard", "admin-2fa", "signed-delivery", "storage"] as const) {
       const releaseConfig = configFor(partition);
+      expect(releaseConfig.environment.PW_TEST_REPORTER).toBeNull();
       expect(releaseConfig.reporters).toEqual(["./scripts/playwright-release-reporter.mjs"]);
       expect(releaseConfig.retries).toBe(0);
     }
@@ -357,8 +399,30 @@ test.skip("controlled skipped release test", () => {});
     );
 
     expect(result.status, result.output).toBe(1);
-    expect(result.output).toContain("Release browser gate rejected");
-    expect(result.output).toContain("1 skipped");
+    expect(normalizePlaywrightOutput(result.output)).toContain(
+      "Skipped release test: release-gate.spec.mjs:3:6 › controlled skipped release test",
+    );
+    expect(normalizePlaywrightOutput(result.output)).toContain(
+      "Release browser gate rejected: 1 skipped; 0 retried or flaky.",
+    );
+    expect(playwrightSummaryCounts(result.output)).toEqual(["1 skipped"]);
+  });
+
+  cliIt("rejects a skipped release result despite a hostile environment reporter", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test.skip("hostile reporter skipped release test", () => {});
+`,
+      { environmentReporter: "hostile" },
+    );
+
+    expect(result.status, result.output).toBe(1);
+    expect(result.output).not.toContain("Hostile environment reporter restored passed status.");
+    expect(normalizePlaywrightOutput(result.output)).toContain(
+      "Skipped release test: release-gate.spec.mjs:3:6 › hostile reporter skipped release test",
+    );
+    expect(playwrightSummaryCounts(result.output)).toEqual(["1 skipped"]);
   });
 
   cliIt("rejects a release run with an actual flaky retry result", () => {
@@ -369,7 +433,7 @@ test("controlled flaky release test", ({}, testInfo) => {
   if (testInfo.retry === 0) throw new Error("controlled first-attempt failure");
 });
 `,
-      ["--retries=1"],
+      { args: ["--retries=1"] },
     );
 
     expect(result.status, result.output).toBe(1);
@@ -387,6 +451,40 @@ test("controlled passing release test", () => {});
 
     expect(result.status, result.output).toBe(0);
     expect(result.output).not.toContain("Release browser gate rejected");
+    expect(playwrightSummaryCounts(result.output)).toEqual(["1 passed"]);
+  });
+
+  cliIt("preserves ordinary Playwright failure diagnostics", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test("controlled ordinary release failure", () => {
+  throw new Error("controlled ordinary failure detail");
+});
+`,
+    );
+    const output = normalizePlaywrightOutput(result.output);
+
+    expect(result.status, result.output).toBe(1);
+    expect(output).toContain("release-gate.spec.mjs:3:1 › controlled ordinary release failure");
+    expect(output).toContain("Error: controlled ordinary failure detail");
+    expect(output).not.toContain("Release browser gate rejected");
+    expect(playwrightSummaryCounts(output)).toEqual(["1 failed"]);
+  });
+
+  cliIt("preserves inherited environment reporter behavior for focused runs", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test.skip("controlled focused skipped test", () => {});
+`,
+      { environmentReporter: "hostile", partition: "focused" },
+    );
+
+    expect(result.status, result.output).toBe(0);
+    expect(result.output).toContain("Hostile environment reporter restored passed status.");
+    expect(result.output).not.toContain("Release browser gate rejected");
+    expect(playwrightSummaryCounts(result.output)).toEqual(["1 skipped"]);
   });
 
   it("runs the production release partitions with required admin 2FA isolated", () => {

@@ -203,6 +203,7 @@ const adminTwoFactorRequired =
 process.env.E2E_ADMIN_REQUIRE_2FA = adminTwoFactorRequired ? "true" : "false";
 process.env.ADMIN_REQUIRE_2FA = process.env.E2E_ADMIN_REQUIRE_2FA;
 process.env.E2E_PARTITION = partition;
+if (partition !== "focused") Reflect.deleteProperty(process.env, "PW_TEST_REPORTER");
 if (partition === "storage") process.env.STORAGE_DRIVER = "local";
 if (partition === "signed-delivery") {
   Object.assign(process.env, {
