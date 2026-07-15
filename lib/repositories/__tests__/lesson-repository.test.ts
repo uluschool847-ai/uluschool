@@ -619,6 +619,7 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
         repository.rescheduleLesson("lesson-1", {
           startAt: new Date("2026-06-08T10:00:00.000Z"),
           endAt: new Date("2026-06-08T11:00:00.000Z"),
+          timezone: "Africa/Nairobi",
         }),
     },
     {
