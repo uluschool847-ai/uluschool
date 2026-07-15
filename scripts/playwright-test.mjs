@@ -49,7 +49,6 @@ function expandArg(arg) {
 
 function withReleaseReporter(args, reporterPath) {
   const forwardedArgs = [];
-  let configuredReporters = "";
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -58,20 +57,19 @@ function withReleaseReporter(args, reporterPath) {
       if (!value || value.startsWith("-")) {
         throw new Error("--reporter requires a reporter value.");
       }
-      configuredReporters = value;
       index += 1;
       continue;
     }
     if (arg.startsWith("--reporter=")) {
-      configuredReporters = arg.slice("--reporter=".length);
-      if (!configuredReporters) throw new Error("--reporter requires a reporter value.");
+      if (!arg.slice("--reporter=".length)) {
+        throw new Error("--reporter requires a reporter value.");
+      }
       continue;
     }
     forwardedArgs.push(arg);
   }
 
-  const reporters = configuredReporters ? `${configuredReporters},${reporterPath}` : reporterPath;
-  return [...forwardedArgs, `--reporter=${reporters}`];
+  return [...forwardedArgs, `--reporter=${reporterPath}`];
 }
 
 function portFromBaseUrl(baseUrl) {

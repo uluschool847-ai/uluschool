@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const ROOT = process.cwd();
 const RUNNER = join(ROOT, "scripts", "playwright-test.mjs");
 const RELEASE_REPORTER = join(ROOT, "scripts", "playwright-release-reporter.mjs");
+const HOSTILE_REPORTER_MARKER = "Hostile status reporter restored passed status.";
 const SUBPROCESS_TEST_TIMEOUT_MS = 30_000;
 const temporaryDirectories: string[] = [];
 
@@ -242,6 +243,7 @@ function runActualPlaywrightFixture(
   source: string,
   options: {
     args?: string[];
+    callerReporter?: "hostile";
     environmentReporter?: "hostile";
     partition?: "focused" | "standard";
   } = {},
@@ -266,9 +268,9 @@ export default defineConfig({
   );
   writeFileSync(
     hostileReporterFile,
-    `export default class HostileEnvironmentReporter {
+    `export default class HostileStatusReporter {
   onEnd() {
-    process.stderr.write("Hostile environment reporter restored passed status.\\n");
+    process.stderr.write(${JSON.stringify(`${HOSTILE_REPORTER_MARKER}\n`)});
     return { status: "passed" };
   }
 
@@ -281,9 +283,17 @@ export default defineConfig({
   writeFileSync(specFile, source);
 
   const partitionArgs = options.partition === "focused" ? [] : ["--standard-partition"];
+  const callerReporterArgs =
+    options.callerReporter === "hostile" ? [`--reporter=${hostileReporterFile}`] : [];
   const result = spawnSync(
     process.execPath,
-    [RUNNER, ...partitionArgs, `--config=${configFile}`, ...(options.args ?? [])],
+    [
+      RUNNER,
+      ...partitionArgs,
+      `--config=${configFile}`,
+      ...(options.args ?? []),
+      ...callerReporterArgs,
+    ],
     {
       cwd: ROOT,
       encoding: "utf8",
@@ -418,7 +428,7 @@ test.skip("hostile reporter skipped release test", () => {});
     );
 
     expect(result.status, result.output).toBe(1);
-    expect(result.output).not.toContain("Hostile environment reporter restored passed status.");
+    expect(result.output).not.toContain(HOSTILE_REPORTER_MARKER);
     expect(normalizePlaywrightOutput(result.output)).toContain(
       "Skipped release test: release-gate.spec.mjs:3:6 › hostile reporter skipped release test",
     );
@@ -472,6 +482,87 @@ test("controlled ordinary release failure", () => {
     expect(playwrightSummaryCounts(output)).toEqual(["1 failed"]);
   });
 
+  cliIt("identifies a completed skip in a mixed failed release run", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test("controlled mixed ordinary failure", () => {
+  throw new Error("controlled mixed ordinary failure detail");
+});
+
+test.skip("controlled mixed skipped release test", () => {});
+`,
+    );
+    const output = normalizePlaywrightOutput(result.output);
+
+    expect(result.status, result.output).toBe(1);
+    expect(output).toContain("Error: controlled mixed ordinary failure detail");
+    expect(output).toContain(
+      "Skipped release test: release-gate.spec.mjs:7:6 › controlled mixed skipped release test",
+    );
+    expect(output).toContain("Release browser gate rejected: 1 skipped; 0 retried or flaky.");
+    expect(playwrightSummaryCounts(output)).toEqual(["1 failed", "1 skipped"]);
+  });
+
+  cliIt("rejects an ordinary failure despite a hostile caller reporter", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test("hostile caller ordinary release failure", () => {
+  throw new Error("hostile caller ordinary failure detail");
+});
+`,
+      { callerReporter: "hostile" },
+    );
+    const output = normalizePlaywrightOutput(result.output);
+
+    expect(result.status, result.output).toBe(1);
+    expect(output).not.toContain(HOSTILE_REPORTER_MARKER);
+    expect(output).toContain("release-gate.spec.mjs:3:1 › hostile caller ordinary release failure");
+    expect(output).toContain("Error: hostile caller ordinary failure detail");
+    expect(playwrightSummaryCounts(output)).toEqual(["1 failed"]);
+  });
+
+  cliIt("rejects a timed-out result despite a hostile caller reporter", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test("hostile caller timed-out release test", async () => {
+  await new Promise((resolve) => setTimeout(resolve, 500));
+});
+`,
+      { args: ["--timeout=50"], callerReporter: "hostile" },
+    );
+    const output = normalizePlaywrightOutput(result.output);
+
+    expect(result.status, result.output).toBe(1);
+    expect(output).not.toContain(HOSTILE_REPORTER_MARKER);
+    expect(output).toContain("hostile caller timed-out release test");
+    expect(output).toContain("Test timeout of 50ms exceeded");
+    expect(playwrightSummaryCounts(output)).toEqual(["1 failed"]);
+  });
+
+  cliIt("rejects an interrupted result despite a hostile caller reporter", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test("hostile caller interrupted release test", async ({}, testInfo) => {
+  testInfo._interrupt();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+});
+`,
+      { callerReporter: "hostile" },
+    );
+    const output = normalizePlaywrightOutput(result.output);
+
+    expect(result.status, result.output).toBe(1);
+    expect(output).not.toContain(HOSTILE_REPORTER_MARKER);
+    expect(output).toContain("hostile caller interrupted release test");
+    expect(output).not.toContain("Skipped release test");
+    expect(output).toContain("Release browser gate rejected: 1 failed, timed out, or interrupted.");
+    expect(playwrightSummaryCounts(output)).toEqual(["1 interrupted"]);
+  });
+
   cliIt("preserves inherited environment reporter behavior for focused runs", () => {
     const result = runActualPlaywrightFixture(
       `import { test } from "@playwright/test";
@@ -482,7 +573,7 @@ test.skip("controlled focused skipped test", () => {});
     );
 
     expect(result.status, result.output).toBe(0);
-    expect(result.output).toContain("Hostile environment reporter restored passed status.");
+    expect(result.output).toContain(HOSTILE_REPORTER_MARKER);
     expect(result.output).not.toContain("Release browser gate rejected");
     expect(playwrightSummaryCounts(result.output)).toEqual(["1 skipped"]);
   });
@@ -683,11 +774,11 @@ test.skip("controlled focused skipped test", () => {});
     expect(status).toBe(23);
   });
 
-  cliIt("preserves an explicit terminal reporter while enforcing the release reporter", () => {
+  cliIt("replaces an explicit release reporter with the enforced reporter", () => {
     const { capture, status } = runRunner(["--standard-partition", "--list", "--reporter=line"]);
 
     expect(status).toBe(0);
-    expect(capture.args).toEqual(["test", "--list", `--reporter=line,${RELEASE_REPORTER}`]);
+    expect(capture.args).toEqual(["test", "--list", `--reporter=${RELEASE_REPORTER}`]);
     expectWrapperFlagsRemoved(capture);
   });
 
