@@ -182,6 +182,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
   }
 
+  try {
+    consumePendingUploadRequestRateLimit(session.uid);
+  } catch {
+    return NextResponse.json({ success: false, error: "Upload failed" }, { status: 429 });
+  }
+
   let formData: FormData;
   try {
     formData = await readBoundedFormData(request);
@@ -206,12 +212,6 @@ export async function POST(request: Request) {
   }
   const reservationPurpose =
     purpose === "teacher-photo" ? ("teacher-photo" as const) : ("course-material" as const);
-
-  try {
-    consumePendingUploadRequestRateLimit(session.uid);
-  } catch {
-    return NextResponse.json({ success: false, error: "Upload failed" }, { status: 429 });
-  }
 
   const namespace =
     purpose === "teacher-photo"

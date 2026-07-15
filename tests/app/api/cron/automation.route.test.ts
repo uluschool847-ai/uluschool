@@ -92,4 +92,27 @@ describe("app/api/cron/automation/route.ts env enforcement", () => {
     });
     expect(sweepExpiredPendingUploadsMock).toHaveBeenCalledWith({ storage: storageServiceMock });
   });
+
+  it("returns non-success when cleanup cannot durably release its claim", async () => {
+    process.env.CRON_SECRET = "expected-secret";
+    generateRuleBasedAutomationTasksMock.mockResolvedValueOnce([]);
+    sweepExpiredPendingUploadsMock.mockResolvedValueOnce({
+      claimed: 1,
+      deleted: 0,
+      durabilityFailures: 1,
+    });
+    const { GET } = await import("../../../../app/api/cron/automation/route");
+
+    const response = await GET(
+      new Request("http://localhost/api/cron/automation", {
+        headers: { authorization: "Bearer expected-secret" },
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: "Storage cleanup could not preserve retry state.",
+    });
+  });
 });

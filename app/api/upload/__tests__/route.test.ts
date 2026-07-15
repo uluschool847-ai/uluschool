@@ -154,6 +154,30 @@ describe("app/api/upload/route local-first upload integration", () => {
     expect(uploadMock).not.toHaveBeenCalled();
   });
 
+  it("returns the thirty-first owner request as 429 without reading or cloning its body", async () => {
+    consumePendingUploadRequestRateLimitMock.mockImplementationOnce(() => {
+      throw new Error("rate limited");
+    });
+    const bodyRead = vi.fn();
+    const clone = vi.fn();
+    const request = {
+      headers: new Headers(),
+      get body() {
+        bodyRead();
+        return null;
+      },
+      clone,
+    } as unknown as Request;
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({ success: false, error: "Upload failed" });
+    expect(consumePendingUploadRequestRateLimitMock).toHaveBeenCalledWith("teacher-1");
+    expect(bodyRead).not.toHaveBeenCalled();
+    expect(clone).not.toHaveBeenCalled();
+  });
+
   it("ignores a forged x-role header", async () => {
     getSessionMock.mockResolvedValueOnce(null);
 
@@ -270,6 +294,7 @@ describe("app/api/upload/route local-first upload integration", () => {
       success: false,
       error: expect.stringMatching(/(multipart|payload|bad request)/i),
     });
+    expect(consumePendingUploadRequestRateLimitMock).toHaveBeenCalledWith("teacher-1");
   });
 
   it("rejects a declared oversized body before formData parsing", async () => {

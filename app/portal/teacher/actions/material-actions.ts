@@ -16,7 +16,6 @@ import {
   validateCourseMaterialFileUrl,
 } from "@/lib/repositories/course-material-repository";
 import { releasePendingUpload } from "@/lib/repositories/pending-upload-repository";
-import { isStorageObjectReferenced } from "@/lib/repositories/storage-reference-repository";
 import {
   createStorageService,
   isTeacherMaterialStorageKey,
@@ -225,42 +224,34 @@ async function cleanupStorageKeysBestEffort(storageKeys: unknown, teacherId: str
     ...new Set(validatedKeys.filter((storageKey): storageKey is string => Boolean(storageKey))),
   ];
   const invalidKeyCount = validatedKeys.filter((storageKey) => !storageKey).length;
-  const unreferencedKeys: string[] = [];
-  let retained = 0;
-  for (const storageKey of keys) {
-    if (await isStorageObjectReferenced(storageKey)) {
-      retained += 1;
-    } else {
-      unreferencedKeys.push(storageKey);
-    }
-  }
-  if (unreferencedKeys.length === 0) {
-    return { attempted: 0, deleted: 0, failed: invalidKeyCount, retained };
-  }
+  if (keys.length === 0) return { attempted: 0, deleted: 0, failed: invalidKeyCount, retained: 0 };
 
   let storage: ReturnType<typeof createStorageService>;
   try {
     storage = createStorageService();
   } catch {
     return {
-      attempted: unreferencedKeys.length,
+      attempted: keys.length,
       deleted: 0,
-      failed: unreferencedKeys.length + invalidKeyCount,
-      retained,
+      failed: keys.length + invalidKeyCount,
+      retained: 0,
     };
   }
 
   let deleted = 0;
   let failed = invalidKeyCount;
-  for (const storageKey of unreferencedKeys) {
+  let retained = 0;
+  for (const storageKey of keys) {
     try {
-      await storage.delete(storageKey);
-      deleted += 1;
+      const result = await releasePendingUpload({ ownerId: teacherId, storageKey, storage });
+      if (result.deleted) deleted += 1;
+      else if (result.referenced) retained += 1;
+      else failed += 1;
     } catch {
       failed += 1;
     }
   }
-  return { attempted: unreferencedKeys.length, deleted, failed, retained };
+  return { attempted: keys.length, deleted, failed, retained };
 }
 
 async function releasePendingMaterialUploadsBestEffort(

@@ -6,7 +6,7 @@ import {
   MAX_OWNER_ACTIVE_AND_PENDING_BYTES,
   PendingUploadError,
   finalizePendingUploads,
-  releasePendingUpload,
+  queueStorageObjectForDeletion,
   reservePendingUpload,
   sweepExpiredPendingUploads,
 } from "@/lib/repositories/pending-upload-repository";
@@ -15,9 +15,10 @@ import { storageUrlForKey } from "@/lib/storage/storage-url";
 const runPostgres = process.env.RUN_TASK3_POSTGRES_INTEGRATION === "1";
 const suite = describe.skipIf(!runPostgres);
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-const id = (name: string) => `t3-pending-${runId}-${name}`;
+const id = (name: string) => `t3-pending-v2-${runId}-${name}`;
 const ownerId = id("teacher");
 const otherOwnerId = id("other-teacher");
+const adminOwnerId = id("admin");
 
 function storageKey(name: string) {
   return `private/teachers/${ownerId}/materials/${name}.pdf`;
@@ -34,61 +35,100 @@ function upload(name: string, byteSize = 128) {
   };
 }
 
-async function cleanupFixtures() {
-  const fixtureIds = { startsWith: `t3-pending-${runId}-` };
-  await prisma.pendingUpload.deleteMany({ where: { ownerId: { in: [ownerId, otherOwnerId] } } });
-  await prisma.courseMaterial.deleteMany({ where: { id: fixtureIds } });
-  await prisma.scheduledClass.deleteMany({ where: { id: fixtureIds } });
-  await prisma.appUser.deleteMany({ where: { id: { in: [ownerId, otherOwnerId] } } });
+function pendingData(name: string, overrides: Record<string, unknown> = {}) {
+  return {
+    ...upload(name),
+    expiresAt: new Date(Date.now() - 60_000),
+    ...overrides,
+  };
 }
 
-suite("pending upload PostgreSQL lifecycle", { timeout: 60_000 }, () => {
+async function createOwnerUsers() {
+  await prisma.appUser.createMany({
+    data: [
+      {
+        id: ownerId,
+        email: `${ownerId}@example.com`,
+        fullName: "Pending upload owner",
+        role: UserRole.TEACHER,
+        passwordHash: "not-used",
+        isActive: true,
+      },
+      {
+        id: otherOwnerId,
+        email: `${otherOwnerId}@example.com`,
+        fullName: "Other pending upload owner",
+        role: UserRole.TEACHER,
+        passwordHash: "not-used",
+        isActive: true,
+      },
+      {
+        id: adminOwnerId,
+        email: `${adminOwnerId}@example.com`,
+        fullName: "Pending upload administrator",
+        role: UserRole.ADMIN,
+        passwordHash: "not-used",
+        isActive: true,
+      },
+    ],
+    skipDuplicates: true,
+  });
+}
+
+async function cleanupFixtures() {
+  const fixtureIds = { startsWith: `t3-pending-v2-${runId}-` };
+  const ownerIds = [ownerId, otherOwnerId, adminOwnerId];
+  await prisma.pendingUpload.deleteMany({ where: { ownerId: { in: ownerIds } } });
+  await prisma.activeStorageObject.deleteMany({
+    where: { ownerId: { in: ownerIds } },
+  });
+  await prisma.courseMaterial.deleteMany({ where: { id: fixtureIds } });
+  await prisma.scheduledClass.deleteMany({ where: { id: fixtureIds } });
+  await prisma.appUser.deleteMany({ where: { id: { in: ownerIds } } });
+}
+
+async function createMaterialReference(name: string, size = 128) {
+  const key = storageKey(name);
+  const scheduledClassId = id(`class-${name}`);
+  await prisma.scheduledClass.create({
+    data: {
+      id: scheduledClassId,
+      title: `Class ${name}`,
+      startAt: new Date("2026-07-16T09:00:00.000Z"),
+      endAt: new Date("2026-07-16T10:00:00.000Z"),
+      teacherId: ownerId,
+    },
+  });
+  await prisma.courseMaterial.create({
+    data: {
+      id: id(`material-${name}`),
+      title: `Material ${name}`,
+      fileUrl: storageUrlForKey(key),
+      scheduledClassId,
+      teacherId: ownerId,
+      attachments: {
+        create: {
+          id: id(`attachment-${name}`),
+          filename: `${name}.pdf`,
+          storageKey: key,
+          mimeType: "application/pdf",
+          size,
+        },
+      },
+    },
+  });
+  return key;
+}
+
+suite("pending upload PostgreSQL durable lifecycle", { timeout: 90_000 }, () => {
   beforeAll(async () => {
     await prisma.$connect();
-    await prisma.appUser.createMany({
-      data: [
-        {
-          id: ownerId,
-          email: `${ownerId}@example.com`,
-          fullName: "Pending upload owner",
-          role: UserRole.TEACHER,
-          passwordHash: "not-used",
-          isActive: true,
-        },
-        {
-          id: otherOwnerId,
-          email: `${otherOwnerId}@example.com`,
-          fullName: "Other pending upload owner",
-          role: UserRole.TEACHER,
-          passwordHash: "not-used",
-          isActive: true,
-        },
-      ],
-    });
+    await createOwnerUsers();
   });
 
   afterEach(async () => {
     await cleanupFixtures();
-    await prisma.appUser.createMany({
-      data: [
-        {
-          id: ownerId,
-          email: `${ownerId}@example.com`,
-          fullName: "Pending upload owner",
-          role: UserRole.TEACHER,
-          passwordHash: "not-used",
-          isActive: true,
-        },
-        {
-          id: otherOwnerId,
-          email: `${otherOwnerId}@example.com`,
-          fullName: "Other pending upload owner",
-          role: UserRole.TEACHER,
-          passwordHash: "not-used",
-          isActive: true,
-        },
-      ],
-    });
+    await createOwnerUsers();
   });
 
   afterAll(async () => {
@@ -96,90 +136,351 @@ suite("pending upload PostgreSQL lifecycle", { timeout: 60_000 }, () => {
     await prisma.$disconnect();
   });
 
-  it("sweeps an owner expired object before reserving a replacement", async () => {
-    const oldKey = storageKey("expired");
-    await prisma.pendingUpload.create({
-      data: {
-        ownerId,
-        purpose: "course-material",
-        storageKey: oldKey,
-        filename: "expired.pdf",
-        mimeType: "application/pdf",
-        byteSize: 128,
-        expiresAt: new Date(Date.now() - 1_000),
-      },
+  it("recovers a stale claim but leaves a fresh lease untouched", async () => {
+    const staleKey = storageKey("stale-claim");
+    const freshKey = storageKey("fresh-claim");
+    const now = new Date();
+    await prisma.pendingUpload.createMany({
+      data: [
+        pendingData("stale-claim", {
+          claimToken: "dead-worker",
+          claimedAt: new Date(now.getTime() - 60 * 60 * 1000),
+        }),
+        pendingData("fresh-claim", {
+          claimToken: "live-worker",
+          claimedAt: now,
+        }),
+      ],
     });
     const storage = { delete: vi.fn().mockResolvedValue(undefined) };
 
-    await reservePendingUpload({ ...upload("replacement"), storage });
-
-    expect(storage.delete).toHaveBeenCalledWith(oldKey);
+    await expect(sweepExpiredPendingUploads({ storage, now, limit: 10 })).resolves.toEqual(
+      expect.objectContaining({ claimed: 1, deleted: 1, durabilityFailures: 0 }),
+    );
+    expect(storage.delete).toHaveBeenCalledWith(staleKey);
+    expect(storage.delete).not.toHaveBeenCalledWith(freshKey);
     await expect(
-      prisma.pendingUpload.findUnique({ where: { storageKey: oldKey } }),
+      prisma.pendingUpload.findUnique({ where: { storageKey: staleKey } }),
     ).resolves.toBeNull();
     await expect(
-      prisma.pendingUpload.findUnique({ where: { storageKey: storageKey("replacement") } }),
-    ).resolves.toEqual(expect.objectContaining({ ownerId, purpose: "course-material" }));
+      prisma.pendingUpload.findUnique({ where: { storageKey: freshKey } }),
+    ).resolves.toEqual(expect.objectContaining({ claimToken: "live-worker" }));
   });
 
-  it("rejects an active-plus-pending owner quota overflow without double counting storage keys", async () => {
-    const scheduledClassId = id("class");
-    const activeKey = storageKey("active-near-limit");
-    await prisma.scheduledClass.create({
-      data: {
-        id: scheduledClassId,
-        title: "Quota fixture class",
-        startAt: new Date("2026-07-15T09:00:00.000Z"),
-        endAt: new Date("2026-07-15T10:00:00.000Z"),
-        teacherId: ownerId,
-      },
+  it("retains the same row through repeated storage outages and counts it at the cap", async () => {
+    const candidate = await prisma.pendingUpload.create({
+      data: pendingData("repeated-outage"),
     });
-    await prisma.courseMaterial.create({
-      data: {
-        id: id("material"),
-        title: "Quota fixture material",
-        fileUrl: storageUrlForKey(activeKey),
-        scheduledClassId,
-        teacherId: ownerId,
-        attachments: {
-          create: {
-            id: id("attachment"),
-            filename: "active-near-limit.pdf",
-            storageKey: activeKey,
-            mimeType: "application/pdf",
-            size: MAX_OWNER_ACTIVE_AND_PENDING_BYTES - 128,
-          },
-        },
-      },
-    });
-    const storage = { delete: vi.fn().mockResolvedValue(undefined) };
+    const storage = { delete: vi.fn().mockRejectedValue(new Error("offline storage")) };
 
-    await expect(reservePendingUpload({ ...upload("over-quota", 256), storage })).rejects.toThrow(
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(sweepExpiredPendingUploads({ storage, limit: 1 })).resolves.toEqual(
+        expect.objectContaining({
+          claimed: 1,
+          storageFailures: 1,
+          released: 1,
+          durabilityFailures: 0,
+        }),
+      );
+      await expect(
+        prisma.pendingUpload.findUniqueOrThrow({ where: { storageKey: candidate.storageKey } }),
+      ).resolves.toEqual(
+        expect.objectContaining({ id: candidate.id, claimToken: null, claimedAt: null }),
+      );
+    }
+
+    await prisma.pendingUpload.createMany({
+      data: Array.from({ length: 19 }, (_, index) => pendingData(`outage-${index}`)),
+    });
+    await expect(reservePendingUpload({ ...upload("blocked-at-21"), storage })).rejects.toThrow(
       PendingUploadError,
     );
-    await expect(prisma.pendingUpload.count({ where: { ownerId } })).resolves.toBe(0);
+    await expect(prisma.pendingUpload.count({ where: { ownerId } })).resolves.toBe(20);
   });
 
-  it("allows only one concurrent reservation for the final available outstanding slot", async () => {
+  it("allows the exact twentieth retained object and rejects the twenty-first", async () => {
     await prisma.pendingUpload.createMany({
-      data: Array.from({ length: 19 }, (_, index) => ({
-        ...upload(`existing-${index}`),
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-      })),
+      data: Array.from({ length: 19 }, (_, index) =>
+        pendingData(`boundary-${index}`, {
+          claimToken: index % 2 === 0 ? `worker-${index}` : null,
+          claimedAt: index % 2 === 0 ? new Date() : null,
+        }),
+      ),
+    });
+    const storage = { delete: vi.fn().mockRejectedValue(new Error("offline storage")) };
+
+    await expect(reservePendingUpload({ ...upload("boundary-20"), storage })).resolves.toEqual(
+      expect.objectContaining({ storageKey: storageKey("boundary-20") }),
+    );
+    await expect(reservePendingUpload({ ...upload("boundary-21"), storage })).rejects.toThrow(
+      PendingUploadError,
+    );
+  });
+
+  it("serializes concurrent reservations at the combined cap and quota boundary", async () => {
+    const pendingSize = 128;
+    const pendingCount = 19;
+    await prisma.pendingUpload.createMany({
+      data: Array.from({ length: pendingCount }, (_, index) =>
+        pendingData(`race-boundary-${index}`, {
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+          byteSize: pendingSize,
+        }),
+      ),
+    });
+    await prisma.activeStorageObject.create({
+      data: {
+        ownerId,
+        purpose: "report-pdf",
+        storageKey: storageKey("race-ledger"),
+        filename: "race-ledger.pdf",
+        mimeType: "application/pdf",
+        byteSize: MAX_OWNER_ACTIVE_AND_PENDING_BYTES - pendingCount * pendingSize - 1,
+      },
     });
     const storage = { delete: vi.fn().mockResolvedValue(undefined) };
 
     const results = await Promise.allSettled([
-      reservePendingUpload({ ...upload("race-a"), storage }),
-      reservePendingUpload({ ...upload("race-b"), storage }),
+      reservePendingUpload({ ...upload("race-a", 1), storage }),
+      reservePendingUpload({ ...upload("race-b", 1), storage }),
     ]);
 
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
     await expect(prisma.pendingUpload.count({ where: { ownerId } })).resolves.toBe(20);
   });
 
-  it("gives finalization and expiry sweep one database winner", async () => {
+  it("allows the exact 2 GiB boundary and rejects one byte over without alias double counting", async () => {
+    const firstSize = 1024 * 1024 * 1024;
+    const secondSize = MAX_OWNER_ACTIVE_AND_PENDING_BYTES - firstSize - 128;
+    await createMaterialReference("ledger-duplicate", firstSize);
+    const duplicateKey = "uploads/materials/ledger-duplicate.pdf";
+    await prisma.courseMaterial.update({
+      where: { id: id("material-ledger-duplicate") },
+      data: { fileUrl: `/${duplicateKey}` },
+    });
+    await prisma.attachment.update({
+      where: { id: id("attachment-ledger-duplicate") },
+      data: { storageKey: `/public/${duplicateKey}` },
+    });
+    await prisma.activeStorageObject.createMany({
+      data: [
+        {
+          ownerId,
+          purpose: "course-material",
+          storageKey: duplicateKey,
+          filename: "ledger-duplicate.pdf",
+          mimeType: "application/pdf",
+          byteSize: firstSize,
+        },
+        {
+          ownerId,
+          purpose: "report-pdf",
+          storageKey: storageKey("ledger-second"),
+          filename: "ledger-second.pdf",
+          mimeType: "application/pdf",
+          byteSize: secondSize,
+        },
+      ],
+    });
+    const storage = { delete: vi.fn().mockResolvedValue(undefined) };
+
+    await expect(reservePendingUpload({ ...upload("exact-quota", 128), storage })).resolves.toEqual(
+      expect.objectContaining({ storageKey: storageKey("exact-quota") }),
+    );
+    await expect(reservePendingUpload({ ...upload("over-quota", 1), storage })).rejects.toThrow(
+      PendingUploadError,
+    );
+  });
+
+  it("finalizes exact metadata into active accounting in the caller transaction", async () => {
+    const candidate = upload("atomic-finalize");
+    await prisma.pendingUpload.create({
+      data: { ...candidate, expiresAt: new Date(Date.now() + 60 * 60 * 1000) },
+    });
+
+    await prisma.$transaction(
+      async (transaction) => {
+        await finalizePendingUploads(
+          {
+            ownerId,
+            purpose: "course-material",
+            uploads: [candidate],
+          },
+          transaction,
+        );
+        const scheduledClass = await transaction.scheduledClass.create({
+          data: {
+            id: id("class-atomic-finalize"),
+            title: "Atomic finalize class",
+            startAt: new Date("2026-07-16T09:00:00.000Z"),
+            endAt: new Date("2026-07-16T10:00:00.000Z"),
+            teacherId: ownerId,
+          },
+        });
+        await transaction.courseMaterial.create({
+          data: {
+            id: id("material-atomic-finalize"),
+            title: "Atomic finalized material",
+            fileUrl: storageUrlForKey(candidate.storageKey),
+            scheduledClassId: scheduledClass.id,
+            teacherId: ownerId,
+            attachments: {
+              create: {
+                id: id("attachment-atomic-finalize"),
+                filename: candidate.filename,
+                storageKey: candidate.storageKey,
+                mimeType: candidate.mimeType,
+                size: candidate.byteSize,
+              },
+            },
+          },
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    await expect(
+      prisma.pendingUpload.findUnique({ where: { storageKey: candidate.storageKey } }),
+    ).resolves.toBeNull();
+    await expect(
+      prisma.activeStorageObject.findUnique({ where: { storageKey: candidate.storageKey } }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        ownerId,
+        purpose: "course-material",
+        filename: candidate.filename,
+        mimeType: candidate.mimeType,
+        byteSize: candidate.byteSize,
+      }),
+    );
+  });
+
+  it("finalizes report and teacher-photo reservations into owner-wide active accounting", async () => {
+    const report = {
+      ownerId: adminOwnerId,
+      purpose: "report-pdf" as const,
+      storageKey: `private/teachers/${adminOwnerId}/reports/report.pdf`,
+      filename: "report.pdf",
+      mimeType: "application/pdf",
+      byteSize: 256,
+    };
+    const photo = {
+      ownerId: adminOwnerId,
+      purpose: "teacher-photo" as const,
+      storageKey: `public/teachers/${adminOwnerId}/photo.webp`,
+      filename: "photo.webp",
+      mimeType: "image/webp",
+      byteSize: 512,
+    };
+    await prisma.pendingUpload.createMany({
+      data: [report, photo].map((candidate) => ({
+        ...candidate,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      })),
+    });
+
+    await prisma.$transaction(
+      async (transaction) => {
+        await finalizePendingUploads(
+          { ownerId: adminOwnerId, purpose: "report-pdf", uploads: [report] },
+          transaction,
+        );
+        await finalizePendingUploads(
+          { ownerId: adminOwnerId, purpose: "teacher-photo", uploads: [photo] },
+          transaction,
+        );
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    await expect(
+      prisma.activeStorageObject.findMany({
+        where: { ownerId: adminOwnerId },
+        orderBy: { byteSize: "asc" },
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        purpose: "report-pdf",
+        storageKey: report.storageKey,
+        byteSize: 256,
+      }),
+      expect.objectContaining({
+        purpose: "teacher-photo",
+        storageKey: photo.storageKey,
+        byteSize: 512,
+      }),
+    ]);
+    await expect(prisma.pendingUpload.count({ where: { ownerId: adminOwnerId } })).resolves.toBe(0);
+  });
+
+  it("atomically moves an unreferenced material ledger row back to pending cleanup", async () => {
+    const key = await createMaterialReference("active-to-pending", 640);
+    await prisma.activeStorageObject.create({
+      data: {
+        ownerId,
+        purpose: "course-material",
+        storageKey: key,
+        filename: "active-to-pending.pdf",
+        mimeType: "application/pdf",
+        byteSize: 640,
+      },
+    });
+
+    await prisma.$transaction(
+      async (transaction) => {
+        await transaction.courseMaterial.delete({
+          where: { id: id("material-active-to-pending") },
+        });
+        await queueStorageObjectForDeletion(
+          {
+            ownerId,
+            purpose: "course-material",
+            storageKey: key,
+            filename: "fallback.pdf",
+            mimeType: "application/octet-stream",
+            byteSize: 1,
+          },
+          transaction,
+        );
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    await expect(
+      prisma.activeStorageObject.findUnique({ where: { storageKey: key } }),
+    ).resolves.toBeNull();
+    await expect(prisma.pendingUpload.findUnique({ where: { storageKey: key } })).resolves.toEqual(
+      expect.objectContaining({
+        ownerId,
+        purpose: "course-material",
+        filename: "active-to-pending.pdf",
+        mimeType: "application/pdf",
+        byteSize: 640,
+        claimToken: null,
+      }),
+    );
+  });
+
+  it("converts a referenced expired reservation to active accounting without deleting storage", async () => {
+    const key = await createMaterialReference("referenced-expired");
+    await prisma.pendingUpload.create({
+      data: pendingData("referenced-expired"),
+    });
+    const storage = { delete: vi.fn().mockResolvedValue(undefined) };
+
+    await expect(sweepExpiredPendingUploads({ storage, limit: 1 })).resolves.toEqual(
+      expect.objectContaining({ claimed: 1, referenced: 1, deleted: 0 }),
+    );
+    expect(storage.delete).not.toHaveBeenCalledWith(key);
+    await expect(
+      prisma.pendingUpload.findUnique({ where: { storageKey: key } }),
+    ).resolves.toBeNull();
+    await expect(
+      prisma.activeStorageObject.findUnique({ where: { storageKey: key } }),
+    ).resolves.toEqual(expect.objectContaining({ ownerId, byteSize: 128 }));
+  });
+
+  it("still gives finalization and expiry sweep one winner", async () => {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 30_000);
     const candidate = upload("finalize-sweep");
@@ -216,46 +517,5 @@ suite("pending upload PostgreSQL lifecycle", { timeout: 60_000 }, () => {
     await expect(
       prisma.pendingUpload.count({ where: { storageKey: candidate.storageKey } }),
     ).resolves.toBe(0);
-  });
-
-  it("recreates an immediately expired reservation after a claimed storage delete fails", async () => {
-    const candidate = upload("retry");
-    await prisma.pendingUpload.create({
-      data: { ...candidate, expiresAt: new Date(Date.now() - 1_000) },
-    });
-    const storage = { delete: vi.fn().mockRejectedValue(new Error("offline storage")) };
-
-    await expect(sweepExpiredPendingUploads({ storage, limit: 1 })).resolves.toEqual(
-      expect.objectContaining({ claimed: 1, deleteFailures: 1, retried: 1 }),
-    );
-    await expect(
-      prisma.pendingUpload.findUniqueOrThrow({ where: { storageKey: candidate.storageKey } }),
-    ).resolves.toEqual(expect.objectContaining({ expiresAt: expect.any(Date) }));
-  });
-
-  it("allows cancellation only by the reservation owner", async () => {
-    const candidate = upload("cancel");
-    const storage = { delete: vi.fn().mockResolvedValue(undefined) };
-
-    await reservePendingUpload({ ...candidate, storage });
-    await expect(
-      releasePendingUpload({
-        ownerId: otherOwnerId,
-        storageKey: candidate.storageKey,
-        storage,
-      }),
-    ).resolves.toEqual({ claimed: false, deleted: false, referenced: false, retried: false });
-    expect(storage.delete).not.toHaveBeenCalled();
-    await expect(
-      prisma.pendingUpload.findUnique({ where: { storageKey: candidate.storageKey } }),
-    ).resolves.not.toBeNull();
-
-    await expect(
-      releasePendingUpload({ ownerId, storageKey: candidate.storageKey, storage }),
-    ).resolves.toEqual({ claimed: true, deleted: true, referenced: false, retried: false });
-    expect(storage.delete).toHaveBeenCalledWith(candidate.storageKey);
-    await expect(
-      prisma.pendingUpload.findUnique({ where: { storageKey: candidate.storageKey } }),
-    ).resolves.toBeNull();
   });
 });

@@ -22,6 +22,8 @@ const MEETING_HOST = "meet.google.com";
 const SUBJECT_SLUG_PREFIX = "qa-teacher-academics-subject";
 const LEVEL_SLUG_PREFIX = "qa-teacher-academics-level";
 const TERM_PREFIX = "QA Teacher Academics Term";
+const EXISTING_REPORT_REFERENCE = "reports/teacher-academics.pdf";
+const EXISTING_REPORT_STORAGE_KEY = "uploads/reports/teacher-academics.pdf";
 const generatedReportUploadKeys: string[] = [];
 type Fixture = {
   activityReason: string;
@@ -147,7 +149,10 @@ test.describe("Teacher academics portal", () => {
     await expect(reportRow.getByText("PDF available", { exact: true })).toBeVisible();
     await expect(page.getByText(fixture.foreignStudentName)).toHaveCount(0);
 
-    await reportRow.getByRole("link", { name: /view report/i }).click();
+    const viewReportLink = reportRow.getByRole("link", { name: /view report/i });
+    const reportDetailPath = `/portal/teacher/reports/${fixture.reportSnapshotId}`;
+    await expect(viewReportLink).toHaveAttribute("href", reportDetailPath);
+    await Promise.all([page.waitForURL(`${BASE_URL}${reportDetailPath}`), viewReportLink.click()]);
     await expect(page.getByRole("heading", { name: /saved report/i })).toBeVisible();
     await expect(page.getByText(fixture.studentName)).toBeVisible();
     await expect(page.getByText(/consistent algebra reasoning/i)).toBeVisible();
@@ -181,7 +186,26 @@ test.describe("Teacher academics portal", () => {
     );
     if (exportedReportStorageKey) {
       generatedReportUploadKeys.push(exportedReportStorageKey);
+      await expect
+        .poll(() =>
+          prisma.activeStorageObject.findUnique({
+            where: { storageKey: exportedReportStorageKey as string },
+            select: { byteSize: true, ownerId: true, purpose: true },
+          }),
+        )
+        .toEqual({
+          byteSize: expect.any(Number),
+          ownerId: fixture.teacherId,
+          purpose: "report-pdf",
+        });
     }
+    await expect
+      .poll(() =>
+        prisma.activeStorageObject.count({
+          where: { storageKey: EXISTING_REPORT_STORAGE_KEY },
+        }),
+      )
+      .toBe(0);
     await expect
       .poll(async () =>
         prisma.adminAuditLog.count({
@@ -700,7 +724,7 @@ async function createFixtures(): Promise<Fixture> {
       generatedAt: addMinutes(now, -30),
       generatedByTeacherId: teacher.id,
       pdfGeneratedAt: addMinutes(now, -20),
-      pdfStorageKey: "reports/teacher-academics.pdf",
+      pdfStorageKey: EXISTING_REPORT_REFERENCE,
       snapshotData: {
         academicTerm: { id: term.id, name: term.name },
         classGroup: { id: classGroup.id, name: classGroup.name },
@@ -711,6 +735,16 @@ async function createFixtures(): Promise<Fixture> {
       snapshotVersion: 1,
       studentId: student.id,
       teacherComment: "Consistent algebra reasoning.",
+    },
+  });
+  await prisma.activeStorageObject.create({
+    data: {
+      byteSize: 1024,
+      filename: "teacher-academics.pdf",
+      mimeType: "application/pdf",
+      ownerId: teacher.id,
+      purpose: "report-pdf",
+      storageKey: EXISTING_REPORT_STORAGE_KEY,
     },
   });
   const foreignSnapshot = await prisma.reportSnapshot.create({

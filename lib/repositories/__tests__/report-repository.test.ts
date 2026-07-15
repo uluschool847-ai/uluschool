@@ -8,7 +8,10 @@ const storageGetUrlMock = vi.hoisted(() => vi.fn());
 const storageDeleteMock = vi.hoisted(() => vi.fn());
 const renderReportSnapshotPdfMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
-const isStorageObjectReferencedMock = vi.hoisted(() => vi.fn());
+const finalizePendingUploadsMock = vi.hoisted(() => vi.fn());
+const releasePendingUploadMock = vi.hoisted(() => vi.fn());
+const reservePendingUploadMock = vi.hoisted(() => vi.fn());
+const queueStorageObjectForDeletionMock = vi.hoisted(() => vi.fn());
 const transactionClientMock = vi.hoisted(() => ({
   reportSnapshot: {
     findFirst: vi.fn(),
@@ -29,8 +32,12 @@ vi.mock("@/lib/services/report-pdf", () => ({
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   createAdminAuditLog: createAdminAuditLogMock,
 }));
-vi.mock("@/lib/repositories/storage-reference-repository", () => ({
-  isStorageObjectReferenced: isStorageObjectReferencedMock,
+vi.mock("@/lib/repositories/pending-upload-repository", () => ({
+  CONSERVATIVE_UNLEDGERED_STORAGE_BYTES: 2_147_483_647,
+  finalizePendingUploads: finalizePendingUploadsMock,
+  queueStorageObjectForDeletion: queueStorageObjectForDeletionMock,
+  releasePendingUpload: releasePendingUploadMock,
+  reservePendingUpload: reservePendingUploadMock,
 }));
 vi.mock("@/lib/storage", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/storage")>()),
@@ -49,8 +56,14 @@ describe("report PDF storage", () => {
         callback(transactionClientMock),
     );
     createAdminAuditLogMock.mockResolvedValue(undefined);
-    isStorageObjectReferencedMock.mockResolvedValue(false);
     storageDeleteMock.mockResolvedValue(undefined);
+    finalizePendingUploadsMock.mockResolvedValue(undefined);
+    releasePendingUploadMock.mockResolvedValue({ claimed: true, deleted: true });
+    reservePendingUploadMock.mockResolvedValue(undefined);
+    queueStorageObjectForDeletionMock.mockImplementation(async (input) => ({
+      ownerId: input.ownerId,
+      storageKey: input.storageKey,
+    }));
   });
 
   it("uploads rendered bytes to the authenticated teacher report namespace and persists only key metadata", async () => {
@@ -89,6 +102,24 @@ describe("report PDF storage", () => {
       contentType: "application/pdf",
     });
     expect(Buffer.isBuffer(storageUploadMock.mock.calls[0]?.[0])).toBe(true);
+    expect(reservePendingUploadMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerId: "teacher-1",
+        purpose: "report-pdf",
+        storageKey,
+        filename: "report.pdf",
+        mimeType: "application/pdf",
+        byteSize: 4,
+      }),
+    );
+    expect(finalizePendingUploadsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerId: "teacher-1",
+        purpose: "report-pdf",
+        uploads: [expect.objectContaining({ storageKey, filename: "report.pdf", byteSize: 4 })],
+      }),
+      transactionClientMock,
+    );
     expect(transactionClientMock.reportSnapshot.update).toHaveBeenCalledWith({
       where: {
         id: "snapshot-1",
@@ -113,7 +144,7 @@ describe("report PDF storage", () => {
     expect(storageGetUrlMock).toHaveBeenCalledWith(storageKey);
   });
 
-  it("uses the shared reference helper before deleting a superseded report PDF", async () => {
+  it("queues a superseded report PDF in the report transaction and releases it after commit", async () => {
     const oldStorageKey = "private/teachers/teacher-1/reports/old-report.pdf";
     const newStorageKey = "private/teachers/teacher-1/reports/new-report.pdf";
     const persistedSnapshot = {
@@ -142,7 +173,20 @@ describe("report PDF storage", () => {
     const { exportReportSnapshotPdf } = await import("@/lib/repositories/report-repository");
     await exportReportSnapshotPdf("teacher-1", "snapshot-1");
 
-    expect(isStorageObjectReferencedMock).toHaveBeenCalledWith(oldStorageKey);
-    expect(storageDeleteMock).toHaveBeenCalledWith(oldStorageKey);
+    expect(queueStorageObjectForDeletionMock).toHaveBeenCalledWith(
+      {
+        ownerId: "teacher-1",
+        purpose: "report-pdf",
+        storageKey: oldStorageKey,
+        filename: "old-report.pdf",
+        mimeType: "application/pdf",
+        byteSize: 2_147_483_647,
+      },
+      transactionClientMock,
+    );
+    expect(releasePendingUploadMock).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerId: "teacher-1", storageKey: oldStorageKey }),
+    );
+    expect(storageDeleteMock).not.toHaveBeenCalledWith(oldStorageKey);
   });
 });

@@ -1,26 +1,32 @@
-import { type PendingUpload, Prisma } from "@prisma/client";
+import { randomUUID } from "node:crypto";
+
+import { type PendingUpload, Prisma, UserRole } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { isStorageObjectReferenced } from "@/lib/repositories/storage-reference-repository";
+import { getStorageObjectReferenceStatus } from "@/lib/repositories/storage-reference-repository";
 import type { StorageService } from "@/lib/storage/StorageService";
 import {
   isTeacherMaterialStorageKey,
   publicTeacherPhotoNamespace,
   sanitizeStorageFilename,
+  teacherReportNamespace,
+  validateLegacyStorageKey,
   validateStorageKey,
 } from "@/lib/storage/storage-key";
 import { normalizePersistedStorageReference } from "@/lib/storage/storage-url";
 
 export const PENDING_UPLOAD_EXPIRY_MS = 60 * 60 * 1000;
+export const PENDING_UPLOAD_CLAIM_LEASE_MS = 5 * 60 * 1000;
 export const MAX_OUTSTANDING_PENDING_UPLOADS = 20;
 export const MAX_OWNER_ACTIVE_AND_PENDING_BYTES = 2 * 1024 * 1024 * 1024;
 export const MAX_PENDING_UPLOAD_REQUESTS_PER_MINUTE = 30;
+export const MAX_PENDING_UPLOAD_RATE_LIMIT_OWNERS = 1_000;
 export const DEFAULT_PENDING_UPLOAD_SWEEP_LIMIT = 25;
+export const CONSERVATIVE_UNLEDGERED_STORAGE_BYTES = 2_147_483_647;
 
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const pendingUploadRequestWindows = new Map<string, number[]>();
 
-export type PendingUploadPurpose = "course-material" | "teacher-photo";
+export type PendingUploadPurpose = "course-material" | "report-pdf" | "teacher-photo";
 export type PendingUploadStorage = Pick<StorageService, "delete">;
 export type PendingUploadDatabase = typeof prisma | Prisma.TransactionClient;
 
@@ -41,6 +47,8 @@ export class PendingUploadError extends Error {
 type PendingUploadRow = Pick<
   PendingUpload,
   | "byteSize"
+  | "claimedAt"
+  | "claimToken"
   | "createdAt"
   | "expiresAt"
   | "filename"
@@ -50,6 +58,20 @@ type PendingUploadRow = Pick<
   | "purpose"
   | "storageKey"
 >;
+
+type ClaimedPendingUpload = PendingUploadRow & {
+  claimedAt: Date;
+  claimToken: string;
+};
+
+type CleanupResult = {
+  deleted: boolean;
+  durabilityFailure: boolean;
+  lookupFailed: boolean;
+  referenced: boolean;
+  released: boolean;
+  storageFailed: boolean;
+};
 
 function pendingUploadError() {
   return new PendingUploadError();
@@ -68,8 +90,19 @@ function assertOwnerId(ownerId: string) {
 }
 
 function assertPurpose(value: string): asserts value is PendingUploadPurpose {
-  if (value !== "course-material" && value !== "teacher-photo") {
+  if (value !== "course-material" && value !== "teacher-photo" && value !== "report-pdf") {
     throw pendingUploadError();
+  }
+}
+
+function isDirectTeacherPhotoKey(storageKey: string, ownerId: string) {
+  try {
+    const namespace = publicTeacherPhotoNamespace(ownerId);
+    const validStorageKey = validateStorageKey(storageKey);
+    const suffix = validStorageKey.slice(namespace.length + 1);
+    return validStorageKey.startsWith(`${namespace}/`) && Boolean(suffix) && !suffix.includes("/");
+  } catch {
+    return false;
   }
 }
 
@@ -95,7 +128,9 @@ function assertMetadata(
     const owned =
       purpose === "course-material"
         ? isTeacherMaterialStorageKey(storageKey, ownerId)
-        : storageKey.startsWith(`${publicTeacherPhotoNamespace(ownerId)}/`);
+        : purpose === "teacher-photo"
+          ? isDirectTeacherPhotoKey(storageKey, ownerId)
+          : storageKey.startsWith(`${teacherReportNamespace(ownerId)}/`);
     if (!owned) throw new Error("Invalid upload owner");
 
     return {
@@ -111,6 +146,18 @@ function assertMetadata(
 
 function isRootDatabase(database: PendingUploadDatabase): database is typeof prisma {
   return database === prisma;
+}
+
+function assertTransactionClient(
+  database: Prisma.TransactionClient,
+): asserts database is Prisma.TransactionClient {
+  if (
+    !database ||
+    typeof database !== "object" ||
+    "$transaction" in (database as unknown as Record<string, unknown>)
+  ) {
+    throw pendingUploadError();
+  }
 }
 
 function isSerializableTransactionConflict(error: unknown) {
@@ -129,47 +176,153 @@ async function inSerializableTransaction<T>(
   return callback(database);
 }
 
+function normalizedStorageKey(storageKey: string) {
+  return normalizePersistedStorageReference(storageKey)?.storageKey ?? storageKey;
+}
+
 function addStorageObject(objects: Map<string, number>, storageKey: string, byteSize: number) {
-  const normalizedStorageKey =
-    normalizePersistedStorageReference(storageKey)?.storageKey ?? storageKey;
-  if (!objects.has(normalizedStorageKey)) objects.set(normalizedStorageKey, byteSize);
+  const normalizedKey = normalizedStorageKey(storageKey);
+  const existingSize = objects.get(normalizedKey);
+  if (existingSize === undefined || byteSize > existingSize) {
+    objects.set(normalizedKey, byteSize);
+  }
 }
 
 function totalStorageBytes(objects: Map<string, number>) {
   let total = 0;
   for (const byteSize of objects.values()) {
     total += byteSize;
+    if (!Number.isSafeInteger(total)) throw pendingUploadError();
   }
   return total;
+}
+
+async function ownerStorageAccounting(ownerId: string, transaction: Prisma.TransactionClient) {
+  const owner = await transaction.appUser.findUnique({
+    where: { id: ownerId },
+    select: { role: true },
+  });
+  if (!owner) throw pendingUploadError();
+
+  const [pendingUploads, activeObjects, activeAttachments, reportReferences] = await Promise.all([
+    transaction.pendingUpload.findMany({
+      where: { ownerId },
+      select: { storageKey: true, byteSize: true },
+    }),
+    transaction.activeStorageObject.findMany({
+      where: { ownerId },
+      select: { storageKey: true, byteSize: true },
+    }),
+    transaction.attachment.findMany({
+      where: { courseMaterial: { is: { teacherId: ownerId } } },
+      select: { storageKey: true, size: true },
+    }),
+    transaction.reportSnapshot.findMany({
+      where: { generatedByTeacherId: ownerId, pdfStorageKey: { not: null } },
+      select: { pdfStorageKey: true },
+    }),
+  ]);
+  const photoReferences =
+    owner.role === UserRole.ADMIN
+      ? await transaction.teacher.findMany({
+          where: { photoUrl: { not: null } },
+          select: { photoUrl: true },
+        })
+      : [];
+
+  const objects = new Map<string, number>();
+  for (const activeObject of activeObjects) {
+    addStorageObject(objects, activeObject.storageKey, activeObject.byteSize);
+  }
+  for (const attachment of activeAttachments) {
+    addStorageObject(objects, attachment.storageKey, attachment.size);
+  }
+  for (const pendingUpload of pendingUploads) {
+    addStorageObject(objects, pendingUpload.storageKey, pendingUpload.byteSize);
+  }
+
+  let hasUnledgeredReference = false;
+  for (const report of reportReferences) {
+    const reference = normalizePersistedStorageReference(report.pdfStorageKey);
+    if (!reference || !objects.has(reference.storageKey)) {
+      hasUnledgeredReference = true;
+      break;
+    }
+  }
+
+  if (!hasUnledgeredReference) {
+    for (const teacher of photoReferences) {
+      const reference = normalizePersistedStorageReference(teacher.photoUrl);
+      if (!reference) {
+        hasUnledgeredReference = true;
+        break;
+      }
+      if (objects.has(reference.storageKey)) continue;
+      if (reference.kind === "legacy") {
+        hasUnledgeredReference = true;
+        break;
+      }
+      if (isDirectTeacherPhotoKey(reference.storageKey, ownerId)) {
+        hasUnledgeredReference = true;
+        break;
+      }
+    }
+  }
+
+  return {
+    hasUnledgeredReference,
+    objects,
+    pendingCount: pendingUploads.length,
+    totalBytes: totalStorageBytes(objects),
+  };
+}
+
+function claimAvailability(staleBefore: Date) {
+  return {
+    OR: [{ claimToken: null }, { claimedAt: null }, { claimedAt: { lte: staleBefore } }],
+  };
 }
 
 async function claimPendingUpload(
   input: {
     expiresAtOrBefore?: Date;
+    now: Date;
     ownerId?: string;
     storageKey: string;
   },
   database: PendingUploadDatabase,
 ) {
+  const staleBefore = new Date(input.now.getTime() - PENDING_UPLOAD_CLAIM_LEASE_MS);
+  const available = claimAvailability(staleBefore);
+  const claimToken = randomUUID();
+
   try {
     return await inSerializableTransaction(database, async (transaction) => {
       const where = {
         storageKey: input.storageKey,
         ...(input.ownerId ? { ownerId: input.ownerId } : {}),
         ...(input.expiresAtOrBefore ? { expiresAt: { lte: input.expiresAtOrBefore } } : {}),
+        ...available,
       };
       const pendingUpload = await transaction.pendingUpload.findFirst({ where });
       if (!pendingUpload) return null;
 
-      const deleted = await transaction.pendingUpload.deleteMany({
+      const updated = await transaction.pendingUpload.updateMany({
         where: {
           id: pendingUpload.id,
           storageKey: input.storageKey,
           ...(input.ownerId ? { ownerId: input.ownerId } : {}),
           ...(input.expiresAtOrBefore ? { expiresAt: { lte: input.expiresAtOrBefore } } : {}),
+          ...available,
         },
+        data: { claimToken, claimedAt: input.now },
       });
-      return deleted.count === 1 ? (pendingUpload as PendingUploadRow) : null;
+      if (updated.count !== 1) return null;
+      return {
+        ...(pendingUpload as PendingUploadRow),
+        claimToken,
+        claimedAt: input.now,
+      } satisfies ClaimedPendingUpload;
     });
   } catch (error) {
     if (isSerializableTransactionConflict(error)) return null;
@@ -177,71 +330,244 @@ async function claimPendingUpload(
   }
 }
 
-async function recreateExpiredPendingUpload(
-  pendingUpload: PendingUploadRow,
-  now: Date,
-  database: PendingUploadDatabase,
-) {
+async function releaseClaim(pendingUpload: ClaimedPendingUpload, database: PendingUploadDatabase) {
   try {
-    await database.pendingUpload.create({
-      data: {
-        ownerId: pendingUpload.ownerId,
-        purpose: pendingUpload.purpose,
-        storageKey: pendingUpload.storageKey,
-        filename: pendingUpload.filename,
-        mimeType: pendingUpload.mimeType,
-        byteSize: pendingUpload.byteSize,
-        expiresAt: now,
-      },
+    const released = await database.pendingUpload.updateMany({
+      where: { id: pendingUpload.id, claimToken: pendingUpload.claimToken },
+      data: { claimToken: null, claimedAt: null },
     });
-    return true;
+    return released.count === 1;
   } catch {
     return false;
   }
 }
 
-async function deleteClaimedPendingUploadObject(
+function activeStorageData(pendingUpload: PendingUploadRow) {
+  assertPurpose(pendingUpload.purpose);
+  return {
+    ownerId: pendingUpload.ownerId,
+    purpose: pendingUpload.purpose,
+    storageKey: pendingUpload.storageKey,
+    filename: pendingUpload.filename,
+    mimeType: pendingUpload.mimeType,
+    byteSize: pendingUpload.byteSize,
+  };
+}
+
+async function ensureActiveStorageObject(
   pendingUpload: PendingUploadRow,
-  storage: PendingUploadStorage,
-  now: Date,
+  transaction: Prisma.TransactionClient,
+) {
+  const data = activeStorageData(pendingUpload);
+  const existing = await transaction.activeStorageObject.findUnique({
+    where: { storageKey: pendingUpload.storageKey },
+  });
+  if (existing) {
+    if (
+      existing.ownerId !== data.ownerId ||
+      existing.purpose !== data.purpose ||
+      existing.storageKey !== data.storageKey ||
+      existing.filename !== data.filename ||
+      existing.mimeType !== data.mimeType ||
+      existing.byteSize !== data.byteSize
+    ) {
+      throw pendingUploadError();
+    }
+    return existing;
+  }
+  return transaction.activeStorageObject.create({ data });
+}
+
+async function finalizeReferencedClaim(
+  pendingUpload: ClaimedPendingUpload,
   database: PendingUploadDatabase,
 ) {
-  if (await isStorageObjectReferenced(pendingUpload.storageKey, database)) {
-    return { deleted: false, referenced: true, retried: false };
+  await inSerializableTransaction(database, async (transaction) => {
+    await ensureActiveStorageObject(pendingUpload, transaction);
+    const deleted = await transaction.pendingUpload.deleteMany({
+      where: { id: pendingUpload.id, claimToken: pendingUpload.claimToken },
+    });
+    if (deleted.count !== 1) throw pendingUploadError();
+  });
+}
+
+async function deleteUnreferencedClaim(
+  pendingUpload: ClaimedPendingUpload,
+  storage: PendingUploadStorage,
+  database: PendingUploadDatabase,
+): Promise<CleanupResult> {
+  try {
+    await storage.delete(pendingUpload.storageKey);
+  } catch {
+    const released = await releaseClaim(pendingUpload, database);
+    return {
+      deleted: false,
+      durabilityFailure: !released,
+      lookupFailed: false,
+      referenced: false,
+      released,
+      storageFailed: true,
+    };
   }
 
   try {
-    await storage.delete(pendingUpload.storageKey);
-    return { deleted: true, referenced: false, retried: false };
+    const deleted = await database.pendingUpload.deleteMany({
+      where: { id: pendingUpload.id, claimToken: pendingUpload.claimToken },
+    });
+    return {
+      deleted: deleted.count === 1,
+      durabilityFailure: deleted.count !== 1,
+      lookupFailed: false,
+      referenced: false,
+      released: false,
+      storageFailed: false,
+    };
   } catch {
-    const retried = await recreateExpiredPendingUpload(pendingUpload, now, database);
-    return { deleted: false, referenced: false, retried };
+    return {
+      deleted: false,
+      durabilityFailure: true,
+      lookupFailed: false,
+      referenced: false,
+      released: false,
+      storageFailed: false,
+    };
   }
 }
 
-export function consumePendingUploadRequestRateLimit(ownerId: string, now = new Date()) {
-  const validOwnerId = assertOwnerId(ownerId);
-  const currentTime = now.getTime();
-  const cutoff = currentTime - RATE_LIMIT_WINDOW_MS;
-  const requests = (pendingUploadRequestWindows.get(validOwnerId) ?? []).filter(
-    (timestamp) => timestamp > cutoff,
-  );
-  if (requests.length >= MAX_PENDING_UPLOAD_REQUESTS_PER_MINUTE) {
+async function processClaimedPendingUpload(
+  pendingUpload: ClaimedPendingUpload,
+  storage: PendingUploadStorage,
+  database: PendingUploadDatabase,
+): Promise<CleanupResult> {
+  let referenceStatus: Awaited<ReturnType<typeof getStorageObjectReferenceStatus>>;
+  try {
+    referenceStatus = await getStorageObjectReferenceStatus(pendingUpload.storageKey, database);
+  } catch {
+    referenceStatus = "unknown";
+  }
+
+  if (referenceStatus === "unknown") {
+    const released = await releaseClaim(pendingUpload, database);
+    return {
+      deleted: false,
+      durabilityFailure: !released,
+      lookupFailed: true,
+      referenced: false,
+      released,
+      storageFailed: false,
+    };
+  }
+
+  if (referenceStatus === "referenced") {
+    try {
+      await finalizeReferencedClaim(pendingUpload, database);
+      return {
+        deleted: false,
+        durabilityFailure: false,
+        lookupFailed: false,
+        referenced: true,
+        released: false,
+        storageFailed: false,
+      };
+    } catch {
+      const released = await releaseClaim(pendingUpload, database);
+      return {
+        deleted: false,
+        durabilityFailure: true,
+        lookupFailed: false,
+        referenced: false,
+        released,
+        storageFailed: false,
+      };
+    }
+  }
+
+  return deleteUnreferencedClaim(pendingUpload, storage, database);
+}
+
+function createPendingUploadRequestRateLimiter(
+  options: {
+    maxOwners?: number;
+    maxRequests?: number;
+    windowMs?: number;
+  } = {},
+) {
+  const maxOwners = options.maxOwners ?? MAX_PENDING_UPLOAD_RATE_LIMIT_OWNERS;
+  const maxRequests = options.maxRequests ?? MAX_PENDING_UPLOAD_REQUESTS_PER_MINUTE;
+  const windowMs = options.windowMs ?? RATE_LIMIT_WINDOW_MS;
+  if (
+    !Number.isSafeInteger(maxOwners) ||
+    maxOwners < 1 ||
+    !Number.isSafeInteger(maxRequests) ||
+    maxRequests < 1 ||
+    !Number.isSafeInteger(windowMs) ||
+    windowMs < 1
+  ) {
     throw pendingUploadError();
   }
-  requests.push(currentTime);
-  pendingUploadRequestWindows.set(validOwnerId, requests);
+
+  const requestWindows = new Map<string, number[]>();
+
+  function activeRequests(requests: number[], cutoff: number) {
+    return requests.filter((timestamp) => timestamp > cutoff);
+  }
+
+  function evictDormantOwners(cutoff: number) {
+    for (const [ownerId, requests] of requestWindows) {
+      const active = activeRequests(requests, cutoff);
+      if (active.length === 0) {
+        requestWindows.delete(ownerId);
+      } else if (active.length !== requests.length) {
+        requestWindows.set(ownerId, active);
+      }
+    }
+  }
+
+  function consume(ownerId: string, now = new Date()) {
+    const validOwnerId = assertOwnerId(ownerId);
+    const currentTime = now.getTime();
+    if (!Number.isFinite(currentTime)) throw pendingUploadError();
+    const cutoff = currentTime - windowMs;
+    evictDormantOwners(cutoff);
+
+    const requests = activeRequests(requestWindows.get(validOwnerId) ?? [], cutoff);
+    if (!requestWindows.has(validOwnerId) && requestWindows.size >= maxOwners) {
+      const leastRecentlyUsedOwner = requestWindows.keys().next().value;
+      if (typeof leastRecentlyUsedOwner === "string") {
+        requestWindows.delete(leastRecentlyUsedOwner);
+      }
+    }
+
+    requestWindows.delete(validOwnerId);
+    requestWindows.set(validOwnerId, requests);
+    if (requests.length >= maxRequests) throw pendingUploadError();
+    requests.push(currentTime);
+  }
+
+  return {
+    consume,
+    reset() {
+      requestWindows.clear();
+    },
+  };
 }
 
-async function finalizePendingUploads(
+const pendingUploadRequestRateLimiter = createPendingUploadRequestRateLimiter();
+
+export function consumePendingUploadRequestRateLimit(ownerId: string, now = new Date()) {
+  pendingUploadRequestRateLimiter.consume(ownerId, now);
+}
+
+async function finalizePendingUploadsUnchecked(
   input: {
     ownerId: string;
     purpose: PendingUploadPurpose;
     uploads: PendingUploadMetadata[];
     now?: Date;
   },
-  database: PendingUploadDatabase = prisma,
+  database: Prisma.TransactionClient,
 ) {
+  assertTransactionClient(database);
   const ownerId = assertOwnerId(input.ownerId);
   assertPurpose(input.purpose);
   if (!Array.isArray(input.uploads) || input.uploads.length === 0) return;
@@ -257,6 +583,7 @@ async function finalizePendingUploads(
       purpose: input.purpose,
       storageKey: { in: storageKeys },
       expiresAt: { gt: now },
+      claimToken: null,
     },
   });
   if (rows.length !== uploads.length) throw pendingUploadError();
@@ -269,6 +596,7 @@ async function finalizePendingUploads(
       pendingUpload.ownerId !== ownerId ||
       pendingUpload.purpose !== input.purpose ||
       pendingUpload.expiresAt <= now ||
+      pendingUpload.claimToken !== null ||
       pendingUpload.filename !== upload.filename ||
       pendingUpload.mimeType !== upload.mimeType ||
       pendingUpload.byteSize !== upload.byteSize
@@ -277,15 +605,155 @@ async function finalizePendingUploads(
     }
   }
 
+  for (const row of rows) {
+    await ensureActiveStorageObject(row, database);
+  }
   const deleted = await database.pendingUpload.deleteMany({
     where: {
       id: { in: rows.map((row) => row.id) },
       ownerId,
       purpose: input.purpose,
       expiresAt: { gt: now },
+      claimToken: null,
     },
   });
   if (deleted.count !== uploads.length) throw pendingUploadError();
+}
+
+async function finalizePendingUploads(
+  input: {
+    ownerId: string;
+    purpose: PendingUploadPurpose;
+    uploads: PendingUploadMetadata[];
+    now?: Date;
+  },
+  database: Prisma.TransactionClient,
+) {
+  try {
+    return await finalizePendingUploadsUnchecked(input, database);
+  } catch {
+    throw pendingUploadError();
+  }
+}
+
+async function queueStorageObjectForDeletionUnchecked(
+  input: {
+    ownerId: string;
+    purpose: PendingUploadPurpose;
+    storageKey: string;
+    filename: string;
+    mimeType: string;
+    byteSize: number;
+    now?: Date;
+  },
+  database: Prisma.TransactionClient,
+) {
+  assertTransactionClient(database);
+  const fallbackOwnerId = assertOwnerId(input.ownerId);
+  assertPurpose(input.purpose);
+
+  let storageKey: string;
+  let filename: string;
+  try {
+    const reference = normalizePersistedStorageReference(input.storageKey);
+    if (!reference) throw new Error("Invalid cleanup storage key");
+    storageKey =
+      reference.kind === "legacy"
+        ? validateLegacyStorageKey(reference.storageKey)
+        : validateStorageKey(reference.storageKey);
+    filename = sanitizeStorageFilename(input.filename);
+    if (
+      filename !== input.filename ||
+      typeof input.mimeType !== "string" ||
+      !input.mimeType ||
+      !Number.isSafeInteger(input.byteSize) ||
+      input.byteSize <= 0
+    ) {
+      throw new Error("Invalid cleanup metadata");
+    }
+  } catch {
+    throw pendingUploadError();
+  }
+
+  let referenceStatus: Awaited<ReturnType<typeof getStorageObjectReferenceStatus>>;
+  try {
+    referenceStatus = await getStorageObjectReferenceStatus(storageKey, database);
+  } catch {
+    referenceStatus = "unknown";
+  }
+  if (referenceStatus === "unknown") throw pendingUploadError();
+  if (referenceStatus === "referenced") return null;
+
+  const [activeObject, existingPendingUpload] = await Promise.all([
+    database.activeStorageObject.findUnique({ where: { storageKey } }),
+    database.pendingUpload.findUnique({ where: { storageKey } }),
+  ]);
+  const data = activeObject
+    ? {
+        ownerId: activeObject.ownerId,
+        purpose: activeObject.purpose,
+        storageKey,
+        filename: activeObject.filename,
+        mimeType: activeObject.mimeType,
+        byteSize: activeObject.byteSize,
+      }
+    : {
+        ownerId: fallbackOwnerId,
+        purpose: input.purpose,
+        storageKey,
+        filename,
+        mimeType: input.mimeType,
+        byteSize: input.byteSize,
+      };
+  assertPurpose(data.purpose);
+
+  if (existingPendingUpload) {
+    if (
+      existingPendingUpload.ownerId !== data.ownerId ||
+      existingPendingUpload.purpose !== data.purpose ||
+      existingPendingUpload.storageKey !== data.storageKey ||
+      existingPendingUpload.filename !== data.filename ||
+      existingPendingUpload.mimeType !== data.mimeType ||
+      existingPendingUpload.byteSize !== data.byteSize
+    ) {
+      throw pendingUploadError();
+    }
+  } else {
+    await database.pendingUpload.create({
+      data: {
+        ...data,
+        expiresAt: input.now ?? new Date(),
+      },
+    });
+  }
+
+  if (activeObject) {
+    const deleted = await database.activeStorageObject.deleteMany({
+      where: { id: activeObject.id, storageKey },
+    });
+    if (deleted.count !== 1) throw pendingUploadError();
+  }
+
+  return { ownerId: data.ownerId, storageKey };
+}
+
+async function queueStorageObjectForDeletion(
+  input: {
+    ownerId: string;
+    purpose: PendingUploadPurpose;
+    storageKey: string;
+    filename: string;
+    mimeType: string;
+    byteSize: number;
+    now?: Date;
+  },
+  database: Prisma.TransactionClient,
+) {
+  try {
+    return await queueStorageObjectForDeletionUnchecked(input, database);
+  } catch {
+    throw pendingUploadError();
+  }
 }
 
 export async function sweepExpiredPendingUploads(
@@ -300,10 +768,12 @@ export async function sweepExpiredPendingUploads(
   const now = input.now ?? new Date();
   const ownerId = input.ownerId ? assertOwnerId(input.ownerId) : undefined;
   const limit = Math.max(1, Math.min(input.limit ?? DEFAULT_PENDING_UPLOAD_SWEEP_LIMIT, 100));
+  const staleBefore = new Date(now.getTime() - PENDING_UPLOAD_CLAIM_LEASE_MS);
   const candidates = await database.pendingUpload.findMany({
     where: {
       expiresAt: { lte: now },
       ...(ownerId ? { ownerId } : {}),
+      ...claimAvailability(staleBefore),
     },
     orderBy: { expiresAt: "asc" },
     take: limit,
@@ -311,32 +781,44 @@ export async function sweepExpiredPendingUploads(
   const summary = {
     claimed: 0,
     deleted: 0,
-    deleteFailures: 0,
+    durabilityFailures: 0,
+    lookupFailures: 0,
     referenced: 0,
-    retried: 0,
+    released: 0,
     skipped: 0,
+    storageFailures: 0,
   };
 
   for (const candidate of candidates) {
-    const claimed = await claimPendingUpload(
-      {
-        storageKey: candidate.storageKey,
-        ...(ownerId ? { ownerId } : {}),
-        expiresAtOrBefore: now,
-      },
-      database,
-    );
+    let claimed: ClaimedPendingUpload | null;
+    try {
+      claimed = await claimPendingUpload(
+        {
+          storageKey: candidate.storageKey,
+          ...(ownerId ? { ownerId } : {}),
+          expiresAtOrBefore: now,
+          now,
+        },
+        database,
+      );
+    } catch {
+      summary.durabilityFailures += 1;
+      summary.skipped += 1;
+      continue;
+    }
     if (!claimed) {
       summary.skipped += 1;
       continue;
     }
 
     summary.claimed += 1;
-    const result = await deleteClaimedPendingUploadObject(claimed, input.storage, now, database);
+    const result = await processClaimedPendingUpload(claimed, input.storage, database);
     if (result.deleted) summary.deleted += 1;
+    if (result.durabilityFailure) summary.durabilityFailures += 1;
+    if (result.lookupFailed) summary.lookupFailures += 1;
     if (result.referenced) summary.referenced += 1;
-    if (!result.deleted && !result.referenced) summary.deleteFailures += 1;
-    if (result.retried) summary.retried += 1;
+    if (result.released) summary.released += 1;
+    if (result.storageFailed) summary.storageFailures += 1;
   }
   return summary;
 }
@@ -355,37 +837,24 @@ export async function reservePendingUpload(
   const metadata = assertMetadata(ownerId, input.purpose, input);
   const now = input.now ?? new Date();
 
-  await sweepExpiredPendingUploads({ ownerId, storage: input.storage, now }, database);
+  const sweep = await sweepExpiredPendingUploads(
+    { ownerId, storage: input.storage, now },
+    database,
+  );
+  if (sweep.durabilityFailures > 0) throw pendingUploadError();
 
   return inSerializableTransaction(database, async (transaction) => {
-    const [pendingUploads, activeAttachments] = await Promise.all([
-      transaction.pendingUpload.findMany({
-        where: { ownerId, expiresAt: { gt: now } },
-        select: { storageKey: true, byteSize: true },
-      }),
-      transaction.attachment.findMany({
-        where: { courseMaterial: { is: { teacherId: ownerId } } },
-        distinct: ["storageKey"],
-        select: { storageKey: true, size: true },
-      }),
-    ]);
-
-    if (pendingUploads.length >= MAX_OUTSTANDING_PENDING_UPLOADS) throw pendingUploadError();
-
-    const objects = new Map<string, number>();
-    for (const attachment of activeAttachments) {
-      addStorageObject(objects, attachment.storageKey, attachment.size);
-    }
-    for (const pendingUpload of pendingUploads) {
-      addStorageObject(objects, pendingUpload.storageKey, pendingUpload.byteSize);
-    }
-    if (objects.has(metadata.storageKey)) throw pendingUploadError();
-
-    const activeAndPendingBytes = totalStorageBytes(objects);
+    const accounting = await ownerStorageAccounting(ownerId, transaction);
     if (
-      !Number.isSafeInteger(activeAndPendingBytes) ||
-      activeAndPendingBytes + metadata.byteSize > MAX_OWNER_ACTIVE_AND_PENDING_BYTES
+      accounting.pendingCount >= MAX_OUTSTANDING_PENDING_UPLOADS ||
+      accounting.hasUnledgeredReference
     ) {
+      throw pendingUploadError();
+    }
+
+    const canonicalStorageKey = normalizedStorageKey(metadata.storageKey);
+    if (accounting.objects.has(canonicalStorageKey)) throw pendingUploadError();
+    if (accounting.totalBytes + metadata.byteSize > MAX_OWNER_ACTIVE_AND_PENDING_BYTES) {
       throw pendingUploadError();
     }
 
@@ -415,16 +884,43 @@ export async function releasePendingUpload(
   const ownerId = assertOwnerId(input.ownerId);
   let storageKey: string;
   try {
-    storageKey = validateStorageKey(input.storageKey);
+    const reference = normalizePersistedStorageReference(input.storageKey);
+    if (!reference) throw new Error("Invalid pending upload reference");
+    storageKey =
+      reference.kind === "legacy"
+        ? validateLegacyStorageKey(reference.storageKey)
+        : validateStorageKey(reference.storageKey);
   } catch {
-    return { claimed: false, deleted: false, referenced: false, retried: false };
+    return {
+      claimed: false,
+      deleted: false,
+      durabilityFailure: false,
+      lookupFailed: false,
+      referenced: false,
+      released: false,
+      storageFailed: false,
+    };
   }
   const now = input.now ?? new Date();
-  const claimed = await claimPendingUpload({ ownerId, storageKey }, database);
-  if (!claimed) return { claimed: false, deleted: false, referenced: false, retried: false };
+  const claimed = await claimPendingUpload({ ownerId, storageKey, now }, database);
+  if (!claimed) {
+    return {
+      claimed: false,
+      deleted: false,
+      durabilityFailure: false,
+      lookupFailed: false,
+      referenced: false,
+      released: false,
+      storageFailed: false,
+    };
+  }
 
-  const result = await deleteClaimedPendingUploadObject(claimed, input.storage, now, database);
+  const result = await processClaimedPendingUpload(claimed, input.storage, database);
   return { claimed: true, ...result };
 }
 
-export { finalizePendingUploads };
+export {
+  createPendingUploadRequestRateLimiter,
+  finalizePendingUploads,
+  queueStorageObjectForDeletion,
+};

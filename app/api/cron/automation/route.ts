@@ -18,10 +18,19 @@ export async function GET(request: Request) {
 
   try {
     const storage = createStorageService();
-    const [tasks] = await Promise.all([
+    const [tasks, sweep] = await Promise.all([
       generateRuleBasedAutomationTasks(),
       sweepExpiredPendingUploads({ storage }),
     ]);
+    if (sweep.durabilityFailures > 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Storage cleanup could not preserve retry state.",
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({
       success: true,
       tasksCreated: tasks.length,

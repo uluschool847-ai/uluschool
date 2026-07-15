@@ -26,7 +26,6 @@ const legacyDeleteCourseMaterialMock = vi.hoisted(() => vi.fn());
 const revalidatePathMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const releasePendingUploadMock = vi.hoisted(() => vi.fn());
-const isStorageObjectReferencedMock = vi.hoisted(() => vi.fn());
 const storageDeleteMock = vi.hoisted(() => vi.fn());
 const transactionClientMock = vi.hoisted(() => ({ transaction: "material-write" }));
 const prismaMock = vi.hoisted(() => ({
@@ -74,10 +73,6 @@ vi.mock("@/lib/repositories/admin-audit-repository", () => ({
 
 vi.mock("@/lib/repositories/pending-upload-repository", () => ({
   releasePendingUpload: releasePendingUploadMock,
-}));
-
-vi.mock("@/lib/repositories/storage-reference-repository", () => ({
-  isStorageObjectReferenced: isStorageObjectReferencedMock,
 }));
 
 vi.mock("next/cache", () => ({
@@ -199,7 +194,6 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
     );
     createAdminAuditLogMock.mockResolvedValue(undefined);
     releasePendingUploadMock.mockResolvedValue({ claimed: true, deleted: true });
-    isStorageObjectReferencedMock.mockResolvedValue(false);
     createCourseMaterialForTeacherMock.mockResolvedValue(material());
     updateCourseMaterialForTeacherMock.mockResolvedValue(
       material({ title: validMaterialUpdate.title, ...validMaterialUpdate }),
@@ -459,8 +453,10 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       const response = await deleteCourseMaterialAction("mat-123");
 
       expect(response).toEqual(expect.objectContaining({ success: true }));
-      expect(storageDeleteMock).toHaveBeenCalledTimes(1);
-      expect(storageDeleteMock).toHaveBeenCalledWith(storageKey);
+      expect(releasePendingUploadMock).toHaveBeenCalledTimes(1);
+      expect(releasePendingUploadMock).toHaveBeenCalledWith(
+        expect.objectContaining({ ownerId: "teacher-123", storageKey }),
+      );
     });
   });
 
@@ -1037,7 +1033,12 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       updateCourseMaterialForTeacherMock.mockResolvedValueOnce(
         material({ cleanup: { queued: true, deleted: 0, storageKeys: [oldStorageKey] } }),
       );
-      storageDeleteMock.mockRejectedValueOnce(new Error("backend cleanup failed"));
+      releasePendingUploadMock.mockResolvedValueOnce({
+        claimed: true,
+        deleted: false,
+        released: true,
+        storageFailed: true,
+      });
 
       const response = await updateCourseMaterialAction("mat-123", {
         title: "Replacement",
@@ -1051,8 +1052,10 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       });
 
       expect(response).toEqual(expect.objectContaining({ success: true }));
-      expect(storageDeleteMock).toHaveBeenCalledTimes(1);
-      expect(storageDeleteMock).toHaveBeenCalledWith(oldStorageKey);
+      expect(releasePendingUploadMock).toHaveBeenCalledTimes(1);
+      expect(releasePendingUploadMock).toHaveBeenCalledWith(
+        expect.objectContaining({ ownerId: "teacher-123", storageKey: oldStorageKey }),
+      );
       expectMaterialAudit("COURSE_MATERIAL_UPDATED");
       expectMaterialAudit("COURSE_MATERIAL_FILE_REPLACED");
       expectMaterialRevalidation();
@@ -1090,18 +1093,27 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       });
 
       expect(response).toEqual(expect.objectContaining({ success: true }));
-      expect(storageDeleteMock).toHaveBeenCalledTimes(2);
-      expect(storageDeleteMock).toHaveBeenCalledWith(firstOrphan);
-      expect(storageDeleteMock).toHaveBeenCalledWith(secondOrphan);
+      expect(releasePendingUploadMock).toHaveBeenCalledTimes(2);
+      expect(releasePendingUploadMock).toHaveBeenCalledWith(
+        expect.objectContaining({ storageKey: firstOrphan }),
+      );
+      expect(releasePendingUploadMock).toHaveBeenCalledWith(
+        expect.objectContaining({ storageKey: secondOrphan }),
+      );
     });
 
     it("returns success after an audited delete when best-effort cleanup fails", async () => {
-      storageDeleteMock.mockRejectedValueOnce(new Error("backend cleanup failed"));
+      releasePendingUploadMock.mockResolvedValueOnce({
+        claimed: true,
+        deleted: false,
+        released: true,
+        storageFailed: true,
+      });
 
       const response = await deleteCourseMaterialAction("mat-123");
 
       expect(response).toEqual(expect.objectContaining({ success: true }));
-      expect(storageDeleteMock).toHaveBeenCalledTimes(1);
+      expect(releasePendingUploadMock).toHaveBeenCalledTimes(1);
       expectMaterialAudit("COURSE_MATERIAL_DELETED");
       expectMaterialRevalidation();
     });
@@ -1127,13 +1139,22 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       const response = await deleteCourseMaterialAction("mat-123");
 
       expect(response).toEqual(expect.objectContaining({ success: true }));
-      expect(storageDeleteMock).toHaveBeenCalledTimes(2);
-      expect(storageDeleteMock).toHaveBeenCalledWith(firstOrphan);
-      expect(storageDeleteMock).toHaveBeenCalledWith(secondOrphan);
+      expect(releasePendingUploadMock).toHaveBeenCalledTimes(2);
+      expect(releasePendingUploadMock).toHaveBeenCalledWith(
+        expect.objectContaining({ storageKey: firstOrphan }),
+      );
+      expect(releasePendingUploadMock).toHaveBeenCalledWith(
+        expect.objectContaining({ storageKey: secondOrphan }),
+      );
     });
 
     it("returns success after an audited unlink when best-effort cleanup fails", async () => {
-      storageDeleteMock.mockRejectedValueOnce(new Error("backend cleanup failed"));
+      releasePendingUploadMock.mockResolvedValueOnce({
+        claimed: true,
+        deleted: false,
+        released: true,
+        storageFailed: true,
+      });
 
       const response = await unlinkAttachmentAction({
         materialId: "mat-123",
@@ -1141,7 +1162,7 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       });
 
       expect(response).toEqual(expect.objectContaining({ success: true }));
-      expect(storageDeleteMock).toHaveBeenCalledTimes(1);
+      expect(releasePendingUploadMock).toHaveBeenCalledTimes(1);
       expect(createAdminAuditLogMock).toHaveBeenCalledWith(
         expect.objectContaining({ action: "COURSE_MATERIAL_ATTACHMENT_DELETED" }),
         expect.anything(),
@@ -1168,8 +1189,10 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
       });
 
       expect(response).toEqual(expect.objectContaining({ success: true }));
-      expect(storageDeleteMock).toHaveBeenCalledTimes(1);
-      expect(storageDeleteMock).toHaveBeenCalledWith(orphan);
+      expect(releasePendingUploadMock).toHaveBeenCalledTimes(1);
+      expect(releasePendingUploadMock).toHaveBeenCalledWith(
+        expect.objectContaining({ storageKey: orphan }),
+      );
     });
 
     it("uses one cleanup path when deleting through the compatibility action", async () => {
@@ -1177,7 +1200,7 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
 
       expect(response).toEqual(expect.objectContaining({ success: true }));
       expect(deleteCourseMaterialForTeacherMock).toHaveBeenCalledTimes(1);
-      expect(storageDeleteMock).toHaveBeenCalledTimes(1);
+      expect(releasePendingUploadMock).toHaveBeenCalledTimes(1);
       expectMaterialAudit("COURSE_MATERIAL_DELETED");
     });
 
@@ -1194,8 +1217,12 @@ describe("API/Action Integration - Teacher Course Material Management", () => {
         "attachment-1",
         transactionClientMock,
       );
-      expect(storageDeleteMock).toHaveBeenCalledWith(
-        "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-material-1.pdf",
+      expect(releasePendingUploadMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ownerId: "teacher-123",
+          storageKey:
+            "private/teachers/teacher-123/materials/00000000-0000-4000-8000-000000000001-material-1.pdf",
+        }),
       );
       expect(createAdminAuditLogMock).toHaveBeenCalledWith(
         expect.objectContaining({

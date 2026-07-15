@@ -2,7 +2,7 @@ import { UserRole } from "@prisma/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { prisma } from "@/lib/prisma";
-import { isStorageObjectReferenced } from "@/lib/repositories/storage-reference-repository";
+import { getStorageObjectReferenceStatus } from "@/lib/repositories/storage-reference-repository";
 import { storageUrlForKey } from "@/lib/storage/storage-url";
 
 const runPostgres = process.env.RUN_TASK3_POSTGRES_INTEGRATION === "1";
@@ -157,16 +157,18 @@ suite("storage reference PostgreSQL aliases", { timeout: 60_000 }, () => {
       },
     });
 
-    await expect(isStorageObjectReferenced(currentKey)).resolves.toBe(true);
-    await expect(isStorageObjectReferenced(legacyKey)).resolves.toBe(true);
+    await expect(getStorageObjectReferenceStatus(currentKey)).resolves.toBe("referenced");
+    await expect(getStorageObjectReferenceStatus(legacyKey)).resolves.toBe("referenced");
     await expect(
-      prisma.$transaction((transaction) => isStorageObjectReferenced(legacyAlias, transaction)),
-    ).resolves.toBe(true);
+      prisma.$transaction((transaction) =>
+        getStorageObjectReferenceStatus(legacyAlias, transaction),
+      ),
+    ).resolves.toBe("referenced");
   });
 
   it("does not classify a truly unreferenced object as live", async () => {
     const unreferenced = `private/teachers/${teacherId}/materials/unreferenced.pdf`;
 
-    await expect(isStorageObjectReferenced(unreferenced)).resolves.toBe(false);
+    await expect(getStorageObjectReferenceStatus(unreferenced)).resolves.toBe("unreferenced");
   });
 });

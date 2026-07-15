@@ -12,7 +12,7 @@ vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 
 import {
   findUnreferencedStorageKeys,
-  isStorageObjectReferenced,
+  getStorageObjectReferenceStatus,
 } from "@/lib/repositories/storage-reference-repository";
 import { storageUrlForKey } from "@/lib/storage/storage-url";
 
@@ -33,7 +33,7 @@ describe("storage reference repository", () => {
     const currentUrl = storageUrlForKey(currentKey);
     prismaMock.attachment.findFirst.mockResolvedValueOnce({ id: "attachment-1" });
 
-    await expect(isStorageObjectReferenced(currentUrl)).resolves.toBe(true);
+    await expect(getStorageObjectReferenceStatus(currentUrl)).resolves.toBe("referenced");
 
     const expectedAliases = [currentKey, currentUrl];
     expect(prismaMock.attachment.findFirst).toHaveBeenCalledWith({
@@ -73,13 +73,23 @@ describe("storage reference repository", () => {
       },
     );
 
-    await expect(isStorageObjectReferenced(legacyKey)).resolves.toBe(true);
+    await expect(getStorageObjectReferenceStatus(legacyKey)).resolves.toBe("referenced");
   });
 
   it("fails closed when any cross-table lookup errors", async () => {
     prismaMock.submission.findFirst.mockRejectedValueOnce(new Error("database unavailable"));
 
-    await expect(isStorageObjectReferenced(currentKey)).resolves.toBe(true);
+    await expect(getStorageObjectReferenceStatus(currentKey)).resolves.toBe("unknown");
+  });
+
+  it("preserves lookup uncertainty separately from a positively proved live reference", async () => {
+    prismaMock.submission.findFirst.mockRejectedValueOnce(new Error("database unavailable"));
+    await expect(getStorageObjectReferenceStatus(currentKey)).resolves.toBe("unknown");
+
+    prismaMock.teacher.findFirst.mockResolvedValueOnce({ id: "teacher-1" });
+    await expect(getStorageObjectReferenceStatus(currentKey)).resolves.toBe("referenced");
+
+    await expect(getStorageObjectReferenceStatus(currentKey)).resolves.toBe("unreferenced");
   });
 
   it("returns only normalized, unreferenced keys and accepts a transaction-shaped database client", async () => {

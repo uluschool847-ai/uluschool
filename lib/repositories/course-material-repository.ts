@@ -2,8 +2,10 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
-import { finalizePendingUploads } from "@/lib/repositories/pending-upload-repository";
-import { findUnreferencedStorageKeys } from "@/lib/repositories/storage-reference-repository";
+import {
+  finalizePendingUploads,
+  queueStorageObjectForDeletion,
+} from "@/lib/repositories/pending-upload-repository";
 import { preferredStoredFileHref, storageHrefForKey } from "@/lib/security/storage-links";
 import { isTeacherMaterialStorageKey, validateLegacyStorageKey } from "@/lib/storage/storage-key";
 import {
@@ -222,8 +224,63 @@ function validateStoredCleanupKeys(attachments: Array<{ storageKey: unknown }>, 
   );
 }
 
-async function findOrphanStorageKeys(storageKeys: string[], database: MaterialDatabase) {
-  return findUnreferencedStorageKeys(storageKeys, database);
+function assertMaterialTransactionClient(
+  database: MaterialDatabase,
+): asserts database is Prisma.TransactionClient {
+  if (
+    !database ||
+    typeof database !== "object" ||
+    "$transaction" in (database as unknown as Record<string, unknown>)
+  ) {
+    throw new Error("Material storage changes require a transaction.");
+  }
+}
+
+function validateStoredCleanupAttachments(
+  attachments: Array<{
+    filename: unknown;
+    mimeType: unknown;
+    size: unknown;
+    storageKey: unknown;
+  }>,
+  teacherId: string,
+) {
+  return attachments.map((attachment) => ({
+    storageKey: validateStoredCleanupKey(attachment.storageKey, teacherId),
+    filename: attachment.filename,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+  }));
+}
+
+async function queueMaterialAttachmentsForDeletion(
+  attachments: ReturnType<typeof validateStoredCleanupAttachments>,
+  teacherId: string,
+  database: MaterialDatabase,
+) {
+  if (attachments.length === 0) return [];
+  assertMaterialTransactionClient(database);
+  const queuedStorageKeys: string[] = [];
+  const attemptedStorageKeys = new Set<string>();
+
+  for (const attachment of attachments) {
+    if (attemptedStorageKeys.has(attachment.storageKey)) continue;
+    attemptedStorageKeys.add(attachment.storageKey);
+    const queued = await queueStorageObjectForDeletion(
+      {
+        ownerId: teacherId,
+        purpose: "course-material",
+        storageKey: attachment.storageKey,
+        filename: String(attachment.filename),
+        mimeType: String(attachment.mimeType),
+        byteSize: Number(attachment.size),
+      },
+      database,
+    );
+    if (queued) queuedStorageKeys.push(queued.storageKey);
+  }
+
+  return queuedStorageKeys;
 }
 
 async function finalizeMaterialAttachmentReservations(
@@ -232,6 +289,7 @@ async function finalizeMaterialAttachmentReservations(
   database: MaterialDatabase,
 ) {
   if (!attachments?.length) return;
+  assertMaterialTransactionClient(database);
   await finalizePendingUploads(
     {
       ownerId: teacherId,
@@ -387,10 +445,13 @@ export async function updateCourseMaterialForTeacher(
   const existing = await assertTeacherOwnsMaterial(teacherId, id, database);
   const data: Prisma.CourseMaterialUpdateInput = {};
   const isReplacingFile = hasAttachment(input);
-  const validatedStoredKeys = validateStoredCleanupKeys(existing.attachments, teacherId);
+  const storedCleanupAttachments = validateStoredCleanupAttachments(
+    existing.attachments,
+    teacherId,
+  );
+  const validatedStoredKeys = storedCleanupAttachments.map((attachment) => attachment.storageKey);
   const existingPrimaryStorageKey = validatedStoredKeys[0] ?? null;
   const existingPrimaryHref = storageHrefForKey(existingPrimaryStorageKey);
-  const oldStorageKeys = isReplacingFile ? validatedStoredKeys : [];
   const validatedFileUrl =
     input.fileUrl === undefined
       ? existingPrimaryHref
@@ -464,7 +525,11 @@ export async function updateCourseMaterialForTeacher(
     include: materialInclude,
   });
   if (!finalMaterial) throw new Error("Material not found after update.");
-  const orphanStorageKeys = await findOrphanStorageKeys(oldStorageKeys, database);
+  const orphanStorageKeys = await queueMaterialAttachmentsForDeletion(
+    storedCleanupAttachments,
+    teacherId,
+    database,
+  );
   return {
     ...finalMaterial,
     cleanup: {
@@ -552,10 +617,15 @@ export async function deleteCourseMaterialForTeacher(
     throw new Error("Material not found or not owned by teacher.");
   }
 
-  const storageKeys = validateStoredCleanupKeys(existing.attachments, teacherId);
+  const cleanupAttachments = validateStoredCleanupAttachments(existing.attachments, teacherId);
 
+  if (cleanupAttachments.length > 0) assertMaterialTransactionClient(database);
   await database.courseMaterial.delete({ where: { id: existing.id } });
-  const orphanStorageKeys = await findOrphanStorageKeys(storageKeys, database);
+  const orphanStorageKeys = await queueMaterialAttachmentsForDeletion(
+    cleanupAttachments,
+    teacherId,
+    database,
+  );
 
   return {
     ...existing,
@@ -588,8 +658,11 @@ export async function unlinkCourseMaterialAttachmentForTeacher(
     throw new Error("Material attachment not found or not owned by teacher.");
   }
 
-  const storageKey = validateStoredCleanupKey(attachment.storageKey, teacherId);
+  const [cleanupAttachment] = validateStoredCleanupAttachments([attachment], teacherId);
+  if (!cleanupAttachment) throw new Error("Material attachment metadata is unavailable.");
+  const storageKey = cleanupAttachment.storageKey;
 
+  assertMaterialTransactionClient(database);
   await database.attachment.delete({
     where: { id: attachment.id },
   });
@@ -599,7 +672,11 @@ export async function unlinkCourseMaterialAttachmentForTeacher(
     include: materialInclude,
   });
   if (!finalMaterial) throw new Error("Material not found after unlinking attachment.");
-  const orphanStorageKeys = await findOrphanStorageKeys([storageKey], database);
+  const orphanStorageKeys = await queueMaterialAttachmentsForDeletion(
+    [cleanupAttachment],
+    teacherId,
+    database,
+  );
 
   return {
     ...finalMaterial,

@@ -76,12 +76,18 @@ origin cache-control headers.
 
 ## 6. Verify scheduled cleanup
 
+- [ ] Deploy both additive pending-upload migrations and confirm `PendingUpload` claim fields and
+      `ActiveStorageObject` exist before enabling uploads.
+- [ ] Inventory pre-existing report PDF and teacher-photo references. Backfill only exact,
+      owner-attributed byte sizes into `ActiveStorageObject`; remove or migrate unattributed legacy
+      photos before launch. Confirm no conservative quota block remains for launch users.
 - [ ] Configure one environment-scoped Render Cron Job on `*/10 * * * *` to call
       `GET /api/cron/automation` with `Authorization: Bearer <CRON_SECRET>`.
 - [ ] Confirm the job has only the matching environment origin and secret, returns HTTP 2xx, and
       never logs the authorization header, a raw storage URL, or object key.
 - [ ] Verify the job remains enabled after the first deploy and configure an operations alert for
-      non-2xx results so bounded pending-upload cleanup continues after storage failures.
+      non-2xx results. A durability failure intentionally returns non-2xx and requires investigation;
+      do not delete or edit the retained lease row merely to clear the alert.
 
 ## 7. Verify DNS, TLS, canonical behavior, and the app
 

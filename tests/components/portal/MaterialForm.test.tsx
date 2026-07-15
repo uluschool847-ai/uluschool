@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const submitCourseMaterialActionMock = vi.hoisted(() => vi.fn());
@@ -20,6 +20,28 @@ const lessons = [
 const uploadedStorageKey =
   "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-worksheet.pdf";
 const uploadedPublicUrl = storageUrlForKey(uploadedStorageKey);
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
+function successfulUploadResponse(storageKey: string, filename: string) {
+  return new Response(
+    JSON.stringify({
+      success: true,
+      storageKey,
+      publicUrl: storageUrlForKey(storageKey),
+      filename,
+      mimeType: "application/pdf",
+      size: 5,
+    }),
+    { status: 201, headers: { "content-type": "application/json" } },
+  );
+}
 
 describe("MaterialForm", () => {
   beforeEach(() => {
@@ -380,6 +402,99 @@ describe("MaterialForm", () => {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ storageKey: uploadedStorageKey }),
           keepalive: true,
+        }),
+      );
+    });
+  });
+
+  it.each([
+    ["A then B", ["A", "B"]],
+    ["B then A", ["B", "A"]],
+  ] as const)(
+    "releases every stale successful upload when deferred requests complete %s",
+    async (_label, completionOrder) => {
+      const firstStorageKey =
+        "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000010-first.pdf";
+      const secondStorageKey =
+        "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000011-second.pdf";
+      const firstRequest = deferred<Response>();
+      const secondRequest = deferred<Response>();
+      const posts = [firstRequest.promise, secondRequest.promise];
+      let postIndex = 0;
+      const fetchMock = vi.fn(async (_url: string, options?: RequestInit) => {
+        if (options?.method === "POST") return posts[postIndex++];
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(<MaterialForm mode="create" lessons={lessons} />);
+      const fileInput = screen.getByLabelText(/upload file|file upload|choose file/i);
+      fireEvent.change(fileInput, {
+        target: { files: [new File(["first"], "first.pdf", { type: "application/pdf" })] },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
+      fireEvent.change(fileInput, {
+        target: { files: [new File(["second"], "second.pdf", { type: "application/pdf" })] },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
+
+      for (const request of completionOrder) {
+        await act(async () => {
+          if (request === "A") {
+            firstRequest.resolve(successfulUploadResponse(firstStorageKey, "first.pdf"));
+          } else {
+            secondRequest.resolve(successfulUploadResponse(secondStorageKey, "second.pdf"));
+          }
+          await Promise.resolve();
+        });
+      }
+
+      expect(await screen.findByText(/upload complete: second\.pdf/i)).toBeDefined();
+      await waitFor(() => {
+        const deletedKeys = fetchMock.mock.calls
+          .filter(([, options]) => options?.method === "DELETE")
+          .map(([, options]) => JSON.parse(String(options?.body)).storageKey);
+        expect(deletedKeys).toEqual([firstStorageKey]);
+        expect(deletedKeys).not.toContain(secondStorageKey);
+      });
+    },
+  );
+
+  it("prevents Cancel navigation while an upload POST is unresolved and later releases its key", async () => {
+    const request = deferred<Response>();
+    const fetchMock = vi.fn(async (_url: string, options?: RequestInit) => {
+      if (options?.method === "POST") return request.promise;
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MaterialForm mode="create" lessons={lessons} />);
+    fireEvent.change(screen.getByLabelText(/upload file|file upload|choose file/i), {
+      target: { files: [new File(["first"], "first.pdf", { type: "application/pdf" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
+
+    const cancel = screen.getByRole("link", { name: /cancel/i });
+    expect(cancel).toHaveAttribute("aria-disabled", "true");
+    expect(fireEvent.click(cancel)).toBe(false);
+    expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "DELETE")).toHaveLength(
+      0,
+    );
+
+    await act(async () => {
+      request.resolve(successfulUploadResponse(uploadedStorageKey, "first.pdf"));
+      await Promise.resolve();
+    });
+    expect(await screen.findByText(/upload complete: first\.pdf/i)).toBeDefined();
+    cancel.addEventListener("click", (event) => event.preventDefault(), { once: true });
+    fireEvent.click(cancel);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/upload",
+        expect.objectContaining({
+          method: "DELETE",
+          body: JSON.stringify({ storageKey: uploadedStorageKey }),
         }),
       );
     });

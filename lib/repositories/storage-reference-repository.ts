@@ -7,21 +7,22 @@ import {
 } from "@/lib/storage/storage-url";
 
 export type StorageReferenceDatabase = typeof prisma | Prisma.TransactionClient;
+export type StorageReferenceStatus = "referenced" | "unreferenced" | "unknown";
 
 function aliasesFor(reference: PersistedStorageReference) {
   return [...new Set(reference.aliases)];
 }
 
 /**
- * Returns true for every malformed or uncertain candidate. Cleanup callers must only delete when
- * this function can prove that no durable record references the normalized object aliases.
+ * Distinguishes a proved live reference from a proved orphan and lookup uncertainty. Cleanup
+ * callers must delete only the `unreferenced` result.
  */
-export async function isStorageObjectReferenced(
+async function getStorageObjectReferenceStatus(
   value: unknown,
   database: StorageReferenceDatabase = prisma,
-) {
+): Promise<StorageReferenceStatus> {
   const reference = normalizePersistedStorageReference(value);
-  if (!reference) return true;
+  if (!reference) return "unknown";
 
   const aliases = aliasesFor(reference);
   try {
@@ -47,9 +48,11 @@ export async function isStorageObjectReferenced(
         select: { id: true },
       }),
     ]);
-    return Boolean(attachment || courseMaterial || submission || reportSnapshot || teacher);
+    return attachment || courseMaterial || submission || reportSnapshot || teacher
+      ? "referenced"
+      : "unreferenced";
   } catch {
-    return true;
+    return "unknown";
   }
 }
 
@@ -67,11 +70,13 @@ async function findUnreferencedStorageKeys(
 
   const unreferenced: string[] = [];
   for (const reference of candidates.values()) {
-    if (!(await isStorageObjectReferenced(reference.storageKey, database))) {
+    if (
+      (await getStorageObjectReferenceStatus(reference.storageKey, database)) === "unreferenced"
+    ) {
       unreferenced.push(reference.storageKey);
     }
   }
   return unreferenced;
 }
 
-export { findUnreferencedStorageKeys };
+export { findUnreferencedStorageKeys, getStorageObjectReferenceStatus };

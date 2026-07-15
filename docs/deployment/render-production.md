@@ -178,11 +178,29 @@ header `Authorization: Bearer <CRON_SECRET>`. Keep `CRON_SECRET` private to the 
 place it in a URL, shell history, repository file, screenshot, or public scheduler configuration.
 
 The route runs the existing rule-based automation and a bounded expired pending-upload sweep on
-every successful invocation. Each sweep claims records before deleting objects and processes a
-small batch, so an outage or backlog drains over later runs without a broad unbounded storage
-operation. Alert on any non-2xx job result and investigate through Render logs without printing
-the authorization header or object URLs. Do not use a public, unauthenticated health check as a
-substitute for this job.
+every successful invocation. Each sweep leases records before checking references or deleting
+objects and processes a small batch. A failed reference lookup or object deletion releases the same
+durable row; a worker that stops mid-operation is recovered after the claim lease becomes stale.
+The route returns a non-2xx response when retry durability cannot be preserved. Alert on every
+non-2xx result and investigate through Render logs without printing the authorization header or
+object URLs. Do not use a public, unauthenticated health check as a substitute for this job.
+
+The active-storage ledger starts accounting for newly finalized materials, report PDFs, and teacher
+photos after the storage migration is deployed. Course-material attachments that predate the ledger
+are also counted by normalized storage identity and their largest recorded attachment size, so URL
+aliases do not count twice. Pre-existing report PDFs and teacher photos do not have trustworthy byte
+sizes in PostgreSQL. The application therefore blocks new owner reservations when it finds an
+unledgered report reference, an unledgered current photo in that administrator's namespace, or any
+unattributed legacy teacher-photo reference.
+
+Before launch, inventory every non-null `ReportSnapshot.pdfStorageKey` and `Teacher.photoUrl`. For
+each object-backed reference, verify the normalized key, owning application user, MIME type,
+filename, and exact R2 byte size, then create the matching `ActiveStorageObject` row in one reviewed
+database transaction. Reports belong to `generatedByTeacherId`; current photos belong to the user
+encoded in `public/teachers/{ownerId}/...`. A legacy photo whose owner cannot be proved must be
+removed or migrated under an incident/change record before administrator uploads are enabled. Never
+guess a byte size or bypass the block by deleting a pending row. Record the inventory and row counts
+without object URLs, keys, credentials, or personal data.
 
 ## Deploy and service verification
 

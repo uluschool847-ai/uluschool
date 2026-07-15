@@ -21,12 +21,11 @@ const prismaMock = vi.hoisted(() => ({
   scheduledClass: {
     findFirst: vi.fn(),
   },
-  $transaction: vi.fn(async (callback: (database: unknown) => unknown) => callback(prismaMock)),
 }));
 
 const storageDeleteMock = vi.hoisted(() => vi.fn());
 const finalizePendingUploadsMock = vi.hoisted(() => vi.fn());
-const findUnreferencedStorageKeysMock = vi.hoisted(() => vi.fn());
+const queueStorageObjectForDeletionMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/prisma", () => ({
   prisma: prismaMock,
@@ -40,10 +39,7 @@ vi.mock("@/lib/storage", () => ({
 
 vi.mock("@/lib/repositories/pending-upload-repository", () => ({
   finalizePendingUploads: finalizePendingUploadsMock,
-}));
-
-vi.mock("@/lib/repositories/storage-reference-repository", () => ({
-  findUnreferencedStorageKeys: findUnreferencedStorageKeysMock,
+  queueStorageObjectForDeletion: queueStorageObjectForDeletionMock,
 }));
 
 type CourseMaterialRepositoryModule = {
@@ -85,7 +81,7 @@ function loadCourseMaterialRepository() {
 }
 
 function material(overrides: Record<string, unknown> = {}) {
-  return {
+  const value = {
     id: "material-1",
     title: "Algebra worksheet",
     description: "Practice set",
@@ -100,6 +96,18 @@ function material(overrides: Record<string, unknown> = {}) {
     },
     ...overrides,
   };
+  if (Array.isArray(value.attachments)) {
+    value.attachments = value.attachments.map((attachment) => ({
+      filename:
+        typeof attachment.storageKey === "string"
+          ? (attachment.storageKey.split("/").at(-1) ?? "material.bin")
+          : "material.bin",
+      mimeType: "application/octet-stream",
+      size: 128,
+      ...attachment,
+    }));
+  }
+  return value;
 }
 
 const createInput = {
@@ -116,9 +124,10 @@ describe("course-material-repository teacher ownership contract", () => {
     prismaMock.attachment.findMany.mockResolvedValue([]);
     prismaMock.courseMaterial.findUnique.mockResolvedValue(material());
     finalizePendingUploadsMock.mockResolvedValue(undefined);
-    findUnreferencedStorageKeysMock.mockImplementation(async (storageKeys: string[]) => [
-      ...new Set(storageKeys),
-    ]);
+    queueStorageObjectForDeletionMock.mockImplementation(async (input) => ({
+      ownerId: input.ownerId,
+      storageKey: input.storageKey,
+    }));
   });
 
   it("exports the dedicated Course Materials repository API", async () => {
@@ -481,12 +490,12 @@ describe("course-material-repository teacher ownership contract", () => {
       material({ attachments: [{ id: "attachment-1", storageKey }] }),
     );
     prismaMock.courseMaterial.delete.mockResolvedValueOnce(material());
-    findUnreferencedStorageKeysMock.mockResolvedValueOnce([]);
+    queueStorageObjectForDeletionMock.mockResolvedValueOnce(null);
     const { deleteCourseMaterialForTeacher } = await loadCourseMaterialRepository();
 
     const result = await deleteCourseMaterialForTeacher("material-1", "teacher-1");
 
-    expect(findUnreferencedStorageKeysMock).toHaveBeenCalledWith([storageKey], prismaMock);
+    expect(queueStorageObjectForDeletionMock).toHaveBeenCalledTimes(1);
     expect(result).toEqual(
       expect.objectContaining({
         cleanup: expect.objectContaining({ queued: false, storageKeys: [] }),
@@ -509,10 +518,7 @@ describe("course-material-repository teacher ownership contract", () => {
 
     const result = await deleteCourseMaterialForTeacher("material-1", "teacher-1");
 
-    expect(findUnreferencedStorageKeysMock).toHaveBeenCalledWith(
-      [storageKey, storageKey],
-      prismaMock,
-    );
+    expect(queueStorageObjectForDeletionMock).toHaveBeenCalledTimes(1);
     expect(result).toEqual(
       expect.objectContaining({
         cleanup: expect.objectContaining({ queued: true, storageKeys: [storageKey] }),
@@ -957,7 +963,15 @@ describe("course-material-repository teacher ownership contract", () => {
     const newFileUrl = storageUrlForKey(newStorageKey);
     prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(
       material({
-        attachments: [{ id: "attachment-old", storageKey: "uploads/teacher/old.pdf" }],
+        attachments: [
+          {
+            id: "attachment-old",
+            storageKey: "uploads/teacher/old.pdf",
+            filename: "old.pdf",
+            mimeType: "application/pdf",
+            size: 1024,
+          },
+        ],
       }),
     );
     prismaMock.courseMaterial.update.mockResolvedValueOnce(
@@ -1006,6 +1020,17 @@ describe("course-material-repository teacher ownership contract", () => {
         }),
       }),
     );
+    expect(queueStorageObjectForDeletionMock).toHaveBeenCalledWith(
+      {
+        ownerId: "teacher-1",
+        purpose: "course-material",
+        storageKey: "uploads/teacher/old.pdf",
+        filename: "old.pdf",
+        mimeType: "application/pdf",
+        byteSize: 1024,
+      },
+      prismaMock,
+    );
   });
 
   it("does not queue or delete a same-key replacement and returns the final attachment state", async () => {
@@ -1025,7 +1050,7 @@ describe("course-material-repository teacher ownership contract", () => {
     prismaMock.courseMaterial.findUnique.mockResolvedValueOnce(
       material({ attachments: [newAttachment] }),
     );
-    findUnreferencedStorageKeysMock.mockResolvedValueOnce([]);
+    queueStorageObjectForDeletionMock.mockResolvedValueOnce(null);
     const { updateCourseMaterialForTeacher } = await loadCourseMaterialRepository();
 
     const result = await updateCourseMaterialForTeacher("material-1", "teacher-1", {
@@ -1048,7 +1073,7 @@ describe("course-material-repository teacher ownership contract", () => {
     });
     expect(result).toEqual(
       expect.objectContaining({
-        attachments: [newAttachment],
+        attachments: [expect.objectContaining(newAttachment)],
         cleanup: expect.objectContaining({ queued: false, storageKeys: [] }),
       }),
     );
@@ -1146,7 +1171,7 @@ describe("course-material-repository teacher ownership contract", () => {
     });
     prismaMock.attachment.delete.mockResolvedValueOnce({ id: "attachment-1", storageKey });
     prismaMock.courseMaterial.findUnique.mockResolvedValueOnce(material({ attachments: [] }));
-    findUnreferencedStorageKeysMock.mockResolvedValueOnce([]);
+    queueStorageObjectForDeletionMock.mockResolvedValueOnce(null);
     const { unlinkCourseMaterialAttachmentForTeacher } = await loadCourseMaterialRepository();
 
     const result = await unlinkCourseMaterialAttachmentForTeacher(
@@ -1183,7 +1208,7 @@ describe("course-material-repository teacher ownership contract", () => {
       "attachment-1",
     );
 
-    expect(findUnreferencedStorageKeysMock).toHaveBeenCalledWith([storageKey], prismaMock);
+    expect(queueStorageObjectForDeletionMock).toHaveBeenCalledTimes(1);
     expect(result).toEqual(
       expect.objectContaining({
         cleanup: expect.objectContaining({ queued: true, storageKeys: [storageKey] }),
