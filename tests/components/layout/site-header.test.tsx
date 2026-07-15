@@ -2,7 +2,11 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SiteHeader } from "../../../components/layout/site-header";
 
-type LinkMockProps = { href: string; children: React.ReactNode } & Record<string, unknown>;
+type LinkMockProps = {
+  href: string;
+  children: React.ReactNode;
+  prefetch?: boolean;
+} & Record<string, unknown>;
 type ImageMockProps = { alt?: string; priority?: boolean } & Record<string, unknown>;
 
 // Mock next/navigation
@@ -19,8 +23,8 @@ vi.mock("next/image", () => ({
 
 // Mock next/link to render standard <a> tags for testing hrefs
 vi.mock("next/link", () => ({
-  default: ({ href, children, ...props }: LinkMockProps) => (
-    <a href={href} {...props}>
+  default: ({ href, children, prefetch, ...props }: LinkMockProps) => (
+    <a href={href} {...props} data-prefetch={prefetch === false ? "false" : "default"}>
       {children}
     </a>
   ),
@@ -96,5 +100,29 @@ describe("SiteHeader Navigation", () => {
       expect(href).not.toBe("");
       expect(href).not.toBe("#");
     }
+  });
+
+  it("disables prefetching for the authenticated teacher portal link", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            authenticated: true,
+            user: {
+              uid: "teacher-1",
+              email: "teacher@example.com",
+              fullName: "Test Teacher",
+              role: "TEACHER",
+            },
+          }),
+      }),
+    ) as typeof fetch;
+
+    render(<SiteHeader />);
+
+    const teacherPortalLink = await screen.findByRole("link", { name: "Teacher Portal" });
+    expect(teacherPortalLink).toHaveAttribute("href", "/portal/teacher");
+    expect(teacherPortalLink).toHaveAttribute("data-prefetch", "false");
   });
 });
