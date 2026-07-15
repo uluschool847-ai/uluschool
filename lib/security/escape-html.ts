@@ -1,3 +1,5 @@
+import { domainToASCII, domainToUnicode } from "node:url";
+
 import addressparser from "nodemailer/lib/addressparser";
 import { z } from "zod";
 
@@ -65,6 +67,17 @@ function isAsciiDnsCharacter(character: string) {
   );
 }
 
+function hasCanonicalAlabel(label: string) {
+  const canonicalAscii = domainToASCII(label);
+  if (!canonicalAscii) {
+    return false;
+  }
+
+  const unicode = domainToUnicode(canonicalAscii);
+  const roundTripAscii = unicode ? domainToASCII(unicode) : "";
+  return roundTripAscii === canonicalAscii && canonicalAscii === label.toLowerCase();
+}
+
 function hasValidDnsDomain(domain: string) {
   const labels = domain.split(".");
   if (labels.length < 2 || labels.some((label) => label.length === 0)) {
@@ -78,6 +91,10 @@ function hasValidDnsDomain(domain: string) {
 
     // ASCII-only labels make JavaScript string length equal the DNS octet length.
     if (label.length > MAX_DOMAIN_LABEL_LENGTH || label.startsWith("-") || label.endsWith("-")) {
+      return false;
+    }
+
+    if (label.toLowerCase().startsWith("xn--") && !hasCanonicalAlabel(label)) {
       return false;
     }
   }

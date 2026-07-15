@@ -113,6 +113,28 @@ describe("email content escaping", () => {
     }
   });
 
+  it("rejects malformed reserved A-labels and preserves exact canonical A-label input", () => {
+    for (const invalidMailbox of [
+      "student@xn--a.example",
+      "student@xn--0.example",
+      "student@example.xn--abc",
+      "student@xn---bba.example",
+    ]) {
+      expect(parseSingleMailbox(invalidMailbox)).toBeNull();
+    }
+
+    for (const validMailbox of [
+      "student@xn--bcher-kva.example",
+      "student@XN--BCHER-KVA.example",
+      "student@example.xn--p1ai",
+    ]) {
+      expect(parseSingleMailbox(validMailbox)).toEqual({
+        name: "",
+        address: validMailbox,
+      });
+    }
+  });
+
   it("parses the supported sender forms into a structured address and rejects redirection syntax", () => {
     expect(parseEmailSender("ULU Online School <no-reply@uluglobalacademy.com>")).toEqual({
       name: "ULU Online School",

@@ -468,9 +468,55 @@ describe("lib/services/email.ts env handling", () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
-  it("delivers to exact valid 63-octet and punycode DNS recipients", async () => {
+  it("rejects malformed reserved A-labels before transport without logging them", async () => {
     configureSmtp();
-    const validRecipients = [`student@${"a".repeat(63)}.example`, "student@example.xn--p1ai"];
+    const invalidRecipients = [
+      "student@xn--a.example",
+      "student@xn--0.example",
+      "student@example.xn--abc",
+      "student@xn---bba.example",
+    ];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { sendClassReminderEmail } = await import("../../../lib/services/email");
+
+    const results = [];
+    for (const recipientEmail of invalidRecipients) {
+      results.push(
+        await sendClassReminderEmail({
+          recipientEmail,
+          recipientName: "Private Student",
+          classTitle: "Private Mathematics Class",
+          startAt: new Date("2026-07-15T08:00:00.000Z"),
+          endAt: new Date("2026-07-15T09:00:00.000Z"),
+          liveLessonUrl: "https://example.com/private-live-class",
+        }),
+      );
+    }
+
+    expect(results).toEqual(
+      invalidRecipients.map(() => ({
+        delivered: false,
+        reason: "SEND_FAILED",
+        attempts: 0,
+      })),
+    );
+    expect(createTransportMock).not.toHaveBeenCalled();
+    expect(sendMailMock).not.toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    for (const invalidRecipient of invalidRecipients) {
+      expect(logged).not.toContain(invalidRecipient);
+    }
+  });
+
+  it("delivers to exact valid 63-octet and canonical A-label DNS recipients", async () => {
+    configureSmtp();
+    const validRecipients = [
+      `student@${"a".repeat(63)}.example`,
+      "student@xn--bcher-kva.example",
+      "student@XN--BCHER-KVA.example",
+      "student@example.xn--p1ai",
+    ];
     const { sendClassReminderEmail } = await import("../../../lib/services/email");
 
     const results = [];
