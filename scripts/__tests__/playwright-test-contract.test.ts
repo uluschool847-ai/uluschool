@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
 const RUNNER = join(ROOT, "scripts", "playwright-test.mjs");
+const SUBPROCESS_TEST_TIMEOUT_MS = 30_000;
 const temporaryDirectories: string[] = [];
 
 type Capture = {
@@ -254,7 +255,11 @@ function readPackageScripts() {
   };
 }
 
-describe("Playwright E2E partition contract", { timeout: 30_000 }, () => {
+function cliIt(name: string, callback: () => void) {
+  it(name, callback, SUBPROCESS_TEST_TIMEOUT_MS);
+}
+
+describe("Playwright E2E partition contract", () => {
   it("runs the production release partitions with required admin 2FA isolated", () => {
     const scripts = readPackageScripts().scripts;
 
@@ -277,7 +282,7 @@ describe("Playwright E2E partition contract", { timeout: 30_000 }, () => {
     expect(scripts["test:e2e:focused"]).toBe("node scripts/playwright-test.mjs --isolated-server");
   });
 
-  it("standard Playwright collection excludes only the partitioned signed-delivery path", () => {
+  cliIt("standard Playwright collection excludes only the partitioned signed-delivery path", () => {
     const decoyDirectory = mkdtempSync(join(ROOT, "e2e", "playwright-contract-decoy-"));
     temporaryDirectories.push(decoyDirectory);
     const decoySpec = join(decoyDirectory, "signed-file-delivery.spec.ts");
@@ -307,9 +312,9 @@ describe("Playwright E2E partition contract", { timeout: 30_000 }, () => {
     expect(output).not.toContain("portals/admin-teachers.spec.ts");
     expect(output).not.toContain("portals/teacher-academics.spec.ts");
     expect(output).not.toContain("portals/teacher-materials.spec.ts");
-  }, 30_000);
+  });
 
-  it("matches the signed-delivery ignore on exact Windows and POSIX path components", () => {
+  cliIt("matches the signed-delivery ignore on exact Windows and POSIX path components", () => {
     const { capture, status } = runRunner([
       "--isolated-server",
       "--standard-partition",
@@ -326,7 +331,7 @@ describe("Playwright E2E partition contract", { timeout: 30_000 }, () => {
     });
   });
 
-  it("normalizes an isolated admin-2fa child and forwards only Playwright arguments", () => {
+  cliIt("normalizes an isolated admin-2fa child and forwards only Playwright arguments", () => {
     const { capture, status } = runRunner(
       [
         "--isolated-server",
@@ -351,7 +356,7 @@ describe("Playwright E2E partition contract", { timeout: 30_000 }, () => {
     expectWrapperFlagsRemoved(capture);
   });
 
-  it("forces standard policy false while retaining the partition next-start command", () => {
+  cliIt("forces standard policy false while retaining the partition next-start command", () => {
     const { capture, status } = runRunner(
       ["--isolated-server", "--standard-partition", "--next-start", "--list"],
       { ADMIN_REQUIRE_2FA: "true", E2E_ADMIN_REQUIRE_2FA: "true" },
@@ -369,7 +374,7 @@ describe("Playwright E2E partition contract", { timeout: 30_000 }, () => {
     expectWrapperFlagsRemoved(capture);
   });
 
-  it("forces storage policy and local storage without retaining hostile server commands", () => {
+  cliIt("forces storage policy and local storage without retaining hostile server commands", () => {
     const { capture, status } = runRunner(
       ["--isolated-server", "--storage-partition", "e2e/portals/teacher-materials.spec.ts"],
       { ADMIN_REQUIRE_2FA: "true", E2E_ADMIN_REQUIRE_2FA: "true" },
@@ -388,27 +393,30 @@ describe("Playwright E2E partition contract", { timeout: 30_000 }, () => {
     expectWrapperFlagsRemoved(capture);
   });
 
-  it("forces deterministic offline signed-delivery storage and forwards only the exact spec", () => {
-    const { capture, status } = runRunner([
-      "--isolated-server",
-      "--signed-delivery-partition",
-      "--next-start",
-      "e2e/storage/signed-file-delivery.spec.ts",
-    ]);
+  cliIt(
+    "forces deterministic offline signed-delivery storage and forwards only the exact spec",
+    () => {
+      const { capture, status } = runRunner([
+        "--isolated-server",
+        "--signed-delivery-partition",
+        "--next-start",
+        "e2e/storage/signed-file-delivery.spec.ts",
+      ]);
 
-    expect(status).toBe(0);
-    expectIsolatedServer(capture);
-    expect(capture.environment).toMatchObject({
-      ADMIN_REQUIRE_2FA: "false",
-      E2E_ADMIN_REQUIRE_2FA: "false",
-      E2E_PARTITION: "signed-delivery",
-      E2E_PLAYWRIGHT_SERVER_COMMAND: "npx next start",
-      ...signedDeliveryEnvironment,
-    });
-    expect(capture.webServerEnvironment).toMatchObject(signedDeliveryEnvironment);
-    expect(capture.args).toEqual(["test", "e2e/storage/signed-file-delivery.spec.ts"]);
-    expectWrapperFlagsRemoved(capture);
-  });
+      expect(status).toBe(0);
+      expectIsolatedServer(capture);
+      expect(capture.environment).toMatchObject({
+        ADMIN_REQUIRE_2FA: "false",
+        E2E_ADMIN_REQUIRE_2FA: "false",
+        E2E_PARTITION: "signed-delivery",
+        E2E_PLAYWRIGHT_SERVER_COMMAND: "npx next start",
+        ...signedDeliveryEnvironment,
+      });
+      expect(capture.webServerEnvironment).toMatchObject(signedDeliveryEnvironment);
+      expect(capture.args).toEqual(["test", "e2e/storage/signed-file-delivery.spec.ts"]);
+      expectWrapperFlagsRemoved(capture);
+    },
+  );
 
   it.each(["e2e/portals/admin-security.spec.ts", "e2e/portals/initial-admin-2fa.spec.ts"])(
     "infers required 2FA for the focused exact path %s",
@@ -429,9 +437,10 @@ describe("Playwright E2E partition contract", { timeout: 30_000 }, () => {
       expect(capture.args).toEqual(["test", specPath, "--reporter=line"]);
       expectWrapperFlagsRemoved(capture);
     },
+    SUBPROCESS_TEST_TIMEOUT_MS,
   );
 
-  it("propagates the Playwright child numeric exit code", () => {
+  cliIt("propagates the Playwright child numeric exit code", () => {
     const { capture, status } = runRunner(
       ["--isolated-server", "--standard-partition", "--next-start"],
       { PLAYWRIGHT_TEST_EXIT_CODE: "23" },
@@ -442,14 +451,14 @@ describe("Playwright E2E partition contract", { timeout: 30_000 }, () => {
     expect(status).toBe(23);
   });
 
-  it("ignores hostile ambient CLI injection outside test mode", () => {
+  cliIt("ignores hostile ambient CLI injection outside test mode", () => {
     const { captureFile, result } = runProductionRunner(false);
 
     expect(result.status).toBe(0);
     expect(existsSync(captureFile)).toBe(false);
   });
 
-  it("rejects the explicit CLI hook outside test mode", () => {
+  cliIt("rejects the explicit CLI hook outside test mode", () => {
     const { captureFile, result } = runProductionRunner(true);
 
     expect(result.status).toBe(1);
