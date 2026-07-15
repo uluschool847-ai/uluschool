@@ -15,6 +15,7 @@ const seedIntegrationFlag = "RUN_SEED_DB_INTEGRATION";
 const storagePostgresIntegrationFlag = "RUN_S3_POSTGRES_INTEGRATION";
 const requiredRunCommands = [
   "npm ci",
+  "npx playwright install --with-deps chromium",
   "npx prisma generate",
   "npx prisma validate",
   "npx prisma migrate deploy",
@@ -23,6 +24,8 @@ const requiredRunCommands = [
   "npm run typecheck",
   "npm run test",
   "npm run build",
+  "npm run db:seed",
+  "npm run test:e2e:release",
 ];
 
 function asRecord(value: unknown, label: string): Record<string, unknown> {
@@ -201,12 +204,22 @@ function assertCiWorkflowContract(
   }
 
   const runCommands = steps.flatMap((step) => (typeof step.run === "string" ? [step.run] : []));
-  const commandIndexes = requiredRunCommands.map((command) => {
-    const index = runCommands.indexOf(command);
-    if (index === -1) {
+  for (const command of requiredRunCommands) {
+    if (!runCommands.includes(command)) {
       throw new Error(`verify job must run ${command}`);
     }
+  }
 
+  let previousIndex = -1;
+  const commandIndexes = requiredRunCommands.map((command) => {
+    const index = runCommands.findIndex(
+      (runCommand, runCommandIndex) => runCommandIndex > previousIndex && runCommand === command,
+    );
+    if (index === -1) {
+      throw new Error("verify job run commands must remain in the required order");
+    }
+
+    previousIndex = index;
     return index;
   });
 

@@ -5,6 +5,7 @@ const reuseExistingServer = /^(1|true|yes)$/i.test(
   process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER ?? "",
 );
 const partition = process.env.E2E_PARTITION ?? "focused";
+const isReleasePartition = ["standard", "admin-2fa", "signed-delivery", "storage"].includes(partition);
 const isStoragePartition = partition === "storage";
 const adminTwoFactorRequired = (process.env.E2E_ADMIN_REQUIRE_2FA ?? "false") === "true";
 const serverCommand = isStoragePartition
@@ -24,7 +25,7 @@ const testIgnore =
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
-  retries: 1,
+  retries: isReleasePartition ? 0 : 1,
   workers: 1,
   timeout: 60000,
   testIgnore,

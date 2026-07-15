@@ -13,6 +13,7 @@ type Capture = {
   args: string[];
   environment: Record<string, string | null>;
   matcherResults: Record<string, boolean>;
+  retries: number;
   source: string;
   webServerEnvironment: Record<string, string | null>;
 };
@@ -98,7 +99,7 @@ const matcherResults = Object.fromEntries(
   ]),
 );
 
-process.stdout.write(JSON.stringify({ matcherResults, webServerEnvironment }));
+process.stdout.write(JSON.stringify({ matcherResults, retries: config.retries, webServerEnvironment }));
 `,
   );
 
@@ -127,7 +128,7 @@ if (configCapture.status !== 0) {
   throw new Error("Unable to capture Playwright config: " + configCapture.stderr);
 }
 
-const { matcherResults, webServerEnvironment } = JSON.parse(configCapture.stdout);
+const { matcherResults, retries, webServerEnvironment } = JSON.parse(configCapture.stdout);
 const environmentKeys = [
   "PLAYWRIGHT_BASE_URL",
   "PORT",
@@ -156,6 +157,7 @@ writeFileSync(
     args: process.argv.slice(2),
     environment: capturedEnvironment,
     matcherResults,
+    retries,
     webServerEnvironment,
   }),
 );
@@ -227,6 +229,22 @@ function runProductionRunner(useExplicitHook: boolean) {
   return { captureFile, result };
 }
 
+function configFor(partition: "focused" | "standard" | "admin-2fa" | "signed-delivery" | "storage") {
+  const partitionFlags = {
+    "admin-2fa": "--admin-2fa-partition",
+    "signed-delivery": "--signed-delivery-partition",
+    standard: "--standard-partition",
+    storage: "--storage-partition",
+  } as const;
+  const { capture, status } = runRunner(
+    ["--isolated-server", ...(partition === "focused" ? [] : [partitionFlags[partition]]), "--list"],
+    { E2E_PARTITION: partition },
+  );
+
+  expect(status).toBe(0);
+  return capture;
+}
+
 function expectIsolatedServer(capture: Capture) {
   const baseUrl = new URL(capture.environment.PLAYWRIGHT_BASE_URL ?? "");
 
@@ -260,6 +278,13 @@ function cliIt(name: string, callback: () => void) {
 }
 
 describe("Playwright E2E partition contract", () => {
+  cliIt("retries only focused browser tests", () => {
+    expect(configFor("focused").retries).toBe(1);
+    for (const partition of ["standard", "admin-2fa", "signed-delivery", "storage"] as const) {
+      expect(configFor(partition).retries).toBe(0);
+    }
+  });
+
   it("runs the production release partitions with required admin 2FA isolated", () => {
     const scripts = readPackageScripts().scripts;
 
