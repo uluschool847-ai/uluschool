@@ -181,6 +181,7 @@ const CLIENT_SENTRY_DSN = "https://client-public-key@o123456.ingest.sentry.io/2"
 type InitOptions = {
   beforeBreadcrumb?: unknown;
   beforeSend?: unknown;
+  beforeSendTransaction?: unknown;
   dsn?: string;
   enabled?: boolean;
   sendDefaultPii?: boolean;
@@ -261,6 +262,7 @@ describe("sanitizeSentryEvent", () => {
             data: {
               "http.url": fixture.url,
               url: fixture.url,
+              "url.full": fixture.url,
             },
             op: "http.client",
           },
@@ -274,6 +276,7 @@ describe("sanitizeSentryEvent", () => {
       expect(event).toEqual(snapshot);
       expect(spanData?.url).toBe(fixture.expectedUrl);
       expect(spanData?.["http.url"]).toBe(fixture.expectedUrl);
+      expect(spanData?.["url.full"]).toBe(fixture.expectedUrl);
       expect(JSON.stringify(sanitized)).not.toContain(fixture.token);
     },
   );
@@ -1083,11 +1086,53 @@ describe("Sentry runtime configuration", () => {
       [InitOptions],
     ]) {
       expect(options.beforeSend).toBe(sanitizer.sanitizeSentryEvent);
+      expect(options.beforeSendTransaction).toBe(sanitizer.sanitizeSentryEvent);
       expect(options.beforeBreadcrumb).toBe(sanitizer.sanitizeSentryBreadcrumb);
       expect(options.sendDefaultPii).toBe(false);
       expect(options.tracesSampleRate).toBe(0.2);
     }
   });
+
+  it.each(["server", "edge", "client"] as const)(
+    "sanitizes %s transaction names and standard span URL attributes through the runtime hook",
+    async (runtime) => {
+      const options = await captureInitOptions(runtime, {
+        SENTRY_ENABLED: "true",
+        SENTRY_DSN: SERVER_SENTRY_DSN,
+        NEXT_PUBLIC_SENTRY_DSN: CLIENT_SENTRY_DSN,
+      });
+      const sanitizer = await import("@/lib/monitoring/sentry-sanitize");
+      const beforeSendTransaction = options.beforeSendTransaction as
+        | typeof sanitizer.sanitizeSentryEvent
+        | undefined;
+      const token = `RUNTIME_${runtime.toUpperCase()}_TRANSACTION_FILE_TOKEN`;
+      const privateUrl = `/api/files/${token}?download=${token}`;
+      const event = {
+        transaction: `GET ${privateUrl}`,
+        spans: [
+          {
+            data: {
+              url: privateUrl,
+              "http.url": privateUrl,
+              "url.full": privateUrl,
+            },
+            op: "http.client",
+          },
+        ],
+      } as Event;
+
+      expect(beforeSendTransaction).toBe(sanitizer.sanitizeSentryEvent);
+      const sanitized = beforeSendTransaction?.(event);
+
+      expect(sanitized?.transaction).toBe("GET /api/files/:token");
+      expect(sanitized?.spans?.[0]?.data).toMatchObject({
+        url: "/api/files/:token",
+        "http.url": "/api/files/:token",
+        "url.full": "/api/files/:token",
+      });
+      expect(JSON.stringify(sanitized)).not.toContain(token);
+    },
+  );
 
   it.each(["server", "edge"] as const)(
     "enables %s only with the exact flag and a non-empty private DSN",
@@ -1141,6 +1186,7 @@ describe("Sentry runtime configuration", () => {
       const source = readFileSync(join(process.cwd(), sourcePath), "utf8");
 
       expect(source).toMatch(/beforeSend\s*:\s*sanitizeSentryEvent/);
+      expect(source).toMatch(/beforeSendTransaction\s*:\s*sanitizeSentryEvent/);
       expect(source).toMatch(/beforeBreadcrumb\s*:\s*sanitizeSentryBreadcrumb/);
       expect(source).toMatch(/sendDefaultPii\s*:\s*false/);
       expect(source).toMatch(/parseSentrySampleRate\s*\(/);

@@ -14,6 +14,7 @@ Sentry.init({
   enabled: sentryEnabled && sentryDsn.length > 0,
   tracesSampleRate: parseSentrySampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE ?? ""),
   beforeSend: sanitizeSentryEvent,
+  beforeSendTransaction: sanitizeSentryEvent,
   beforeBreadcrumb: sanitizeSentryBreadcrumb,
   sendDefaultPii: false,
 });

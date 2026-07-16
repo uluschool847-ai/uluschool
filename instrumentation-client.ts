@@ -13,6 +13,7 @@ Sentry.init({
   enabled: sentryDsn.length > 0,
   tracesSampleRate: parseSentrySampleRate(process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE ?? ""),
   beforeSend: sanitizeSentryEvent,
+  beforeSendTransaction: sanitizeSentryEvent,
   beforeBreadcrumb: sanitizeSentryBreadcrumb,
   sendDefaultPii: false,
 });

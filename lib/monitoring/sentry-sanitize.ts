@@ -311,7 +311,11 @@ function sanitizeValue(
         continue;
       }
 
-      if (typeof propertyValue === "string" && normalizeKey(key).endsWith("url")) {
+      const normalizedKey = normalizeKey(key);
+      if (
+        typeof propertyValue === "string" &&
+        (normalizedKey.endsWith("url") || normalizedKey === "urlfull")
+      ) {
         entries.push([key, sanitizeRouteValue(propertyValue)]);
         continue;
       }
