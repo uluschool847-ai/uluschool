@@ -23,6 +23,7 @@ const id = (name: string) => `t3-pending-v2-${runId}-${name}`;
 const ownerId = id("teacher");
 const otherOwnerId = id("other-teacher");
 const adminOwnerId = id("admin");
+const otherAdminOwnerId = id("other-admin");
 
 function storageKey(name: string) {
   return `private/teachers/${ownerId}/materials/${name}.pdf`;
@@ -74,6 +75,14 @@ async function createOwnerUsers() {
         passwordHash: "not-used",
         isActive: true,
       },
+      {
+        id: otherAdminOwnerId,
+        email: `${otherAdminOwnerId}@example.com`,
+        fullName: "Other pending upload administrator",
+        role: UserRole.ADMIN,
+        passwordHash: "not-used",
+        isActive: true,
+      },
     ],
     skipDuplicates: true,
   });
@@ -81,11 +90,12 @@ async function createOwnerUsers() {
 
 async function cleanupFixtures() {
   const fixtureIds = { startsWith: `t3-pending-v2-${runId}-` };
-  const ownerIds = [ownerId, otherOwnerId, adminOwnerId];
+  const ownerIds = [ownerId, otherOwnerId, adminOwnerId, otherAdminOwnerId];
   await prisma.pendingUpload.deleteMany({ where: { ownerId: { in: ownerIds } } });
   await prisma.activeStorageObject.deleteMany({
     where: { ownerId: { in: ownerIds } },
   });
+  await prisma.teacher.deleteMany({ where: { id: fixtureIds } });
   await prisma.courseMaterial.deleteMany({ where: { id: fixtureIds } });
   await prisma.scheduledClass.deleteMany({ where: { id: fixtureIds } });
   await prisma.appUser.deleteMany({ where: { id: { in: ownerIds } } });
@@ -531,6 +541,62 @@ suite("pending upload PostgreSQL durable lifecycle", { timeout: 90_000 }, () => 
       }),
     ]);
     await expect(prisma.pendingUpload.count({ where: { ownerId: adminOwnerId } })).resolves.toBe(0);
+  });
+
+  it("attributes current teacher photos to their encoded administrator owner", async () => {
+    const firstAdminPhotoKey = `public/teachers/${adminOwnerId}/photo.webp`;
+    await prisma.activeStorageObject.create({
+      data: {
+        ownerId: adminOwnerId,
+        purpose: "teacher-photo",
+        storageKey: firstAdminPhotoKey,
+        filename: "photo.webp",
+        mimeType: "image/webp",
+        byteSize: 512,
+      },
+    });
+    await prisma.teacher.create({
+      data: {
+        id: id("teacher-photo-first-admin"),
+        fullName: "First administrator photo",
+        title: "Teacher",
+        bio: "Current managed photo owned by the first administrator.",
+        photoUrl: storageUrlForKey(firstAdminPhotoKey),
+      },
+    });
+    const storage = { delete: vi.fn().mockResolvedValue(undefined) };
+    const otherAdminUpload = {
+      ownerId: otherAdminOwnerId,
+      purpose: "course-material" as const,
+      storageKey: `private/teachers/${otherAdminOwnerId}/materials/worksheet.pdf`,
+      filename: "worksheet.pdf",
+      mimeType: "application/pdf",
+      byteSize: 128,
+      storage,
+    };
+
+    await expect(reservePendingUpload(otherAdminUpload)).resolves.toEqual(
+      expect.objectContaining({ ownerId: otherAdminOwnerId }),
+    );
+
+    const secondAdminPhotoKey = `public/teachers/${otherAdminOwnerId}/photo.webp`;
+    await prisma.teacher.create({
+      data: {
+        id: id("teacher-photo-second-admin"),
+        fullName: "Second administrator photo",
+        title: "Teacher",
+        bio: "Unledgered current managed photo owned by the second administrator.",
+        photoUrl: storageUrlForKey(secondAdminPhotoKey),
+      },
+    });
+
+    await expect(
+      reservePendingUpload({
+        ...otherAdminUpload,
+        storageKey: `private/teachers/${otherAdminOwnerId}/materials/blocked.pdf`,
+        filename: "blocked.pdf",
+      }),
+    ).rejects.toThrow(PendingUploadError);
   });
 
   it("atomically moves an unreferenced material ledger row back to pending cleanup", async () => {

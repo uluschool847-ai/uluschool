@@ -95,15 +95,28 @@ function assertPurpose(value: string): asserts value is PendingUploadPurpose {
   }
 }
 
-function isDirectTeacherPhotoKey(storageKey: string, ownerId: string) {
+function directTeacherPhotoOwnerId(storageKey: string) {
   try {
-    const namespace = publicTeacherPhotoNamespace(ownerId);
-    const validStorageKey = validateStorageKey(storageKey);
-    const suffix = validStorageKey.slice(namespace.length + 1);
-    return validStorageKey.startsWith(`${namespace}/`) && Boolean(suffix) && !suffix.includes("/");
+    const [root, collection, ownerId, filename, ...extraSegments] =
+      validateStorageKey(storageKey).split("/");
+    if (
+      root !== "public" ||
+      collection !== "teachers" ||
+      !ownerId ||
+      !filename ||
+      extraSegments.length > 0
+    ) {
+      return null;
+    }
+    publicTeacherPhotoNamespace(ownerId);
+    return ownerId;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function isDirectTeacherPhotoKey(storageKey: string, ownerId: string) {
+  return directTeacherPhotoOwnerId(storageKey) === ownerId;
 }
 
 function assertMetadata(
@@ -314,11 +327,13 @@ async function ownerStorageAccounting(ownerId: string, transaction: Prisma.Trans
         hasUnledgeredReference = true;
         break;
       }
-      if (objects.has(reference.storageKey)) continue;
-      if (isDirectTeacherPhotoKey(reference.storageKey, ownerId)) {
+      const photoOwnerId = directTeacherPhotoOwnerId(reference.storageKey);
+      if (!photoOwnerId) {
         hasUnledgeredReference = true;
         break;
       }
+      if (photoOwnerId !== ownerId) continue;
+      if (objects.has(reference.storageKey)) continue;
       hasUnledgeredReference = true;
       break;
     }

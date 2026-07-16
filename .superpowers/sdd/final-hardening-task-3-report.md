@@ -334,3 +334,62 @@ rewritten, so Prisma validate/generate/migrate commands were not rerun.
 - The in-process upload request limiter remains intentionally non-distributed across application
   instances. Unknown managed-looking legacy data continues to block quota growth by design until it
   receives ledger metadata or is remediated.
+
+## Owner Attribution Correction - 2026-07-16
+
+This correction resolves the final second re-review Important finding without changing schema,
+migrations, external/static classification, or legacy alias policy.
+
+### Behavior And Ownership
+
+- Current teacher-photo keys are parsed only after complete current-key validation and must have the
+  exact direct shape `public/teachers/{administratorId}/{filename}`.
+- A valid current photo attributed to another administrator is excluded from the current owner's
+  accounting. It cannot consume or block the current owner's reservation quota.
+- A current owner's own managed photo still uses that owner's pending/active map and blocks growth
+  when no ledger metadata exists.
+- Malformed current-photo shapes and ownerless legacy aliases remain unattributed and fail closed.
+  Existing external HTTPS, root-static, and alias normalization behavior is unchanged.
+
+### Exact RED And GREEN Evidence
+
+Both RED database and GREEN database commands set process-local `DATABASE_URL` and `DIRECT_URL`
+exactly to `postgresql://postgres:postgres@127.0.0.1:55432/ulu_school_c5?schema=public` and asserted
+the exact scheme, host, port, database path, and query before access. No `.env` database URL was
+used.
+
+~~~powershell
+npx vitest run lib/repositories/__tests__/pending-upload-repository.test.ts
+# RED: 1 failed, 26 passed; administrator B was blocked by administrator A's valid current photo.
+
+$env:RUN_TASK3_POSTGRES_INTEGRATION='1'
+npx vitest run tests/repositories/pending-upload-repository.postgres.test.ts
+# RED: 1 failed, 15 passed; the real two-admin reservation reproduced the same false block.
+
+npx vitest run lib/repositories/__tests__/pending-upload-repository.test.ts app/api/upload/__tests__/route.test.ts 'app/(admin)/admin/teachers/__tests__/actions.test.ts'
+# GREEN: 3 files, 109 tests passed.
+
+$env:RUN_TASK3_POSTGRES_INTEGRATION='1'
+npx vitest run tests/repositories/pending-upload-repository.postgres.test.ts tests/repositories/storage-reference-repository.postgres.test.ts
+# GREEN: 2 files, 18 tests passed.
+
+npm run test
+# GREEN: 372 files passed, 6 skipped; 3,662 tests passed, 40 skipped.
+
+npm run lint
+# GREEN: Biome checked 849 files with no fixes required.
+
+npm run typecheck
+# GREEN: tsc --noEmit passed.
+~~~
+
+### Attribution Self-Review And Remaining Risks
+
+- The focused owner parser uses the established current storage-key validator and validated teacher
+  photo namespace; it performs no prefix slicing. Upload metadata ownership and quota attribution
+  now share the same exact direct-photo shape.
+- PostgreSQL coverage proves A's ledger-backed photo does not block B and B's own unledgered photo
+  still blocks B. Unit coverage separately retains malformed current, malformed storage-looking,
+  legacy, external, and root-static outcomes.
+- No browser-facing behavior or UI changed, so no Playwright rerun was required for this correction.
+  The upload request limiter remains intentionally process-local, as previously documented.

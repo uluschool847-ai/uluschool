@@ -39,6 +39,7 @@ import {
   reservePendingUpload,
   sweepExpiredPendingUploads,
 } from "@/lib/repositories/pending-upload-repository";
+import { storageUrlForKey } from "@/lib/storage/storage-url";
 
 const ownerId = "teacher-1";
 const storageKey = "private/teachers/teacher-1/materials/worksheet.pdf";
@@ -373,6 +374,72 @@ describe("pending upload repository", () => {
       );
     },
   );
+
+  it("does not charge another administrator's valid current teacher photo to this owner", async () => {
+    const currentAdminId = "admin-b";
+    const otherAdminPhotoKey = "public/teachers/admin-a/photo.webp";
+    prismaMock.appUser.findUnique.mockResolvedValueOnce({ role: "ADMIN" });
+    prismaMock.teacher.findMany.mockResolvedValueOnce([
+      { photoUrl: storageUrlForKey(otherAdminPhotoKey) },
+    ]);
+
+    await expect(
+      reservePendingUpload({
+        ...upload({
+          ownerId: currentAdminId,
+          storageKey: `private/teachers/${currentAdminId}/materials/worksheet.pdf`,
+        }),
+        storage,
+        now,
+      }),
+    ).resolves.toEqual(expect.objectContaining({ id: "pending-1" }));
+    expect(prismaMock.pendingUpload.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        ownerId: currentAdminId,
+        storageKey: `private/teachers/${currentAdminId}/materials/worksheet.pdf`,
+      }),
+    });
+  });
+
+  it("blocks an administrator for their own unledgered current teacher photo", async () => {
+    const currentAdminId = "admin-b";
+    prismaMock.appUser.findUnique.mockResolvedValueOnce({ role: "ADMIN" });
+    prismaMock.teacher.findMany.mockResolvedValueOnce([
+      { photoUrl: storageUrlForKey(`public/teachers/${currentAdminId}/photo.webp`) },
+    ]);
+
+    await expect(
+      reservePendingUpload({
+        ...upload({
+          ownerId: currentAdminId,
+          storageKey: `private/teachers/${currentAdminId}/materials/worksheet.pdf`,
+        }),
+        storage,
+        now,
+      }),
+    ).rejects.toThrow(PendingUploadError);
+  });
+
+  it("keeps malformed current teacher-photo namespaces fail-closed", async () => {
+    const currentAdminId = "admin-b";
+    prismaMock.appUser.findUnique.mockResolvedValueOnce({ role: "ADMIN" });
+    prismaMock.teacher.findMany.mockResolvedValueOnce([
+      {
+        photoUrl: storageUrlForKey(`public/teachers/${currentAdminId}/nested/photo.webp`),
+      },
+    ]);
+
+    await expect(
+      reservePendingUpload({
+        ...upload({
+          ownerId: currentAdminId,
+          storageKey: `private/teachers/${currentAdminId}/materials/worksheet.pdf`,
+        }),
+        storage,
+        now,
+      }),
+    ).rejects.toThrow(PendingUploadError);
+  });
 
   it("keeps malformed storage-looking teacher photos fail-closed", async () => {
     prismaMock.appUser.findUnique.mockResolvedValueOnce({ role: "ADMIN" });
