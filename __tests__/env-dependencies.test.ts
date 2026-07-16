@@ -6,13 +6,46 @@ const ROOT = process.cwd();
 const ENV_FILES = [join(ROOT, ".env.example"), join(ROOT, ".env.local.example")].filter(existsSync);
 const SCAN_DIRS = [join(ROOT, "app"), join(ROOT, "components"), join(ROOT, "lib"), ROOT];
 
-function walk(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
+type WalkFileSystem = {
+  readdirSync: (path: string) => string[];
+  statSync: (path: string) => { isDirectory: () => boolean };
+};
+type ReadFile = (path: string, encoding: BufferEncoding) => string;
+
+function isConcurrentDisappearance(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+function readFileIfPresent(filePath: string, readFile: ReadFile = readFileSync) {
+  try {
+    return readFile(filePath, "utf8");
+  } catch (error) {
+    if (isConcurrentDisappearance(error)) return null;
+    throw error;
+  }
+}
+
+function walk(dir: string, fileSystem: WalkFileSystem = { readdirSync, statSync }): string[] {
+  let entries: string[];
+  try {
+    entries = fileSystem.readdirSync(dir);
+  } catch (error) {
+    if (isConcurrentDisappearance(error)) return [];
+    throw error;
+  }
+
+  return entries.flatMap((entry) => {
     const fullPath = join(dir, entry);
-    const stats = statSync(fullPath);
+    let stats: { isDirectory: () => boolean };
+    try {
+      stats = fileSystem.statSync(fullPath);
+    } catch (error) {
+      if (isConcurrentDisappearance(error)) return [];
+      throw error;
+    }
     if (stats.isDirectory()) {
       if (["node_modules", ".git", ".next", "coverage"].includes(entry)) return [];
-      return walk(fullPath);
+      return walk(fullPath, fileSystem);
     }
     return fullPath;
   });
@@ -34,7 +67,8 @@ const envContent = ENV_FILES.map((filePath) => readFileSync(filePath, "utf8")).j
 function collectEnvUsages() {
   const usages: Array<{ variable: string; file: string; line: string }> = [];
   for (const filePath of codeFiles) {
-    const content = readFileSync(filePath, "utf8");
+    const content = readFileIfPresent(filePath);
+    if (content === null) continue;
     for (const match of content.matchAll(/process\.env\.([A-Z0-9_]+)/g)) {
       const variable = match[1];
       const line = content.slice(0, match.index).split(/\r?\n/).length;
@@ -46,6 +80,28 @@ function collectEnvUsages() {
 }
 
 describe("Environment variable dependencies", () => {
+  it("skips only source entries that disappear during the audit walk", () => {
+    const root = join(ROOT, "race-fixture");
+    const stablePath = join(root, "stable.ts");
+    const disappearingPath = join(root, "disappearing.ts");
+    const enoent = Object.assign(new Error("disappeared"), { code: "ENOENT" });
+
+    expect(
+      walk(root, {
+        readdirSync: () => ["stable.ts", "disappearing.ts"],
+        statSync: (filePath) => {
+          if (filePath === disappearingPath) throw enoent;
+          return { isDirectory: () => false };
+        },
+      }),
+    ).toEqual([stablePath]);
+    expect(
+      readFileIfPresent(disappearingPath, () => {
+        throw enoent;
+      }),
+    ).toBeNull();
+  });
+
   it("every process.env.* reference has a corresponding entry in .env.example", () => {
     const missing: string[] = [];
 
@@ -72,7 +128,8 @@ describe("Environment variable dependencies", () => {
     ];
 
     for (const filePath of codeFiles) {
-      const content = readFileSync(filePath, "utf8");
+      const content = readFileIfPresent(filePath);
+      if (content === null) continue;
       const lines = content.split(/\r?\n/);
       lines.forEach((line, index) => {
         if (line.includes("process.env.")) return;

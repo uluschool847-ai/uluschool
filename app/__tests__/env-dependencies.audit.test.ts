@@ -31,10 +31,37 @@ function envValue(key: string) {
   return match?.[1]?.trim();
 }
 
+function isConcurrentDisappearance(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+function readFileIfPresent(filePath: string) {
+  try {
+    return readFileSync(filePath, "utf8");
+  } catch (error) {
+    if (isConcurrentDisappearance(error)) return null;
+    throw error;
+  }
+}
+
 function walk(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch (error) {
+    if (isConcurrentDisappearance(error)) return [];
+    throw error;
+  }
+
+  return entries.flatMap((entry) => {
     const fullPath = join(dir, entry);
-    const stats = statSync(fullPath);
+    let stats: ReturnType<typeof statSync>;
+    try {
+      stats = statSync(fullPath);
+    } catch (error) {
+      if (isConcurrentDisappearance(error)) return [];
+      throw error;
+    }
     if (stats.isDirectory()) {
       if (["node_modules", ".git", ".next", "coverage"].includes(entry)) return [];
       return walk(fullPath);
@@ -59,7 +86,8 @@ function e2eSpecsWithPortalPasswordMarker() {
 
   return walk(e2eDir).filter((filePath) => {
     if (!filePath.endsWith(".spec.ts")) return false;
-    return hasPortalPasswordMarker(readFileSync(filePath, "utf8"));
+    const content = readFileIfPresent(filePath);
+    return content !== null && hasPortalPasswordMarker(content);
   });
 }
 
@@ -119,7 +147,8 @@ describe("Google Calendar environment and dependency readiness", () => {
     const serviceAccountEmailPattern = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.iam\.gserviceaccount\.com/i;
 
     for (const filePath of sourceFiles()) {
-      const content = readFileSync(filePath, "utf8");
+      const content = readFileIfPresent(filePath);
+      if (content === null) continue;
       const lines = content.split(/\r?\n/);
       lines.forEach((line, index) => {
         if (privateKeyPattern.test(line) || serviceAccountEmailPattern.test(line)) {
@@ -188,8 +217,8 @@ describe("Google Calendar environment and dependency readiness", () => {
   it("uses exactly one E2E, seed, then local fallback for every portal-password E2E spec", () => {
     const offenders = e2eSpecsWithPortalPasswordMarker()
       .filter((filePath) => {
-        const content = readFileSync(filePath, "utf8");
-        return !usesRequiredPortalPasswordFallback(content);
+        const content = readFileIfPresent(filePath);
+        return content !== null && !usesRequiredPortalPasswordFallback(content);
       })
       .map((filePath) => relative(ROOT, filePath));
 

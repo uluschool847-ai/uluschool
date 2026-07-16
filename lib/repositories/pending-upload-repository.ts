@@ -180,6 +180,45 @@ function normalizedStorageKey(storageKey: string) {
   return normalizePersistedStorageReference(storageKey)?.storageKey ?? storageKey;
 }
 
+type PersistedReferenceClassification =
+  | { kind: "managed"; storageKey: string }
+  | { kind: "non-storage" }
+  | { kind: "uncertain" };
+
+function isStorageLookingValue(value: string) {
+  const candidate = value.startsWith("/") ? value.slice(1) : value;
+  return (
+    candidate === "api" ||
+    candidate.startsWith("api/") ||
+    candidate === "uploads" ||
+    candidate.startsWith("uploads/") ||
+    candidate === "public/uploads" ||
+    candidate.startsWith("public/uploads/") ||
+    candidate === "private" ||
+    candidate.startsWith("private/") ||
+    candidate === "public" ||
+    candidate.startsWith("public/")
+  );
+}
+
+function classifyPersistedReference(value: unknown): PersistedReferenceClassification {
+  const reference = normalizePersistedStorageReference(value);
+  if (reference) return { kind: "managed", storageKey: reference.storageKey };
+  if (typeof value !== "string" || !value || value !== value.trim()) return { kind: "uncertain" };
+
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol === "https:") return { kind: "non-storage" };
+  } catch {
+    // Root-static references are handled below. Other invalid values remain fail-closed.
+  }
+
+  if (value.startsWith("/") && !value.startsWith("//") && !isStorageLookingValue(value)) {
+    return { kind: "non-storage" };
+  }
+  return { kind: "uncertain" };
+}
+
 function addStorageObject(objects: Map<string, number>, storageKey: string, byteSize: number) {
   const normalizedKey = normalizedStorageKey(storageKey);
   const existingSize = objects.get(normalizedKey);
@@ -204,24 +243,29 @@ async function ownerStorageAccounting(ownerId: string, transaction: Prisma.Trans
   });
   if (!owner) throw pendingUploadError();
 
-  const [pendingUploads, activeObjects, activeAttachments, reportReferences] = await Promise.all([
-    transaction.pendingUpload.findMany({
-      where: { ownerId },
-      select: { storageKey: true, byteSize: true },
-    }),
-    transaction.activeStorageObject.findMany({
-      where: { ownerId },
-      select: { storageKey: true, byteSize: true },
-    }),
-    transaction.attachment.findMany({
-      where: { courseMaterial: { is: { teacherId: ownerId } } },
-      select: { storageKey: true, size: true },
-    }),
-    transaction.reportSnapshot.findMany({
-      where: { generatedByTeacherId: ownerId, pdfStorageKey: { not: null } },
-      select: { pdfStorageKey: true },
-    }),
-  ]);
+  const [pendingUploads, activeObjects, activeAttachments, materialReferences, reportReferences] =
+    await Promise.all([
+      transaction.pendingUpload.findMany({
+        where: { ownerId },
+        select: { storageKey: true, byteSize: true },
+      }),
+      transaction.activeStorageObject.findMany({
+        where: { ownerId },
+        select: { storageKey: true, byteSize: true },
+      }),
+      transaction.attachment.findMany({
+        where: { courseMaterial: { is: { teacherId: ownerId } } },
+        select: { storageKey: true, size: true },
+      }),
+      transaction.courseMaterial.findMany({
+        where: { teacherId: ownerId },
+        select: { fileUrl: true },
+      }),
+      transaction.reportSnapshot.findMany({
+        where: { generatedByTeacherId: ownerId, pdfStorageKey: { not: null } },
+        select: { pdfStorageKey: true },
+      }),
+    ]);
   const photoReferences =
     owner.role === UserRole.ADMIN
       ? await transaction.teacher.findMany({
@@ -242,30 +286,41 @@ async function ownerStorageAccounting(ownerId: string, transaction: Prisma.Trans
   }
 
   let hasUnledgeredReference = false;
-  for (const report of reportReferences) {
-    const reference = normalizePersistedStorageReference(report.pdfStorageKey);
-    if (!reference || !objects.has(reference.storageKey)) {
+  for (const material of materialReferences) {
+    const reference = classifyPersistedReference(material.fileUrl);
+    if (reference.kind === "non-storage") continue;
+    if (reference.kind !== "managed" || !objects.has(reference.storageKey)) {
       hasUnledgeredReference = true;
       break;
     }
   }
 
   if (!hasUnledgeredReference) {
+    for (const report of reportReferences) {
+      const reference = classifyPersistedReference(report.pdfStorageKey);
+      if (reference.kind === "non-storage") continue;
+      if (reference.kind !== "managed" || !objects.has(reference.storageKey)) {
+        hasUnledgeredReference = true;
+        break;
+      }
+    }
+  }
+
+  if (!hasUnledgeredReference) {
     for (const teacher of photoReferences) {
-      const reference = normalizePersistedStorageReference(teacher.photoUrl);
-      if (!reference) {
+      const reference = classifyPersistedReference(teacher.photoUrl);
+      if (reference.kind === "non-storage") continue;
+      if (reference.kind !== "managed") {
         hasUnledgeredReference = true;
         break;
       }
       if (objects.has(reference.storageKey)) continue;
-      if (reference.kind === "legacy") {
-        hasUnledgeredReference = true;
-        break;
-      }
       if (isDirectTeacherPhotoKey(reference.storageKey, ownerId)) {
         hasUnledgeredReference = true;
         break;
       }
+      hasUnledgeredReference = true;
+      break;
     }
   }
 

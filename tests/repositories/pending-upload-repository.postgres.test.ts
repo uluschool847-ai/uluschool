@@ -3,6 +3,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 import { prisma } from "@/lib/prisma";
 import {
+  deleteCourseMaterialForTeacher,
+  updateCourseMaterialForTeacher,
+} from "@/lib/repositories/course-material-repository";
+import {
   MAX_OWNER_ACTIVE_AND_PENDING_BYTES,
   PendingUploadError,
   finalizePendingUploads,
@@ -118,6 +122,30 @@ async function createMaterialReference(name: string, size = 128) {
     },
   });
   return key;
+}
+
+async function createFileUrlOnlyMaterial(name: string, fileUrl: string) {
+  const scheduledClassId = id(`class-file-url-${name}`);
+  const materialId = id(`material-file-url-${name}`);
+  await prisma.scheduledClass.create({
+    data: {
+      id: scheduledClassId,
+      title: `File URL class ${name}`,
+      startAt: new Date("2026-07-16T09:00:00.000Z"),
+      endAt: new Date("2026-07-16T10:00:00.000Z"),
+      teacherId: ownerId,
+    },
+  });
+  await prisma.courseMaterial.create({
+    data: {
+      id: materialId,
+      title: `File URL material ${name}`,
+      fileUrl,
+      scheduledClassId,
+      teacherId: ownerId,
+    },
+  });
+  return materialId;
 }
 
 suite("pending upload PostgreSQL durable lifecycle", { timeout: 90_000 }, () => {
@@ -290,6 +318,98 @@ suite("pending upload PostgreSQL durable lifecycle", { timeout: 90_000 }, () => 
     await expect(reservePendingUpload({ ...upload("over-quota", 1), storage })).rejects.toThrow(
       PendingUploadError,
     );
+  });
+
+  it.each([
+    ["current", storageUrlForKey(storageKey("file-url-only-current"))],
+    ["legacy", "/public/uploads/materials/file-url-only-legacy.pdf"],
+  ])("blocks growth for an unledgered attachment-less %s file URL", async (_label, fileUrl) => {
+    await createFileUrlOnlyMaterial(`unledgered-${_label}`, fileUrl);
+
+    await expect(reservePendingUpload({ ...upload(`blocked-${_label}`) })).rejects.toThrow(
+      PendingUploadError,
+    );
+  });
+
+  it("deduplicates a legacy attachment-less file URL against its ledger at the exact quota boundary", async () => {
+    const legacyKey = "uploads/materials/file-url-boundary.pdf";
+    const firstSize = 1024 * 1024 * 1024;
+    const secondSize = MAX_OWNER_ACTIVE_AND_PENDING_BYTES - firstSize - 128;
+    await createFileUrlOnlyMaterial("legacy-boundary", `/public/${legacyKey}`);
+    await prisma.activeStorageObject.createMany({
+      data: [
+        {
+          ownerId,
+          purpose: "course-material",
+          storageKey: legacyKey,
+          filename: "file-url-boundary.pdf",
+          mimeType: "application/pdf",
+          byteSize: firstSize,
+        },
+        {
+          ownerId,
+          purpose: "report-pdf",
+          storageKey: storageKey("file-url-boundary-second"),
+          filename: "file-url-boundary-second.pdf",
+          mimeType: "application/pdf",
+          byteSize: secondSize,
+        },
+      ],
+    });
+    const storage = { delete: vi.fn().mockResolvedValue(undefined) };
+
+    await expect(
+      reservePendingUpload({ ...upload("file-url-boundary", 128), storage }),
+    ).resolves.toEqual(expect.objectContaining({ storageKey: storageKey("file-url-boundary") }));
+    await expect(
+      reservePendingUpload({ ...upload("file-url-boundary-over", 1), storage }),
+    ).rejects.toThrow(PendingUploadError);
+  });
+
+  it("queues an attachment-less current file URL after replacement", async () => {
+    const key = storageKey("file-url-replace");
+    const materialId = await createFileUrlOnlyMaterial("replace", storageUrlForKey(key));
+
+    await prisma.$transaction(
+      (transaction) =>
+        updateCourseMaterialForTeacher(
+          materialId,
+          ownerId,
+          { fileUrl: "https://cdn.example.com/replacement.pdf" },
+          transaction,
+        ),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    await expect(prisma.pendingUpload.findUnique({ where: { storageKey: key } })).resolves.toEqual(
+      expect.objectContaining({ ownerId, purpose: "course-material" }),
+    );
+  });
+
+  it("queues an attachment-less legacy file URL on delete but retains a shared reference", async () => {
+    const legacyKey = "uploads/materials/file-url-shared.pdf";
+    const firstMaterialId = await createFileUrlOnlyMaterial("shared-first", `/${legacyKey}`);
+    await createFileUrlOnlyMaterial("shared-second", `/public/${legacyKey}`);
+
+    await prisma.$transaction(
+      (transaction) => deleteCourseMaterialForTeacher(firstMaterialId, ownerId, transaction),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+    await expect(
+      prisma.pendingUpload.findUnique({ where: { storageKey: legacyKey } }),
+    ).resolves.toBeNull();
+
+    const secondMaterial = await prisma.courseMaterial.findFirstOrThrow({
+      where: { id: id("material-file-url-shared-second") },
+      select: { id: true },
+    });
+    await prisma.$transaction(
+      (transaction) => deleteCourseMaterialForTeacher(secondMaterial.id, ownerId, transaction),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+    await expect(
+      prisma.pendingUpload.findUnique({ where: { storageKey: legacyKey } }),
+    ).resolves.toEqual(expect.objectContaining({ ownerId, purpose: "course-material" }));
   });
 
   it("finalizes exact metadata into active accounting in the caller transaction", async () => {

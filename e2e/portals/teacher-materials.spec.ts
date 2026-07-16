@@ -395,6 +395,17 @@ async function createFixtures(): Promise<Fixture> {
     }),
   ]);
 
+  await prisma.activeStorageObject.create({
+    data: {
+      ownerId: teacherA.id,
+      purpose: "course-material",
+      storageKey: "uploads/teacher/existing.pdf",
+      filename: "existing.pdf",
+      mimeType: "application/pdf",
+      byteSize: 128,
+    },
+  });
+
   void materialA;
 
   return {

@@ -38,6 +38,7 @@ vi.mock("@/lib/storage", () => ({
 }));
 
 vi.mock("@/lib/repositories/pending-upload-repository", () => ({
+  CONSERVATIVE_UNLEDGERED_STORAGE_BYTES: 2_147_483_647,
   finalizePendingUploads: finalizePendingUploadsMock,
   queueStorageObjectForDeletion: queueStorageObjectForDeletionMock,
 }));
@@ -1076,6 +1077,93 @@ describe("course-material-repository teacher ownership contract", () => {
         attachments: [expect.objectContaining(newAttachment)],
         cleanup: expect.objectContaining({ queued: false, storageKeys: [] }),
       }),
+    );
+  });
+
+  it.each([
+    [
+      "current file URL",
+      storageUrlForKey(
+        "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000021-file-url.pdf",
+      ),
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000021-file-url.pdf",
+    ],
+    ["legacy file URL", "/uploads/teacher-1/file-url.pdf", "uploads/teacher-1/file-url.pdf"],
+  ])(
+    "queues an attachment-less managed %s when replacing it",
+    async (_label, oldFileUrl, expectedStorageKey) => {
+      prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(
+        material({ fileUrl: oldFileUrl, attachments: [] }),
+      );
+      prismaMock.courseMaterial.update.mockResolvedValueOnce(
+        material({ fileUrl: "https://cdn.example.com/replacement.pdf", attachments: [] }),
+      );
+      prismaMock.courseMaterial.findUnique.mockResolvedValueOnce(
+        material({ fileUrl: "https://cdn.example.com/replacement.pdf", attachments: [] }),
+      );
+
+      const { updateCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+      await updateCourseMaterialForTeacher("material-1", "teacher-1", {
+        fileUrl: "https://cdn.example.com/replacement.pdf",
+      });
+
+      expect(queueStorageObjectForDeletionMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ownerId: "teacher-1",
+          purpose: "course-material",
+          storageKey: expectedStorageKey,
+        }),
+        prismaMock,
+      );
+    },
+  );
+
+  it("queues an attachment-less managed file URL when deleting the material", async () => {
+    const storageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000022-delete.pdf";
+    prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(
+      material({ fileUrl: storageUrlForKey(storageKey), attachments: [] }),
+    );
+    prismaMock.courseMaterial.delete.mockResolvedValueOnce({ id: "material-1" });
+
+    const { deleteCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+    await deleteCourseMaterialForTeacher("material-1", "teacher-1");
+
+    expect(queueStorageObjectForDeletionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ storageKey }),
+      prismaMock,
+    );
+  });
+
+  it("does not queue an external file URL", async () => {
+    prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(
+      material({ fileUrl: "https://cdn.example.com/material.pdf", attachments: [] }),
+    );
+    prismaMock.courseMaterial.delete.mockResolvedValueOnce({ id: "material-1" });
+
+    const { deleteCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+    await deleteCourseMaterialForTeacher("material-1", "teacher-1");
+
+    expect(queueStorageObjectForDeletionMock).not.toHaveBeenCalled();
+  });
+
+  it("does not duplicate a file URL that aliases a managed attachment", async () => {
+    const storageKey = "uploads/teacher-1/shared-file-url.pdf";
+    prismaMock.courseMaterial.findFirst.mockResolvedValueOnce(
+      material({
+        fileUrl: `/${storageKey}`,
+        attachments: [{ id: "attachment-1", storageKey }],
+      }),
+    );
+    prismaMock.courseMaterial.delete.mockResolvedValueOnce({ id: "material-1" });
+
+    const { deleteCourseMaterialForTeacher } = await loadCourseMaterialRepository();
+    await deleteCourseMaterialForTeacher("material-1", "teacher-1");
+
+    expect(queueStorageObjectForDeletionMock).toHaveBeenCalledTimes(1);
+    expect(queueStorageObjectForDeletionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ storageKey }),
+      prismaMock,
     );
   });
 

@@ -178,9 +178,11 @@ export function MaterialForm({
   const activeUploadCountRef = useRef(0);
   const attachmentRef = useRef<UploadedAttachment | null>(null);
   const mountedRef = useRef(true);
+  const isSubmittingRef = useRef(false);
   const uploadGenerationRef = useRef(0);
 
   useEffect(() => {
+    mountedRef.current = true;
     setIsHydrated(true);
     return () => {
       mountedRef.current = false;
@@ -203,6 +205,7 @@ export function MaterialForm({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSubmittingRef.current) return;
     const formData = new FormData(event.currentTarget);
     const submittedValues = {
       title: formData.get("title")?.toString() ?? "",
@@ -221,6 +224,7 @@ export function MaterialForm({
       return;
     }
 
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
     setErrors({});
 
@@ -240,6 +244,7 @@ export function MaterialForm({
 
       if (!result.success) {
         setErrors(normalizeActionErrors(result.error));
+        isSubmittingRef.current = false;
         setIsSubmitting(false);
         return;
       }
@@ -247,11 +252,13 @@ export function MaterialForm({
       navigateAfterSuccess(cancelHref, result.data);
     } catch {
       setErrors({ form: "Something went wrong." });
+      isSubmittingRef.current = false;
       setIsSubmitting(false);
     }
   }
 
   function onFileChange(file: File | null) {
+    if (isSubmittingRef.current) return;
     uploadGenerationRef.current += 1;
     releasePendingAttachment(attachmentRef.current);
     setSelectedFile(file);
@@ -274,6 +281,7 @@ export function MaterialForm({
   }
 
   async function uploadSelectedFile() {
+    if (isSubmittingRef.current) return;
     if (!selectedFile) return;
     const file = selectedFile;
     if (selectedFile.size <= 0) {
@@ -366,7 +374,9 @@ export function MaterialForm({
           id="material-file-url"
           name="fileUrl"
           value={fileUrl}
+          disabled={isSubmitting}
           onChange={(event) => {
+            if (isSubmittingRef.current) return;
             uploadGenerationRef.current += 1;
             setFileUrl(event.target.value);
             releasePendingAttachment(attachmentRef.current);
@@ -383,6 +393,7 @@ export function MaterialForm({
           id="material-upload-file"
           name="uploadFile"
           type="file"
+          disabled={isSubmitting}
           accept=".pdf,.doc,.docx,.ppt,.pptx,.zip,.txt,.png,.jpg,.jpeg,.webp,.gif"
           onChange={(event) => onFileChange(event.currentTarget.files?.[0] ?? null)}
         />
@@ -398,7 +409,7 @@ export function MaterialForm({
         {selectedFile ? (
           <button
             type="button"
-            disabled={uploadStatus === "uploading"}
+            disabled={uploadStatus === "uploading" || isSubmitting}
             onClick={() => void uploadSelectedFile()}
           >
             {uploadStatus === "uploading"
@@ -444,7 +455,7 @@ export function MaterialForm({
         href={cancelHref}
         aria-disabled={activeUploadCount > 0 || isSubmitting ? true : undefined}
         onClick={(event) => {
-          if (activeUploadCountRef.current > 0 || isSubmitting) {
+          if (activeUploadCountRef.current > 0 || isSubmittingRef.current) {
             event.preventDefault();
             return;
           }

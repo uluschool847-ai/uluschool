@@ -260,3 +260,77 @@ different endpoint.
   `next start` invocation resolved the harness ordering condition. The final signed-delivery run
   passed.
 - The request limiter remains intentionally process-local rather than distributed across instances.
+
+## Second Review Correction - 2026-07-16
+
+This wave resolves all binding re-review findings I1-I4 and M1.
+
+### Implemented Corrections
+
+- I1: owner quota accounting now includes every teacher-owned `CourseMaterial.fileUrl` and
+  normalizes current and legacy aliases with pending rows, active ledger rows, and attachments.
+  An attachment-less managed reference without known ledger metadata blocks further growth. Managed
+  attachment-less URLs are queued on replacement/delete inside the supplied transaction, with
+  normalized deduplication, external URL exclusion, and shared-reference retention.
+- I2: persisted references are classified as managed, proved non-storage (`https:` and root-static),
+  or uncertain. External/static report and photo values do not consume quota; malformed or
+  storage-looking values remain fail-closed.
+- I3: each `MaterialForm` effect setup restores `mountedRef`, including the React StrictMode replay.
+  StrictMode overlap, cancellation, and post-unmount upload completion release the correct object.
+- I4: the source-environment audits tolerate only `ENOENT` entries that disappear between walk/read
+  operations. A deterministic regression test covers both `stat` and `readFile` disappearance;
+  other filesystem errors and all audit violations still fail.
+- M1: submit starts synchronously through a ref, disables file URL/file picker/upload controls, and
+  guards their handlers so deferred actions cannot mutate attachment state during submission.
+- The storage Playwright fixture now gives its attachment-less legacy material an active ledger row,
+  matching the production fail-closed accounting contract.
+
+### RED And GREEN Evidence
+
+Initial focused RED coverage exposed missing file-URL accounting/cleanup, incorrect external/static
+classification, StrictMode mount state, and mutable submit controls. The first guarded storage
+Playwright run also failed with upload HTTP 500 because its fixture intentionally had an
+attachment-less legacy managed URL with no ledger size. That was corrected by adding the matching
+fixture ledger row; the production accounting remains fail-closed for genuinely unknown references.
+
+All database commands set process-local `DATABASE_URL` and `DIRECT_URL` exactly to
+`postgresql://postgres:postgres@127.0.0.1:55432/ulu_school_c5?schema=public` and validated scheme,
+host, port, database, and query before access. No database command used an `.env` database URL.
+
+~~~powershell
+npx vitest run lib/repositories/__tests__/pending-upload-repository.test.ts tests/repositories/course-material-repository.test.ts tests/components/portal/MaterialForm.test.tsx __tests__/env-dependencies.test.ts app/__tests__/env-dependencies.audit.test.ts
+# passed: 4 files, 128 tests
+
+$env:RUN_TASK3_POSTGRES_INTEGRATION='1'
+npx vitest run tests/repositories/pending-upload-repository.postgres.test.ts tests/repositories/storage-reference-repository.postgres.test.ts
+# passed: 2 files, 17 tests
+
+npm run test:e2e:storage
+# passed: 6 Playwright tests in 5.8 minutes after the fixture ledger correction
+
+npm run build
+# passed: Biome checked 849 files, type validation passed, Next generated 88 pages
+
+npm run test:e2e:signed-delivery
+# passed: 1 Playwright test in 10.4 seconds
+
+npm run typecheck
+# passed
+
+npm run test
+# passed: 372 files passed, 6 skipped; 3,659 tests passed, 39 skipped
+~~~
+
+No Prisma schema or migration changed in this wave. The already-applied Task 3 migrations were not
+rewritten, so Prisma validate/generate/migrate commands were not rerun.
+
+### Second-Wave Self-Review And Remaining Risks
+
+- Current/legacy managed aliases are deduplicated before quota sums and deletion queueing. Cleanup
+  never queues external/root-static URLs and rechecks durable references before moving a ledger row
+  into pending cleanup.
+- The audit race fix is narrowly limited to concurrent `ENOENT`; permission, malformed-path, and
+  audit-content failures still surface.
+- The in-process upload request limiter remains intentionally non-distributed across application
+  instances. Unknown managed-looking legacy data continues to block quota growth by design until it
+  receives ledger metadata or is remediated.

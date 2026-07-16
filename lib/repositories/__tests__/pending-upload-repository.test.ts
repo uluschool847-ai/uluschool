@@ -10,6 +10,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   appUser: { findUnique: vi.fn() },
   attachment: { findMany: vi.fn() },
+  courseMaterial: { findMany: vi.fn() },
   pendingUpload: {
     create: vi.fn(),
     deleteMany: vi.fn(),
@@ -94,6 +95,7 @@ describe("pending upload repository", () => {
     prismaMock.activeStorageObject.deleteMany.mockResolvedValue({ count: 0 });
     prismaMock.activeStorageObject.create.mockResolvedValue({});
     prismaMock.attachment.findMany.mockResolvedValue([]);
+    prismaMock.courseMaterial.findMany.mockResolvedValue([]);
     prismaMock.reportSnapshot.findMany.mockResolvedValue([]);
     prismaMock.teacher.findMany.mockResolvedValue([]);
     getStorageObjectReferenceStatusMock.mockResolvedValue("unreferenced");
@@ -319,6 +321,68 @@ describe("pending upload repository", () => {
       PendingUploadError,
     );
     expect(prismaMock.pendingUpload.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["current application URL", "private/teachers/teacher-1/materials/file-url-only.pdf"],
+    ["legacy alias", "/uploads/teacher-1/file-url-only.pdf"],
+  ])("blocks quota growth for an unledgered fileUrl-only material %s", async (_label, fileUrl) => {
+    prismaMock.courseMaterial.findMany.mockResolvedValueOnce([{ fileUrl }]);
+
+    await expect(reservePendingUpload({ ...upload(), storage, now })).rejects.toThrow(
+      PendingUploadError,
+    );
+    expect(prismaMock.pendingUpload.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["external HTTPS", "https://cdn.example.com/report.pdf"],
+    ["root static", "/images/teacher-photo.webp"],
+  ])(
+    "does not block quota growth for a proved non-storage report reference: %s",
+    async (_label, pdfStorageKey) => {
+      prismaMock.reportSnapshot.findMany.mockResolvedValueOnce([{ pdfStorageKey }]);
+
+      await expect(reservePendingUpload({ ...upload(), storage, now })).resolves.toEqual(
+        expect.objectContaining({ storageKey }),
+      );
+    },
+  );
+
+  it("keeps malformed storage-looking report references fail-closed", async () => {
+    prismaMock.reportSnapshot.findMany.mockResolvedValueOnce([
+      { pdfStorageKey: "/api/files/not-a-valid-storage-token" },
+    ]);
+
+    await expect(reservePendingUpload({ ...upload(), storage, now })).rejects.toThrow(
+      PendingUploadError,
+    );
+  });
+
+  it.each([
+    ["external HTTPS", "https://cdn.example.com/teacher-photo.webp"],
+    ["root static", "/images/teacher-photo.webp"],
+  ])(
+    "does not block administrators for a proved non-storage teacher photo: %s",
+    async (_label, photoUrl) => {
+      prismaMock.appUser.findUnique.mockResolvedValueOnce({ role: "ADMIN" });
+      prismaMock.teacher.findMany.mockResolvedValueOnce([{ photoUrl }]);
+
+      await expect(reservePendingUpload({ ...upload(), storage, now })).resolves.toEqual(
+        expect.objectContaining({ storageKey }),
+      );
+    },
+  );
+
+  it("keeps malformed storage-looking teacher photos fail-closed", async () => {
+    prismaMock.appUser.findUnique.mockResolvedValueOnce({ role: "ADMIN" });
+    prismaMock.teacher.findMany.mockResolvedValueOnce([
+      { photoUrl: "/api/files/not-a-valid-storage-token" },
+    ]);
+
+    await expect(reservePendingUpload({ ...upload(), storage, now })).rejects.toThrow(
+      PendingUploadError,
+    );
   });
 
   it("conservatively blocks administrators when a legacy teacher photo has no owner ledger", async () => {

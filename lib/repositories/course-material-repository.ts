@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
 import {
+  CONSERVATIVE_UNLEDGERED_STORAGE_BYTES,
   finalizePendingUploads,
   queueStorageObjectForDeletion,
 } from "@/lib/repositories/pending-upload-repository";
@@ -10,6 +11,7 @@ import { preferredStoredFileHref, storageHrefForKey } from "@/lib/security/stora
 import { isTeacherMaterialStorageKey, validateLegacyStorageKey } from "@/lib/storage/storage-key";
 import {
   legacyStorageKeyFromUrl,
+  normalizePersistedStorageReference,
   storageKeyFromUrl,
   storageUrlForKey,
   storageUrlMatchesKey,
@@ -253,6 +255,51 @@ function validateStoredCleanupAttachments(
   }));
 }
 
+function fileUrlCleanupCandidate(fileUrl: unknown, teacherId: string) {
+  const reference = normalizePersistedStorageReference(fileUrl);
+  if (!reference) return null;
+  const storageKey =
+    reference.kind === "legacy"
+      ? validateLegacyStorageKey(reference.storageKey)
+      : isTeacherMaterialStorageKey(reference.storageKey, teacherId)
+        ? reference.storageKey
+        : null;
+  if (!storageKey) return null;
+  return {
+    storageKey,
+    filename: storageKey.split("/").at(-1) ?? "material.bin",
+    mimeType: "application/octet-stream",
+    size: CONSERVATIVE_UNLEDGERED_STORAGE_BYTES,
+  };
+}
+
+function cleanupStorageKey(value: unknown) {
+  return normalizePersistedStorageReference(value)?.storageKey ?? null;
+}
+
+function materialCleanupCandidates(
+  attachments: ReturnType<typeof validateStoredCleanupAttachments>,
+  fileUrl: unknown,
+  teacherId: string,
+) {
+  const candidates = [...attachments];
+  const attachedStorageKeys = new Set(
+    attachments.map(
+      (attachment) => cleanupStorageKey(attachment.storageKey) ?? attachment.storageKey,
+    ),
+  );
+  const fileUrlCandidate = fileUrlCleanupCandidate(fileUrl, teacherId);
+  if (
+    fileUrlCandidate &&
+    !attachedStorageKeys.has(
+      cleanupStorageKey(fileUrlCandidate.storageKey) ?? fileUrlCandidate.storageKey,
+    )
+  ) {
+    candidates.push(fileUrlCandidate);
+  }
+  return candidates;
+}
+
 async function queueMaterialAttachmentsForDeletion(
   attachments: ReturnType<typeof validateStoredCleanupAttachments>,
   teacherId: string,
@@ -264,8 +311,9 @@ async function queueMaterialAttachmentsForDeletion(
   const attemptedStorageKeys = new Set<string>();
 
   for (const attachment of attachments) {
-    if (attemptedStorageKeys.has(attachment.storageKey)) continue;
-    attemptedStorageKeys.add(attachment.storageKey);
+    const normalizedKey = cleanupStorageKey(attachment.storageKey) ?? attachment.storageKey;
+    if (attemptedStorageKeys.has(normalizedKey)) continue;
+    attemptedStorageKeys.add(normalizedKey);
     const queued = await queueStorageObjectForDeletion(
       {
         ownerId: teacherId,
@@ -444,7 +492,7 @@ export async function updateCourseMaterialForTeacher(
 ) {
   const existing = await assertTeacherOwnsMaterial(teacherId, id, database);
   const data: Prisma.CourseMaterialUpdateInput = {};
-  const isReplacingFile = hasAttachment(input);
+  const hasReplacementAttachment = hasAttachment(input);
   const storedCleanupAttachments = validateStoredCleanupAttachments(
     existing.attachments,
     teacherId,
@@ -459,10 +507,10 @@ export async function updateCourseMaterialForTeacher(
           input.fileUrl,
           existing.fileUrl,
           existingPrimaryStorageKey,
-          isReplacingFile,
+          hasReplacementAttachment,
         );
 
-  if (isReplacingFile) {
+  if (hasReplacementAttachment) {
     assertTeacherOwnsAttachmentInputs(input.attachments, teacherId, validatedFileUrl);
   }
 
@@ -476,7 +524,7 @@ export async function updateCourseMaterialForTeacher(
   if (input.fileUrl !== undefined || existingPrimaryHref) {
     if (validatedFileUrl) data.fileUrl = validatedFileUrl;
   }
-  if (isReplacingFile) {
+  if (hasReplacementAttachment) {
     const attachments = attachmentCreateData(input.attachments);
     if (attachments) {
       data.attachments = { create: attachments };
@@ -494,7 +542,7 @@ export async function updateCourseMaterialForTeacher(
     data.scheduledClass = { connect: { id: scheduledClass.id } };
   }
 
-  if (isReplacingFile) {
+  if (hasReplacementAttachment) {
     await assertAttachmentInputKeysAvailable(
       input.attachments,
       database,
@@ -509,7 +557,7 @@ export async function updateCourseMaterialForTeacher(
     include: materialInclude,
   });
 
-  if (isReplacingFile && existing.attachments.length > 0) {
+  if (hasReplacementAttachment && existing.attachments.length > 0) {
     await database.attachment.deleteMany({
       where: {
         id: { in: existing.attachments.map((attachment) => attachment.id) },
@@ -518,7 +566,12 @@ export async function updateCourseMaterialForTeacher(
     });
   }
 
-  if (!isReplacingFile) return updated;
+  const existingStorageKey = cleanupStorageKey(existing.fileUrl);
+  const updatedStorageKey = cleanupStorageKey(updated.fileUrl);
+  const isReplacingFileUrl =
+    input.fileUrl !== undefined &&
+    (existingStorageKey !== updatedStorageKey || existing.fileUrl !== updated.fileUrl);
+  if (!hasReplacementAttachment && !isReplacingFileUrl) return updated;
 
   const finalMaterial = await database.courseMaterial.findUnique({
     where: { id: existing.id },
@@ -526,7 +579,7 @@ export async function updateCourseMaterialForTeacher(
   });
   if (!finalMaterial) throw new Error("Material not found after update.");
   const orphanStorageKeys = await queueMaterialAttachmentsForDeletion(
-    storedCleanupAttachments,
+    materialCleanupCandidates(storedCleanupAttachments, existing.fileUrl, teacherId),
     teacherId,
     database,
   );
@@ -617,7 +670,11 @@ export async function deleteCourseMaterialForTeacher(
     throw new Error("Material not found or not owned by teacher.");
   }
 
-  const cleanupAttachments = validateStoredCleanupAttachments(existing.attachments, teacherId);
+  const cleanupAttachments = materialCleanupCandidates(
+    validateStoredCleanupAttachments(existing.attachments, teacherId),
+    existing.fileUrl,
+    teacherId,
+  );
 
   if (cleanupAttachments.length > 0) assertMaterialTransactionClient(database);
   await database.courseMaterial.delete({ where: { id: existing.id } });

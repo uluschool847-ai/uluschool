@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const submitCourseMaterialActionMock = vi.hoisted(() => vi.fn());
@@ -427,7 +428,11 @@ describe("MaterialForm", () => {
       });
       vi.stubGlobal("fetch", fetchMock);
 
-      render(<MaterialForm mode="create" lessons={lessons} />);
+      render(
+        <StrictMode>
+          <MaterialForm mode="create" lessons={lessons} />
+        </StrictMode>,
+      );
       const fileInput = screen.getByLabelText(/upload file|file upload|choose file/i);
       fireEvent.change(fileInput, {
         target: { files: [new File(["first"], "first.pdf", { type: "application/pdf" })] },
@@ -468,7 +473,11 @@ describe("MaterialForm", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<MaterialForm mode="create" lessons={lessons} />);
+    render(
+      <StrictMode>
+        <MaterialForm mode="create" lessons={lessons} />
+      </StrictMode>,
+    );
     fireEvent.change(screen.getByLabelText(/upload file|file upload|choose file/i), {
       target: { files: [new File(["first"], "first.pdf", { type: "application/pdf" })] },
     });
@@ -488,6 +497,41 @@ describe("MaterialForm", () => {
     expect(await screen.findByText(/upload complete: first\.pdf/i)).toBeDefined();
     cancel.addEventListener("click", (event) => event.preventDefault(), { once: true });
     fireEvent.click(cancel);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/upload",
+        expect.objectContaining({
+          method: "DELETE",
+          body: JSON.stringify({ storageKey: uploadedStorageKey }),
+        }),
+      );
+    });
+  });
+
+  it("releases a successful upload that completes after a StrictMode unmount", async () => {
+    const request = deferred<Response>();
+    const fetchMock = vi.fn(async (_url: string, options?: RequestInit) => {
+      if (options?.method === "POST") return request.promise;
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { unmount } = render(
+      <StrictMode>
+        <MaterialForm mode="create" lessons={lessons} />
+      </StrictMode>,
+    );
+    fireEvent.change(screen.getByLabelText(/upload file|file upload|choose file/i), {
+      target: { files: [new File(["first"], "first.pdf", { type: "application/pdf" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
+    unmount();
+
+    await act(async () => {
+      request.resolve(successfulUploadResponse(uploadedStorageKey, "first.pdf"));
+      await Promise.resolve();
+    });
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -542,6 +586,45 @@ describe("MaterialForm", () => {
         attachment: expect.objectContaining({ storageKey }),
       }),
     );
+  });
+
+  it("keeps submitted attachment state immutable while the action is unresolved", async () => {
+    const submit = deferred<{ success: true; data: { id: string } }>();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(successfulUploadResponse(uploadedStorageKey, "file.pdf")),
+    );
+    submitCourseMaterialActionMock.mockReturnValueOnce(submit.promise);
+
+    render(<MaterialForm mode="create" lessons={lessons} />);
+    fireEvent.change(screen.getByLabelText(/^title$/i), { target: { value: "Material" } });
+    fireEvent.change(screen.getByLabelText(/lesson|scheduled class/i), {
+      target: { value: "lesson-1" },
+    });
+    fireEvent.change(screen.getByLabelText(/upload file|file upload|choose file/i), {
+      target: { files: [new File(["file"], "file.pdf", { type: "application/pdf" })] },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
+    expect(await screen.findByText(/upload complete/i)).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: /create material/i }));
+    const fileUrl = screen.getByLabelText(/file url/i) as HTMLInputElement;
+    const fileInput = screen.getByLabelText(
+      /upload file|file upload|choose file/i,
+    ) as HTMLInputElement;
+    expect(fileUrl).toHaveProperty("disabled", true);
+    expect(fileInput).toHaveProperty("disabled", true);
+    fireEvent.change(fileUrl, { target: { value: "https://cdn.example.com/replaced.pdf" } });
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["other"], "other.pdf", { type: "application/pdf" })] },
+    });
+
+    expect(fileUrl.value).toBe(uploadedPublicUrl);
+    expect(screen.getByText("file.pdf")).toBeDefined();
+    await act(async () => {
+      submit.resolve({ success: true, data: { id: "material-1" } });
+      await Promise.resolve();
+    });
   });
 
   it("edit mode can keep an existing file unchanged or replace it with new attachment metadata", async () => {
