@@ -120,12 +120,13 @@ describe("deployment runbook contract", () => {
     for (const relativePath of [
       "docs/deployment/render-production.md",
       "docs/deployment/launch-checklist.md",
+      ".superpowers/sdd/final-hardening-task-4-report.md",
     ]) {
       const docs = read(relativePath);
 
       expect(docs).toContain("IANA-reserved");
       expect(docs).toContain("does not reject private, link-local, or unspecified addresses");
-      expect(docs).not.toMatch(/\bpublic host\b/i);
+      expect(docs).not.toMatch(/\bpublic(?:[\s/-]+provider)?[\s/-]+host(?:name)?\b/i);
     }
   });
 

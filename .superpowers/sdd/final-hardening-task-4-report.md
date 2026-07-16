@@ -49,7 +49,7 @@ Branch: `launch/mvp-production-readiness`
 ## Documentation Changed
 
 - `.env.example`: identifies `SEED_PORTAL_PASSWORD` as local-only and rejected when non-empty in hosted environments.
-- `docs/deployment/render-production.md`: documents hosted password restrictions and public/provider-host requirements for alert and Sentry URLs.
+- `docs/deployment/render-production.md`: documents hosted password restrictions, the enforced non-loopback/IANA-reserved hostname rules, and manual provider ownership confirmation because validation does not reject private, link-local, or unspecified addresses.
 - `docs/deployment/launch-checklist.md`: adds staging verification for those environment restrictions.
 
 ## Browser Verification
