@@ -8,6 +8,7 @@ import { mailboxSchema } from "@/lib/validations/mailbox";
 const SYSTEM_ACTOR_ID = "system:production-bootstrap";
 const PRODUCTION_ADMIN_AUDIT_ACTION = "PRODUCTION_ADMIN_BOOTSTRAPPED";
 const MAX_NAME_LENGTH = 200;
+const MAX_SERIALIZABLE_ATTEMPTS = 3;
 
 const productionAdminEnvironmentSchema = z
   .object({
@@ -427,7 +428,17 @@ export async function bootstrapProductionAdmin(
 ): Promise<ProductionAdminBootstrapResult> {
   try {
     const configured = parseConfiguredEnvironment(environment);
-    return await executeProductionAdminBootstrap(configured, database);
+    for (let attempt = 1; attempt <= MAX_SERIALIZABLE_ATTEMPTS; attempt += 1) {
+      try {
+        return await executeProductionAdminBootstrap(configured, database);
+      } catch (error) {
+        if (!isSerializableTransactionConflict(error) || attempt === MAX_SERIALIZABLE_ATTEMPTS) {
+          throw error;
+        }
+      }
+    }
+
+    throw new ProductionAdminBootstrapError();
   } catch {
     throw new ProductionAdminBootstrapError();
   }

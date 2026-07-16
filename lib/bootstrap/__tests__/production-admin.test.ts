@@ -571,6 +571,26 @@ describe("bootstrapProductionAdmin", () => {
     expect(transaction.adminAuditLog.create).not.toHaveBeenCalled();
   });
 
+  it("retries after a commit-time serializable conflict before the winner is visible", async () => {
+    const { database } = createDatabase();
+    const racedAdmin = bootstrapWinner();
+    database.appUser.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+    database.appUser.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(racedAdmin);
+    database.$transaction.mockRejectedValueOnce({ code: "P2034" });
+
+    await expect(bootstrapProductionAdmin(configuredEnv(), database)).resolves.toEqual({
+      status: "existing",
+    });
+
+    expect(database.appUser.count).toHaveBeenCalledTimes(2);
+    expect(database.appUser.findUnique).toHaveBeenCalledTimes(3);
+    expect(database.$transaction).toHaveBeenCalledOnce();
+    expect(hashPasswordMock).toHaveBeenCalledOnce();
+  });
+
   it("does not convert an unrelated P2034 into success for a same-email admin", async () => {
     const { database, transaction } = createDatabase();
     const conflict = { code: "P2034", message: "sensitive database detail" };
@@ -608,6 +628,8 @@ describe("bootstrapProductionAdmin", () => {
     expect(error).toBeInstanceOf(ProductionAdminBootstrapError);
     expect(error).not.toBe(conflict);
 
+    expect(database.$transaction).toHaveBeenCalledTimes(3);
+    expect(hashPasswordMock).toHaveBeenCalledTimes(3);
     expect(transaction.adminAuditLog.create).not.toHaveBeenCalled();
   });
 
