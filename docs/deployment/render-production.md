@@ -81,11 +81,15 @@ are configuration rules, not credentials.
 | `PRIVACY_EMAIL_PROCESSOR_NAME` | Actual outbound-email processor name |
 | `CRON_SECRET` | Unique high-entropy value of at least 32 characters |
 | `REMINDER_CRON_TOKEN` | Unique high-entropy value of at least 32 characters |
-| `ALERT_WEBHOOK_URL` | HTTPS webhook for the private operations channel on a real provider host; never use loopback, `.invalid`, `.example`, or `.test` |
+| `ALERT_WEBHOOK_URL` | HTTPS webhook for the private operations channel; validation rejects loopback hosts and IANA-reserved `.invalid`, `.example`, and `.test` names or suffixes |
 | `ALERT_TEST_TOKEN` | Unique high-entropy value of at least 32 characters |
 | `SENTRY_ENABLED` | `true` only when both environment-specific DSNs are configured; otherwise `false` with both DSNs empty |
-| `SENTRY_DSN` | Server DSN for this environment when Sentry is enabled, using a real Sentry host rather than loopback or a reserved hostname |
-| `NEXT_PUBLIC_SENTRY_DSN` | Browser DSN for this environment when Sentry is enabled, using a real Sentry host rather than loopback or a reserved hostname |
+| `SENTRY_DSN` | Server DSN for this environment when Sentry is enabled; validation rejects loopback hosts and IANA-reserved `.invalid`, `.example`, and `.test` names or suffixes |
+| `NEXT_PUBLIC_SENTRY_DSN` | Browser DSN for this environment when Sentry is enabled; validation rejects loopback hosts and IANA-reserved `.invalid`, `.example`, and `.test` names or suffixes |
+
+The monitoring hostname validator does not reject private, link-local, or unspecified addresses.
+Operators must independently confirm that each configured URL is the environment's intended alert
+provider webhook or Sentry project DSN before deployment.
 
 For the launch gate, enable Sentry with separate staging and production projects so the browser
 matrix can verify sanitization and environment routing.

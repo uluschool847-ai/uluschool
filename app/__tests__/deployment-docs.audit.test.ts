@@ -116,6 +116,19 @@ describe("deployment runbook contract", () => {
     expect(missing, `Missing deployment environment keys: ${missing.join(", ")}`).toEqual([]);
   });
 
+  it("states the exact monitoring hostname validation scope", () => {
+    for (const relativePath of [
+      "docs/deployment/render-production.md",
+      "docs/deployment/launch-checklist.md",
+    ]) {
+      const docs = read(relativePath);
+
+      expect(docs).toContain("IANA-reserved");
+      expect(docs).toContain("does not reject private, link-local, or unspecified addresses");
+      expect(docs).not.toMatch(/\bpublic host\b/i);
+    }
+  });
+
   it("does not embed credentials or connection strings", () => {
     const docs = combinedDeploymentDocs();
     const forbiddenPatterns = [

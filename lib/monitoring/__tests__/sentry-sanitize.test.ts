@@ -17,6 +17,110 @@ vi.mock("@sentry/nextjs", () => ({
 }));
 
 const FILTERED = "[Filtered]";
+const FILE_ROUTE_FAMILIES = [
+  { label: "private", route: "/api/files" },
+  { label: "public", route: "/api/public-files" },
+] as const;
+
+function encodeFileRoutePrefix(route: string, passes: number) {
+  let encoded = [...route.slice(1)]
+    .map((character) => `%${character.charCodeAt(0).toString(16).padStart(2, "0")}`)
+    .join("");
+
+  for (let pass = 1; pass < passes; pass += 1) {
+    encoded = encodeURIComponent(encoded);
+  }
+
+  return `/${encoded}`;
+}
+
+function encodeWholeFileRoutePrefix(route: string, passes: number) {
+  let encoded = [...route]
+    .map((character) => `%${character.charCodeAt(0).toString(16).padStart(2, "0")}`)
+    .join("");
+
+  for (let pass = 1; pass < passes; pass += 1) {
+    encoded = encodeURIComponent(encoded);
+  }
+
+  return encoded;
+}
+
+const MALFORMED_FILE_ROUTE_CASES = FILE_ROUTE_FAMILIES.flatMap((family) =>
+  [
+    {
+      label: "raw trailing percent",
+      pathname: (token: string) => `${family.route}/${token}%`,
+      preservesFamily: true,
+    },
+    {
+      label: "malformed non-hex percent sequence",
+      pathname: (token: string) => `${family.route}/${token}%GG`,
+      preservesFamily: true,
+    },
+    {
+      label: "malformed UTF-8 percent sequence",
+      pathname: (token: string) => `${family.route}/${token}%E0%A4%A`,
+      preservesFamily: true,
+    },
+    {
+      label: "partially encoded separator with a malformed token",
+      pathname: (token: string) => `${family.route.replace("/api/", "/api%2F")}/${token}%E0%A4%A`,
+      preservesFamily: true,
+    },
+    ...[1, 2, 3, 4, 5].map((passes) => ({
+      label: `${passes}-pass encoded route prefix`,
+      pathname: (token: string) => `${encodeFileRoutePrefix(family.route, passes)}/${token}`,
+      preservesFamily: passes <= 4,
+    })),
+  ].flatMap((candidate, candidateIndex) =>
+    (["path-only", "absolute"] as const).map((requestForm) => {
+      const token = `SIGNED_${family.label.toUpperCase()}_FILE_TOKEN_${candidateIndex}_${requestForm.toUpperCase().replace("-", "_")}`;
+      const pathname = candidate.pathname(token);
+      const requestUrl =
+        requestForm === "absolute" ? `https://school.example${pathname}` : pathname;
+      const expectedRoute = candidate.preservesFamily
+        ? requestForm === "absolute"
+          ? `https://school.example${family.route}/:token`
+          : `${family.route}/:token`
+        : FILTERED;
+
+      return {
+        label: `${family.label} ${candidate.label} in a ${requestForm} route`,
+        requestUrl: `${requestUrl}?download=${token}`,
+        transaction: `GET ${requestUrl}?download=${token}`,
+        token,
+        expectedRequestUrl: expectedRoute,
+        expectedTransaction: `GET ${expectedRoute}`,
+      };
+    }),
+  ),
+);
+const ENCODED_LEADING_FILE_ROUTE_CASES = FILE_ROUTE_FAMILIES.flatMap((family) =>
+  [1, 2, 3, 4, 5].map((passes) => {
+    const token = `SIGNED_${family.label.toUpperCase()}_LEADING_SEPARATOR_TOKEN_${passes}`;
+    const route = `${encodeWholeFileRoutePrefix(family.route, passes)}/${token}`;
+    const expectedRoute = passes <= 4 ? `${family.route}/:token` : FILTERED;
+
+    return {
+      label: `${family.label} route with a ${passes}-pass encoded leading separator`,
+      token,
+      transaction: `DELETE ${route}?download=${token}`,
+      expectedTransaction: `DELETE ${expectedRoute}`,
+    };
+  }),
+);
+const UNPARSABLE_ABSOLUTE_FILE_ROUTE_CASES = FILE_ROUTE_FAMILIES.map((family) => {
+  const token = `SIGNED_${family.label.toUpperCase()}_UNPARSABLE_ABSOLUTE_TOKEN`;
+  const requestUrl = `https://[invalid-host${family.route}/${token}%`;
+
+  return {
+    label: `${family.label} route in an unparseable absolute URL`,
+    requestUrl: `${requestUrl}?download=${token}`,
+    token,
+    transaction: `PATCH ${requestUrl}?download=${token}`,
+  };
+});
 const AUTHORITY_LIKE_LOGIN_PATHS = [
   "//portal/login",
   String.raw`/\\portal\\login`,
@@ -330,6 +434,89 @@ describe("sanitizeSentryEvent", () => {
       expect(sanitized.transaction).toMatch(/^(?:GET|POST) /);
     },
   );
+
+  it.each(MALFORMED_FILE_ROUTE_CASES)("never serializes a signed token for $label", (fixture) => {
+    const event = {
+      transaction: fixture.transaction,
+      request: {
+        url: fixture.requestUrl,
+        method: "GET",
+        query_string: `download=${fixture.token}`,
+        headers: {
+          Authorization: `Bearer ${fixture.token}`,
+          Cookie: `ulu_file=${fixture.token}`,
+          "User-Agent": "safe-test-agent",
+        },
+        data: { safeField: `payload-${fixture.token}` },
+        body: { safeField: `body-${fixture.token}` },
+      },
+    } as Event;
+    const snapshot = JSON.parse(JSON.stringify(event)) as Event;
+
+    const sanitized = sanitizeSentryEvent(event);
+    const request = sanitized.request as Event["request"] & { body?: unknown };
+    const serialized = JSON.stringify(sanitized);
+
+    expect(event).toEqual(snapshot);
+    expect(sanitized.transaction).toBe(fixture.expectedTransaction);
+    expect(request?.url).toBe(fixture.expectedRequestUrl);
+    expect(request?.query_string).toBeUndefined();
+    expect(request?.headers).toEqual({
+      Authorization: FILTERED,
+      Cookie: FILTERED,
+      "User-Agent": "safe-test-agent",
+    });
+    expect(request?.data).toBeUndefined();
+    expect(request?.body).toBeUndefined();
+    expect(serialized).not.toContain(fixture.token);
+  });
+
+  it.each(ENCODED_LEADING_FILE_ROUTE_CASES)(
+    "filters $label when request URL fallback uses its transaction",
+    (fixture) => {
+      const event = {
+        transaction: fixture.transaction,
+        request: {
+          headers: { Cookie: `ulu_file=${fixture.token}` },
+          data: { safeField: `payload-${fixture.token}` },
+          body: { safeField: `body-${fixture.token}` },
+        },
+      } as Event;
+
+      const sanitized = sanitizeSentryEvent(event);
+      const request = sanitized.request as Event["request"] & { body?: unknown };
+      const serialized = JSON.stringify(sanitized);
+
+      expect(sanitized.transaction).toBe(fixture.expectedTransaction);
+      expect(request?.headers).toEqual({ Cookie: FILTERED });
+      expect(request?.data).toBeUndefined();
+      expect(request?.body).toBeUndefined();
+      expect(serialized).not.toContain(fixture.token);
+    },
+  );
+
+  it.each(UNPARSABLE_ABSOLUTE_FILE_ROUTE_CASES)("filters $label", (fixture) => {
+    const event = {
+      transaction: fixture.transaction,
+      request: {
+        url: fixture.requestUrl,
+        headers: { Cookie: `ulu_file=${fixture.token}` },
+        data: { safeField: `payload-${fixture.token}` },
+        body: { safeField: `body-${fixture.token}` },
+      },
+    } as Event;
+
+    const sanitized = sanitizeSentryEvent(event);
+    const request = sanitized.request as Event["request"] & { body?: unknown };
+    const serialized = JSON.stringify(sanitized);
+
+    expect(sanitized.transaction).toBe("PATCH [Filtered]");
+    expect(request?.url).toBe(FILTERED);
+    expect(request?.headers).toEqual({ Cookie: FILTERED });
+    expect(request?.data).toBeUndefined();
+    expect(request?.body).toBeUndefined();
+    expect(serialized).not.toContain(fixture.token);
+  });
 
   it.each([
     [undefined, "POST /portal/login"],

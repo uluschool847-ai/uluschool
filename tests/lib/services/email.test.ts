@@ -187,13 +187,45 @@ function resetSmtpEnv() {
   }
 }
 
-function renderReminderDateLines(timeZone: string) {
+function boundedRendererDiagnostic(value: unknown) {
+  const raw =
+    value instanceof Error
+      ? `${value.name}: ${value.message}`
+      : Buffer.isBuffer(value)
+        ? value.toString("utf8")
+        : String(value ?? "");
+  const normalized = raw.trim().replace(/\s+/g, " ");
+
+  return normalized.length <= 500 ? normalized : `${normalized.slice(0, 500)}... [truncated]`;
+}
+
+function assertReminderRendererSucceeded(result: ReturnType<typeof spawnSync>) {
+  const stderr = boundedRendererDiagnostic(result.stderr);
+
+  if (result.error) {
+    throw new Error(
+      `Reminder timezone renderer failed to start: ${boundedRendererDiagnostic(result.error)}`,
+    );
+  }
+
+  if (result.status !== 0) {
+    throw new Error(
+      `Reminder timezone renderer exited with status ${String(result.status)}; stderr: ${stderr || "(empty)"}`,
+    );
+  }
+
+  if (stderr !== "") {
+    throw new Error(`Reminder timezone renderer wrote to stderr: ${stderr}`);
+  }
+}
+
+function renderReminderDateLines(timeZone: string, spawn = spawnSync) {
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "ulu-email-timezone-"));
   const rendererPath = join(temporaryDirectory, "render-reminders.mts");
 
   try {
     writeFileSync(rendererPath, REMINDER_RENDERER_SOURCE);
-    const result = spawnSync(
+    const result = spawn(
       process.execPath,
       [join(ROOT, "node_modules", "tsx", "dist", "cli.mjs"), rendererPath],
       {
@@ -204,10 +236,12 @@ function renderReminderDateLines(timeZone: string) {
           EMAIL_SERVICE_PATH: join(ROOT, "lib", "services", "email.ts"),
           TZ: timeZone,
         },
+        killSignal: "SIGKILL",
+        timeout: 15_000,
       },
     );
 
-    expect(result.status).toBe(0);
+    assertReminderRendererSucceeded(result);
     return JSON.parse(result.stdout) as string[][];
   } finally {
     rmSync(temporaryDirectory, { force: true, recursive: true });
@@ -238,6 +272,80 @@ describe("lib/services/email.ts env handling", () => {
     });
     expect(createTransportMock).not.toHaveBeenCalled();
     expect(sendMailMock).not.toHaveBeenCalled();
+  });
+
+  it("bounds and force-terminates the timezone renderer subprocess", () => {
+    const spawn = vi.fn(() => ({
+      error: undefined,
+      output: [null, "[]", ""],
+      pid: 123,
+      signal: null,
+      status: 0,
+      stderr: "",
+      stdout: "[]",
+    }));
+
+    expect(
+      renderReminderDateLines("America/Los_Angeles", spawn as unknown as typeof spawnSync),
+    ).toEqual([]);
+    expect(spawn).toHaveBeenCalledTimes(1);
+
+    const options = spawn.mock.calls[0]?.[2];
+    expect(options?.timeout).toBeGreaterThan(0);
+    expect(options?.timeout).toBeLessThan(30_000);
+    expect(options?.killSignal).toBe("SIGKILL");
+  });
+
+  it.each([
+    {
+      label: "spawn error",
+      result: {
+        error: new Error(`spawn timeout ${"x".repeat(2_000)} UNBOUNDED_TAIL`),
+        status: null,
+        stderr: "renderer stderr",
+      },
+      expected: /failed to start.*spawn timeout/i,
+    },
+    {
+      label: "nonzero status",
+      result: {
+        error: undefined,
+        status: 7,
+        stderr: `renderer failure ${"x".repeat(2_000)} UNBOUNDED_TAIL`,
+      },
+      expected: /exited with status 7.*renderer failure/i,
+    },
+    {
+      label: "unexpected stderr",
+      result: {
+        error: undefined,
+        status: 0,
+        stderr: `renderer warning ${"x".repeat(2_000)} UNBOUNDED_TAIL`,
+      },
+      expected: /wrote to stderr.*renderer warning/i,
+    },
+  ])("reports bounded $label diagnostics before parsing stdout", ({ result, expected }) => {
+    const spawn = vi.fn(() => ({
+      output: [null, "INVALID_JSON", result.stderr],
+      pid: 123,
+      signal: null,
+      stdout: "INVALID_JSON",
+      ...result,
+    }));
+
+    let thrown: unknown;
+    try {
+      renderReminderDateLines("America/Los_Angeles", spawn as unknown as typeof spawnSync);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const message = (thrown as Error).message;
+    expect(message).toMatch(expected);
+    expect(message).not.toContain("UNBOUNDED_TAIL");
+    expect(message.length).toBeLessThan(1_000);
+    expect(message).not.toContain("Unexpected token");
   });
 
   it("renders class and assignment reminder dates in Nairobi under a non-Kenyan host timezone", () => {

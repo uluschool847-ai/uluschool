@@ -29,6 +29,7 @@ const CONTEXTUAL_NAME_KEY = /^(?:first|last|full|display|legal)?name$/;
 const SUBJECT_CONTAINER_KEY =
   /^(?:student|students|parent|parents|guardian|guardians|recipient|recipients)(?:data|details|profile|profiles)?$/;
 const ENCODED_OCTET = /%[0-9a-f]{2}/i;
+const ENCODED_OCTET_WITH_VALUE = /%([0-9a-f]{2})/gi;
 const HTTP_METHOD_TRANSACTION =
   /^((?:CONNECT|DELETE|GET|HEAD|OPTIONS|PATCH|POST|PUT|TRACE)\s+)(.+)$/i;
 
@@ -78,6 +79,20 @@ function stripUrlQuery(value: string) {
   return indexes.length === 0 ? value : value.slice(0, Math.min(...indexes));
 }
 
+function isRouteLikeValue(value: unknown) {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const candidate = value.trim();
+  return (
+    candidate.startsWith("/") ||
+    candidate.startsWith("\\") ||
+    candidate.startsWith("%") ||
+    /^https?:\/\//i.test(candidate)
+  );
+}
+
 function pathnameFromRouteValue(value: unknown) {
   if (typeof value !== "string") {
     return null;
@@ -88,7 +103,7 @@ function pathnameFromRouteValue(value: unknown) {
     return null;
   }
 
-  if (candidate.startsWith("/") || candidate.startsWith("\\")) {
+  if (candidate.startsWith("/") || candidate.startsWith("\\") || candidate.startsWith("%")) {
     return stripUrlQuery(candidate);
   }
 
@@ -141,10 +156,33 @@ function canonicalizePathname(pathname: string) {
   return canonical.includes("%") ? null : canonical;
 }
 
+function decodeAsciiPathOctets(pathname: string) {
+  return pathname.replace(ENCODED_OCTET_WITH_VALUE, (encoded, hexadecimal: string) => {
+    const value = Number.parseInt(hexadecimal, 16);
+    return value <= 0x7f ? String.fromCharCode(value) : encoded;
+  });
+}
+
+function findFileRoutePrefix(pathname: string) {
+  let recognizablePathname = normalizePathSegments(pathname);
+
+  for (let pass = 0; pass < MAX_PATH_DECODE_PASSES; pass += 1) {
+    const decodedPathname = decodeAsciiPathOctets(recognizablePathname);
+    if (decodedPathname === recognizablePathname) {
+      break;
+    }
+
+    recognizablePathname = normalizePathSegments(decodedPathname);
+  }
+
+  const normalizedPathname = recognizablePathname.toLowerCase();
+  return FILE_ROUTE_PREFIXES.find((prefix) => normalizedPathname.startsWith(`${prefix}/`));
+}
+
 function classifyRoute(value: unknown): RouteClassification {
   const pathname = pathnameFromRouteValue(value);
   if (pathname === null) {
-    return "unusable";
+    return isRouteLikeValue(value) ? "sensitive" : "unusable";
   }
 
   const canonicalPathname = canonicalizePathname(pathname);
@@ -172,20 +210,13 @@ function routeFromTransaction(value: unknown) {
 function redactFileRouteToken(value: string) {
   const pathname = pathnameFromRouteValue(value);
   if (pathname === null) {
-    return value;
+    return isRouteLikeValue(value) ? FILTERED : value;
   }
 
   const canonicalPathname = canonicalizePathname(pathname);
-  if (canonicalPathname === null) {
-    return value;
-  }
-
-  const normalizedPathname = canonicalPathname.toLowerCase();
-  const prefix = FILE_ROUTE_PREFIXES.find((candidate) =>
-    normalizedPathname.startsWith(`${candidate}/`),
-  );
+  const prefix = findFileRoutePrefix(pathname);
   if (!prefix) {
-    return value;
+    return canonicalPathname === null ? FILTERED : value;
   }
 
   const sanitizedPathname = `${prefix}/${FILE_ROUTE_TOKEN_PLACEHOLDER}`;
@@ -218,7 +249,7 @@ function sanitizeTransaction(event: UnknownRecord) {
   const methodPrefix = match?.[1] ?? "";
   const route = match?.[2]?.trim() ?? transaction;
 
-  if (pathnameFromRouteValue(route) === null) {
+  if (pathnameFromRouteValue(route) === null && !isRouteLikeValue(route)) {
     return;
   }
 
@@ -310,17 +341,17 @@ function sanitizeRequest(event: UnknownRecord) {
   }
 
   const request = event.request;
-  Reflect.deleteProperty(request, "query_string");
-
-  if (typeof request.url === "string") {
-    request.url = sanitizeRouteValue(request.url);
-  }
-
   const requestRoute = classifyRoute(request.url);
   const route =
     requestRoute === "unusable"
       ? classifyRoute(routeFromTransaction(event.transaction))
       : requestRoute;
+
+  Reflect.deleteProperty(request, "query_string");
+
+  if (typeof request.url === "string") {
+    request.url = sanitizeRouteValue(request.url);
+  }
 
   if (route !== "sensitive") {
     return;
@@ -345,8 +376,8 @@ export function sanitizeSentryEvent<T extends Event>(event: T): T {
   }
 
   Reflect.deleteProperty(cloned, "user");
-  sanitizeTransaction(cloned);
   sanitizeRequest(cloned);
+  sanitizeTransaction(cloned);
 
   if (Array.isArray(cloned.breadcrumbs)) {
     cloned.breadcrumbs = cloned.breadcrumbs.map((breadcrumb) =>

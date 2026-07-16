@@ -449,7 +449,7 @@ function requireHttpsUrl(context: z.RefinementCtx, value: string | undefined, ke
     addIssue(
       context,
       key,
-      "must be an HTTPS URL with a public host and without embedded credentials",
+      "must be an HTTPS URL with a non-loopback host outside the IANA-reserved .invalid, .example, and .test namespaces and without embedded credentials",
     );
   }
 }
@@ -471,7 +471,11 @@ function requireSentryContract(
     const value = env[key];
     if (env.SENTRY_ENABLED === "true") {
       if (!isHttpsUrl(value, true)) {
-        addIssue(context, key, "must be an HTTPS DSN with a public host when Sentry is enabled");
+        addIssue(
+          context,
+          key,
+          "must be an HTTPS DSN with a non-loopback host outside the IANA-reserved .invalid, .example, and .test namespaces when Sentry is enabled",
+        );
       }
     } else if (value !== undefined && value !== "") {
       addIssue(context, key, "must be empty when Sentry is disabled");

@@ -522,6 +522,57 @@ describe("validateProductionEnv", () => {
     }
   });
 
+  it("describes the exact monitoring hostname guarantee without claiming public-host validation", () => {
+    const enabledSentry = {
+      ...validProductionEnv(),
+      SENTRY_ENABLED: "true",
+      SENTRY_DSN: VALID_SERVER_SENTRY_DSN,
+      NEXT_PUBLIC_SENTRY_DSN: VALID_CLIENT_SENTRY_DSN,
+    };
+    const cases = [
+      {
+        key: "ALERT_WEBHOOK_URL",
+        env: { ...validProductionEnv(), ALERT_WEBHOOK_URL: "https://localhost/hooks" },
+        message:
+          "must be an HTTPS URL with a non-loopback host outside the IANA-reserved .invalid, .example, and .test namespaces and without embedded credentials",
+      },
+      {
+        key: "SENTRY_DSN",
+        env: { ...enabledSentry, SENTRY_DSN: "https://key@alerts.example/1" },
+        message:
+          "must be an HTTPS DSN with a non-loopback host outside the IANA-reserved .invalid, .example, and .test namespaces when Sentry is enabled",
+      },
+    ] as const;
+
+    for (const fixture of cases) {
+      const issue = invalidResult(fixture.env).errors.find((error) => error.key === fixture.key);
+
+      expect(issue?.message).toBe(fixture.message);
+      expect(issue?.message).not.toMatch(/\bpublic\b|private|link-local|unspecified/i);
+    }
+  });
+
+  it.each([
+    ["private IPv4", "10.0.0.1"],
+    ["link-local IPv4", "169.254.169.254"],
+    ["unspecified IPv6", "[::]"],
+  ])("does not broaden monitoring validation to reject %s literals", (_, host) => {
+    expect(
+      validateProductionEnv({
+        ...validProductionEnv(),
+        ALERT_WEBHOOK_URL: `https://${host}/hooks`,
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateProductionEnv({
+        ...validProductionEnv(),
+        SENTRY_ENABLED: "true",
+        SENTRY_DSN: `https://server-public-key@${host}/1`,
+        NEXT_PUBLIC_SENTRY_DSN: `https://client-public-key@${host}/2`,
+      }).ok,
+    ).toBe(true);
+  });
+
   it("returns deterministic deduplicated errors without rejected values or parsed details", () => {
     const secretValues = [
       "leaked-session-value",

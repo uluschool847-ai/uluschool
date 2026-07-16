@@ -60,3 +60,31 @@ Not applicable. Task 4 has no UI or browser-facing workflow change.
 
 - Alert delivery and Sentry ingestion remain provider-controlled operational checks and must be exercised through the documented staging launch matrix with real environment values.
 - The successful Next build emitted non-blocking webpack cache serialization performance warnings only.
+
+## Final Review Correction
+
+The final hardening review corrections are represented coherently:
+
+- I-1: malformed percent encodings, raw trailing `%`, and over-encoded file-route prefixes are treated as sensitive; recognized private/public route families retain `/api/files/:token` or `/api/public-files/:token`, while unclassifiable route values use a stable filtered value. The complete serialized Sentry event excludes the signed token, with request payload/query/body/header/cookie filtering preserved.
+- M-1: the timezone renderer subprocess now has a 15-second `spawnSync` timeout and `SIGKILL`; startup errors, non-zero status, and stderr are asserted with bounded diagnostics.
+- M-2: validator messages and deployment docs state the enforced guarantee precisely: non-loopback hosts outside IANA-reserved `.invalid`, `.example`, and `.test` namespaces. The docs explicitly state that private, link-local, and unspecified addresses are not rejected and require separate provider-ownership confirmation.
+
+### Prior Broad Evidence
+
+Inherited evidence from the previous worker, not rerun for this closeout:
+
+- Focused 11-file slice: 566/566 passed.
+- Full suite: 3,738 passed, 40 skipped.
+- Production build: passed; 88 pages generated.
+
+### Fresh Focused Evidence
+
+- `npx vitest run tests/lib/services/email.test.ts`: 1 file passed; 20 tests passed.
+- `npx vitest run lib/monitoring/__tests__/sentry-sanitize.test.ts`: 1 file passed; 117 tests passed.
+- `npx vitest run lib/config/__tests__/production-env.test.ts`: 1 file passed; 280 tests passed.
+- `git diff --check`: passed with no whitespace errors.
+
+### Correction Residual Risk
+
+- Monitoring validation still does not establish that a private, link-local, or unspecified literal belongs to the intended provider; deployment operators must verify provider ownership separately.
+- No database or network access was used, and no browser verification was required because Task 4 has no UI or browser-facing workflow change.
