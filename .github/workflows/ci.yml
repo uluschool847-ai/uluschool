@@ -13,7 +13,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 180
     services:
       postgres:
         image: postgres:16
@@ -70,8 +70,10 @@ jobs:
         run: npm run typecheck
       - name: Test
         env:
+          RUN_ADMIN_TWO_FACTOR_CHALLENGE_POSTGRES: "1"
           RUN_SEED_DB_INTEGRATION: "1"
           RUN_S3_POSTGRES_INTEGRATION: "1"
+          RUN_TASK3_POSTGRES_INTEGRATION: "1"
         run: npm run test
       - name: Build
         run: npm run build

@@ -312,7 +312,7 @@ function sanitizeValue(
       }
 
       if (typeof propertyValue === "string" && normalizeKey(key).endsWith("url")) {
-        entries.push([key, stripUrlQuery(propertyValue)]);
+        entries.push([key, sanitizeRouteValue(propertyValue)]);
         continue;
       }
 
@@ -341,7 +341,7 @@ function sanitizeRequest(event: UnknownRecord) {
   }
 
   const request = event.request;
-  const requestRoute = classifyRoute(request.url);
+  const requestRoute = request.url === FILTERED ? "sensitive" : classifyRoute(request.url);
   const route =
     requestRoute === "unusable"
       ? classifyRoute(routeFromTransaction(event.transaction))

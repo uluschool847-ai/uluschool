@@ -121,6 +121,43 @@ const UNPARSABLE_ABSOLUTE_FILE_ROUTE_CASES = FILE_ROUTE_FAMILIES.map((family) =>
     transaction: `PATCH ${requestUrl}?download=${token}`,
   };
 });
+const GENERIC_FILE_URL_CASES = [
+  {
+    category: "fetch",
+    expectedUrl: "/api/files/:token",
+    label: "relative private-file route",
+    token: "GENERIC_RELATIVE_PRIVATE_FILE_TOKEN",
+    url: "/api/files/GENERIC_RELATIVE_PRIVATE_FILE_TOKEN?download=GENERIC_RELATIVE_PRIVATE_FILE_TOKEN",
+  },
+  {
+    category: "xhr",
+    expectedUrl: "https://school.example/api/public-files/:token",
+    label: "absolute public-file route",
+    token: "GENERIC_ABSOLUTE_PUBLIC_FILE_TOKEN",
+    url: "https://school.example/api/public-files/GENERIC_ABSOLUTE_PUBLIC_FILE_TOKEN?download=GENERIC_ABSOLUTE_PUBLIC_FILE_TOKEN#preview",
+  },
+  {
+    category: "fetch",
+    expectedUrl: "/api/files/:token",
+    label: "encoded private-file route",
+    token: "GENERIC_ENCODED_PRIVATE_FILE_TOKEN",
+    url: "/api%2Ffiles/GENERIC_ENCODED_PRIVATE_FILE_TOKEN?download=GENERIC_ENCODED_PRIVATE_FILE_TOKEN",
+  },
+  {
+    category: "xhr",
+    expectedUrl: "/api/public-files/:token",
+    label: "malformed public-file route",
+    token: "GENERIC_MALFORMED_PUBLIC_FILE_TOKEN",
+    url: "/api/public-files/GENERIC_MALFORMED_PUBLIC_FILE_TOKEN%E0%A4%A?download=GENERIC_MALFORMED_PUBLIC_FILE_TOKEN",
+  },
+  {
+    category: "fetch",
+    expectedUrl: FILTERED,
+    label: "unparseable absolute private-file route",
+    token: "GENERIC_UNPARSABLE_PRIVATE_FILE_TOKEN",
+    url: "https://[invalid-host/api/files/GENERIC_UNPARSABLE_PRIVATE_FILE_TOKEN%?download=GENERIC_UNPARSABLE_PRIVATE_FILE_TOKEN",
+  },
+] as const;
 const AUTHORITY_LIKE_LOGIN_PATHS = [
   "//portal/login",
   String.raw`/\\portal\\login`,
@@ -194,6 +231,77 @@ async function captureInitOptions(
 }
 
 describe("sanitizeSentryEvent", () => {
+  it.each(GENERIC_FILE_URL_CASES)(
+    "masks a token-bearing $label in a $category breadcrumb URL",
+    (fixture) => {
+      const event = {
+        breadcrumbs: [
+          {
+            category: fixture.category,
+            data: { url: fixture.url },
+          },
+        ],
+      } as Event;
+      const snapshot = JSON.parse(JSON.stringify(event)) as Event;
+
+      const sanitized = sanitizeSentryEvent(event);
+
+      expect(event).toEqual(snapshot);
+      expect(sanitized.breadcrumbs?.[0]?.data?.url).toBe(fixture.expectedUrl);
+      expect(JSON.stringify(sanitized)).not.toContain(fixture.token);
+    },
+  );
+
+  it.each(GENERIC_FILE_URL_CASES)(
+    "masks a token-bearing $label in generic span URL fields",
+    (fixture) => {
+      const event = {
+        spans: [
+          {
+            data: {
+              "http.url": fixture.url,
+              url: fixture.url,
+            },
+            op: "http.client",
+          },
+        ],
+      } as Event;
+      const snapshot = JSON.parse(JSON.stringify(event)) as Event;
+
+      const sanitized = sanitizeSentryEvent(event);
+      const spanData = sanitized.spans?.[0]?.data;
+
+      expect(event).toEqual(snapshot);
+      expect(spanData?.url).toBe(fixture.expectedUrl);
+      expect(spanData?.["http.url"]).toBe(fixture.expectedUrl);
+      expect(JSON.stringify(sanitized)).not.toContain(fixture.token);
+    },
+  );
+
+  it("continues stripping queries from generic non-file breadcrumb and span URLs", () => {
+    const querySecret = "GENERIC_SAFE_URL_QUERY_SECRET";
+    const event = {
+      breadcrumbs: [
+        {
+          category: "fetch",
+          data: { url: `https://school.example/api/health?probe=${querySecret}` },
+        },
+      ],
+      spans: [
+        {
+          data: { url: `/portal/teacher/assignments?view=${querySecret}` },
+          op: "http.client",
+        },
+      ],
+    } as Event;
+
+    const sanitized = sanitizeSentryEvent(event);
+
+    expect(sanitized.breadcrumbs?.[0]?.data?.url).toBe("https://school.example/api/health");
+    expect(sanitized.spans?.[0]?.data?.url).toBe("/portal/teacher/assignments");
+    expect(JSON.stringify(sanitized)).not.toContain(querySecret);
+  });
+
   it("removes nested PII and secrets while preserving technical diagnostics", () => {
     const secrets = {
       authorization: "Bearer AUTH_VALUE_4f967d",

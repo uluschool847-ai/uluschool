@@ -13,6 +13,15 @@ const storagePostgresTest = readFileSync(
 );
 const seedIntegrationFlag = "RUN_SEED_DB_INTEGRATION";
 const storagePostgresIntegrationFlag = "RUN_S3_POSTGRES_INTEGRATION";
+const adminTwoFactorPostgresIntegrationFlag = "RUN_ADMIN_TWO_FACTOR_CHALLENGE_POSTGRES";
+const task3PostgresIntegrationFlag = "RUN_TASK3_POSTGRES_INTEGRATION";
+const integrationFlags = [
+  seedIntegrationFlag,
+  storagePostgresIntegrationFlag,
+  adminTwoFactorPostgresIntegrationFlag,
+  task3PostgresIntegrationFlag,
+] as const;
+const verifyJobTimeoutMinutes = 180;
 const requiredRunCommands = [
   "npm ci",
   "npx playwright install --with-deps chromium",
@@ -160,6 +169,9 @@ function assertCiWorkflowContract(
   assertStoragePostgresTestGate(storagePostgresTestSource);
   const parsedWorkflow = asRecord(parse(workflowSource), "workflow");
   const jobs = asRecord(parsedWorkflow.jobs, "workflow jobs");
+  if (Object.keys(jobs).length !== 1 || !Object.hasOwn(jobs, "verify")) {
+    throw new Error("CI workflow must retain exactly one verify job");
+  }
   const verify = asRecord(jobs.verify, "verify job");
   const steps = asSteps(verify.steps);
   const permissions = asRecord(verify.permissions ?? parsedWorkflow.permissions, "CI permissions");
@@ -169,6 +181,12 @@ function assertCiWorkflowContract(
   const environment = asRecord(verify.env, "verify job environment");
   const workflowEnvironment =
     parsedWorkflow.env === undefined ? {} : asRecord(parsedWorkflow.env, "workflow environment");
+
+  assertEqual(
+    verify["timeout-minutes"],
+    verifyJobTimeoutMinutes,
+    `verify job timeout must remain ${verifyJobTimeoutMinutes} minutes`,
+  );
 
   const nodeSetup = steps.find((step) => step.uses === "actions/setup-node@v4");
   if (!nodeSetup) {
@@ -193,7 +211,6 @@ function assertCiWorkflowContract(
   assertDatabaseUrl(environment.DATABASE_URL, "DATABASE_URL");
   assertDatabaseUrl(environment.DIRECT_URL, "DIRECT_URL");
 
-  const integrationFlags = [seedIntegrationFlag, storagePostgresIntegrationFlag];
   for (const integrationFlag of integrationFlags) {
     if (
       Object.hasOwn(workflowEnvironment, integrationFlag) ||
@@ -260,6 +277,41 @@ describe("GitHub CI production-readiness contract", () => {
     expect(nvmrc).toBe("22");
     expect(() => assertCiWorkflowContract(workflow)).not.toThrow();
   });
+
+  it("keeps one sequential verify job with a 180-minute timeout", () => {
+    const parsedWorkflow = asRecord(parse(workflow), "workflow");
+    const jobs = asRecord(parsedWorkflow.jobs, "workflow jobs");
+    const verify = asRecord(jobs.verify, "verify job");
+
+    expect(Object.keys(jobs)).toEqual(["verify"]);
+    expect(verify["timeout-minutes"]).toBe(verifyJobTimeoutMinutes);
+
+    const shortenedTimeout = workflow.replace(
+      `timeout-minutes: ${verifyJobTimeoutMinutes}`,
+      "timeout-minutes: 30",
+    );
+    expect(shortenedTimeout).not.toBe(workflow);
+    expect(() => assertCiWorkflowContract(shortenedTimeout)).toThrow(/180 minutes/i);
+  });
+
+  it.each([adminTwoFactorPostgresIntegrationFlag, task3PostgresIntegrationFlag])(
+    "enables %s only on the full test step",
+    (integrationFlag) => {
+      const parsedWorkflow = asRecord(parse(workflow), "workflow");
+      const verify = asRecord(asRecord(parsedWorkflow.jobs, "workflow jobs").verify, "verify job");
+      const steps = asSteps(verify.steps);
+      const testStep = steps.find((step) => step.run === "npm run test");
+
+      expect(testStep).toBeDefined();
+      expect(asRecord(testStep?.env, "full test step environment")[integrationFlag]).toBe("1");
+
+      const removedFlag = workflow.replace(`          ${integrationFlag}: "1"\n`, "");
+      expect(removedFlag).not.toBe(workflow);
+      expect(() => assertCiWorkflowContract(removedFlag)).toThrow(
+        new RegExp(`full test step must enable ${integrationFlag}`),
+      );
+    },
+  );
 
   it("rejects enabling seed integration before deterministic seeding", () => {
     const earlySeedIntegration = workflow.replace(

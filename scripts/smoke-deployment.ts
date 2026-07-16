@@ -57,6 +57,24 @@ function validateBaseUrl(value: string) {
   return url;
 }
 
+function isPortalLoginRedirect(response: Response, baseUrl: URL) {
+  if (response.status < 300 || response.status >= 400) {
+    return false;
+  }
+
+  const location = response.headers.get("location");
+  if (!location) {
+    return false;
+  }
+
+  try {
+    const redirectUrl = new URL(location, baseUrl);
+    return redirectUrl.origin === baseUrl.origin && redirectUrl.pathname === "/portal/login";
+  } catch {
+    return false;
+  }
+}
+
 async function fetchWithTimeout(
   fetchImpl: typeof fetch,
   url: URL,
@@ -95,12 +113,7 @@ async function verifyRoute(
 
   try {
     if (route === "/admin") {
-      const location = response.headers.get("location") ?? "";
-      if (
-        response.status < 300 ||
-        response.status >= 400 ||
-        !location.startsWith("/portal/login")
-      ) {
+      if (!isPortalLoginRedirect(response, baseUrl)) {
         throw failure(route, response.status);
       }
       return;

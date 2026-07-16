@@ -27,6 +27,7 @@ const testIgnore =
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
+  forbidOnly: isReleasePartition,
   retries: isReleasePartition ? 0 : 1,
   reporter: isReleasePartition ? [["./scripts/playwright-release-reporter.mjs"]] : undefined,
   workers: 1,

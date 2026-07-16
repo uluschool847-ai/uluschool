@@ -16,6 +16,7 @@ const temporaryDirectories: string[] = [];
 type Capture = {
   args: string[];
   environment: Record<string, string | null>;
+  forbidOnly: boolean;
   matcherResults: Record<string, boolean>;
   reporters: string[];
   retries: number;
@@ -109,7 +110,13 @@ const reporters = (
   Array.isArray(config.reporter) ? config.reporter : config.reporter ? [config.reporter] : []
 ).map((reporter) => Array.isArray(reporter) ? reporter[0] : reporter);
 
-process.stdout.write(JSON.stringify({ matcherResults, reporters, retries: config.retries, webServerEnvironment }));
+process.stdout.write(JSON.stringify({
+  forbidOnly: config.forbidOnly === true,
+  matcherResults,
+  reporters,
+  retries: config.retries,
+  webServerEnvironment,
+}));
 `,
   );
 
@@ -138,7 +145,7 @@ if (configCapture.status !== 0) {
   throw new Error("Unable to capture Playwright config: " + configCapture.stderr);
 }
 
-const { matcherResults, reporters, retries, webServerEnvironment } = JSON.parse(configCapture.stdout);
+const { forbidOnly, matcherResults, reporters, retries, webServerEnvironment } = JSON.parse(configCapture.stdout);
 const environmentKeys = [
   "PLAYWRIGHT_BASE_URL",
   "PORT",
@@ -167,6 +174,7 @@ writeFileSync(
     source: ${sourceLiteral},
     args: process.argv.slice(2),
     environment: capturedEnvironment,
+    forbidOnly,
     matcherResults,
     reporters,
     retries,
@@ -254,6 +262,7 @@ function runActualPlaywrightFixture(
     callerConfig?: "equals" | "separate" | "short-attached" | "short-equals" | "short-separate";
     callerReporter?: "hostile";
     environmentReporter?: "hostile";
+    forbidOnly?: boolean;
     partition?: "focused" | "standard";
     specFileName?: string;
   } = {},
@@ -279,6 +288,7 @@ function runActualPlaywrightFixture(
     `import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
+  forbidOnly: ${JSON.stringify(options.forbidOnly ?? false)},
   outputDir: ${JSON.stringify(join(directory, "results"))},
   reporter: "line",
   testDir: ${JSON.stringify(directory)},
@@ -497,6 +507,13 @@ const releaseConfigOverrideCases = [
 ]);
 
 describe("Playwright E2E partition contract", () => {
+  cliIt("forbids focused tests only in release partitions", () => {
+    expect(configFor("focused").forbidOnly).toBe(false);
+    for (const partition of ["standard", "admin-2fa", "signed-delivery", "storage"] as const) {
+      expect(configFor(partition).forbidOnly).toBe(true);
+    }
+  });
+
   cliIt("retries only focused browser tests", () => {
     const focusedConfig = configFor("focused");
     expect(focusedConfig.environment.PW_TEST_REPORTER).toBe(hostileEnvironment.PW_TEST_REPORTER);
@@ -508,6 +525,36 @@ describe("Playwright E2E partition contract", () => {
       expect(releaseConfig.reporters).toEqual(["./scripts/playwright-release-reporter.mjs"]);
       expect(releaseConfig.retries).toBe(0);
     }
+  });
+
+  cliIt("rejects a release run containing an actual test.only", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test.only("controlled focused release test", () => {});
+test("controlled non-focused release test", () => {});
+`,
+      { forbidOnly: configFor("standard").forbidOnly },
+    );
+
+    expect(result.status, result.output).toBe(1);
+    expect(normalizePlaywrightOutput(result.output)).toContain(
+      "item focused with '.only' is not allowed due to the 'forbidOnly' option",
+    );
+  });
+
+  cliIt("preserves test.only behavior for a focused run", () => {
+    const result = runActualPlaywrightFixture(
+      `import { test } from "@playwright/test";
+
+test.only("controlled focused local test", () => {});
+test("controlled non-focused local test", () => {});
+`,
+      { forbidOnly: configFor("focused").forbidOnly, partition: "focused" },
+    );
+
+    expect(result.status, result.output).toBe(0);
+    expect(playwrightSummaryCounts(result.output)).toEqual(["1 passed"]);
   });
 
   cliIt("rejects a release run with an actual skipped Playwright result", () => {

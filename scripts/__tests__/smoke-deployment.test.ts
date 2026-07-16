@@ -4,7 +4,18 @@ import { parseSmokeCliArgs, runDeploymentSmoke } from "../smoke-deployment";
 
 type SmokeEnvironment = "staging" | "production";
 
-function createHealthyFetch(environment: SmokeEnvironment = "staging") {
+type AdminRedirect = {
+  location?: string;
+  status: number;
+};
+
+function createHealthyFetch(
+  environment: SmokeEnvironment = "staging",
+  adminRedirect: AdminRedirect = {
+    location: "/portal/login?callbackUrl=%2Fadmin",
+    status: 307,
+  },
+) {
   return vi.fn<typeof fetch>(async (input, init) => {
     const url = new URL(typeof input === "string" ? input : input.toString());
 
@@ -15,8 +26,9 @@ function createHealthyFetch(environment: SmokeEnvironment = "staging") {
     if (url.pathname === "/admin") {
       expect(init?.redirect).toBe("manual");
       return new Response(null, {
-        status: 307,
-        headers: { location: "/portal/login?callbackUrl=%2Fadmin" },
+        status: adminRedirect.status,
+        headers:
+          adminRedirect.location === undefined ? undefined : { location: adminRedirect.location },
       });
     }
 
@@ -228,6 +240,63 @@ describe("runDeploymentSmoke", () => {
         fetchImpl,
       }),
     ).rejects.toThrow("FAIL /admin (status 302)");
+  });
+
+  it.each([
+    ["root-relative", "/portal/login?callbackUrl=%2Fadmin"],
+    [
+      "absolute same-origin",
+      "https://school.example.com/portal/login?callbackUrl=%2Fadmin#complete",
+    ],
+  ])("accepts a %s admin login redirect", async (_form, location) => {
+    const fetchImpl = createHealthyFetch("staging", { location, status: 307 });
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await expect(
+      runDeploymentSmoke({
+        baseUrl: "https://school.example.com",
+        environment: "staging",
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ passed: 7, total: 7 });
+  });
+
+  it.each([
+    ["another path", "/sign-in?redirect=WRONG_PATH_LOCATION", 302],
+    ["a login-path suffix", "/portal/login/continue?token=WRONG_SUFFIX_LOCATION", 307],
+    [
+      "an off-origin absolute URL",
+      "https://attacker.example/portal/login?token=OFF_ORIGIN_LOCATION",
+      302,
+    ],
+    [
+      "an off-origin protocol-relative URL",
+      "//attacker.example/portal/login?token=PROTOCOL_RELATIVE_LOCATION",
+      302,
+    ],
+    ["an invalid URL", "https://[invalid-host/portal/login?token=INVALID_LOCATION", 302],
+    ["a missing Location header", undefined, 302],
+    ["a non-redirect response", "/portal/login?token=NON_REDIRECT_LOCATION", 200],
+  ])("rejects %s without exposing its Location", async (_case, location, status) => {
+    const fetchImpl = createHealthyFetch("staging", { location, status });
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    let thrown: Error | undefined;
+    try {
+      await runDeploymentSmoke({
+        baseUrl: "https://school.example.com",
+        environment: "staging",
+        fetchImpl,
+      });
+    } catch (error) {
+      thrown = error as Error;
+    }
+
+    expect(thrown?.message).toBe(`FAIL /admin (status ${status})`);
+    if (location !== undefined) {
+      expect(thrown?.message).not.toContain(location);
+      expect(JSON.stringify(log.mock.calls)).not.toContain(location);
+    }
   });
 });
 
