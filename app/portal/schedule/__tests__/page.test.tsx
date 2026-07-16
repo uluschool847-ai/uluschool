@@ -187,8 +187,8 @@ describe("Portal schedule subject display", () => {
     const { from: start, to: end } = range ?? {};
     expect(start).toBeInstanceOf(Date);
     expect(end).toBeInstanceOf(Date);
-    expect((start as Date).getMonth()).toBe(6);
-    expect((end as Date).getMonth()).toBe(7);
+    expect(start).toEqual(new Date("2026-06-30T21:00:00.000Z"));
+    expect(end).toEqual(new Date("2026-07-31T21:00:00.000Z"));
     expect(screen.getByLabelText(/month/i)).toHaveProperty("value", "2026-07");
     expect(screen.getByText(/no lessons scheduled|no classes scheduled/i)).toBeDefined();
   });
