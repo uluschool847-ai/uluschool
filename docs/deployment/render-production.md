@@ -81,11 +81,11 @@ are configuration rules, not credentials.
 | `PRIVACY_EMAIL_PROCESSOR_NAME` | Actual outbound-email processor name |
 | `CRON_SECRET` | Unique high-entropy value of at least 32 characters |
 | `REMINDER_CRON_TOKEN` | Unique high-entropy value of at least 32 characters |
-| `ALERT_WEBHOOK_URL` | HTTPS webhook for the private operations channel |
+| `ALERT_WEBHOOK_URL` | HTTPS webhook for the private operations channel on a real provider host; never use loopback, `.invalid`, `.example`, or `.test` |
 | `ALERT_TEST_TOKEN` | Unique high-entropy value of at least 32 characters |
 | `SENTRY_ENABLED` | `true` only when both environment-specific DSNs are configured; otherwise `false` with both DSNs empty |
-| `SENTRY_DSN` | Server DSN for this environment when Sentry is enabled |
-| `NEXT_PUBLIC_SENTRY_DSN` | Browser DSN for this environment when Sentry is enabled |
+| `SENTRY_DSN` | Server DSN for this environment when Sentry is enabled, using a real Sentry host rather than loopback or a reserved hostname |
+| `NEXT_PUBLIC_SENTRY_DSN` | Browser DSN for this environment when Sentry is enabled, using a real Sentry host rather than loopback or a reserved hostname |
 
 For the launch gate, enable Sentry with separate staging and production projects so the browser
 matrix can verify sanitization and environment routing.
@@ -117,8 +117,9 @@ requires an environment-specific calendar plus server-only Google credentials. K
 `GOOGLE_TIMEZONE` set to `Africa/Nairobi`. Set public ULU contact metadata to verified Kenyan
 contact details before launch.
 
-Render supplies `PORT` and its platform marker. Do not add a fixed `PORT`. Do not define a shared
-portal-password variable or `SEED_PORTAL_PASSWORD` in staging or production.
+Render supplies `PORT` and its platform marker. Do not add a fixed `PORT`. In staging and
+production, leave `SEED_PORTAL_PASSWORD` and `DEFAULT_PORTAL_PASSWORD` absent or empty; validation
+rejects every non-empty value, including whitespace-only values.
 
 ## Regular-session version 2 cutover
 

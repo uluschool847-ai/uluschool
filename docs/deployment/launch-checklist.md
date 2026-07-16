@@ -19,6 +19,8 @@ links in the private launch record. Never record credentials.
       service and staging database.
 - [ ] Confirm `APP_ENV=staging`, a non-production HTTPS site origin, separate R2/Turnstile/Sentry
       configuration, and no production personal data.
+- [ ] Confirm alert and Sentry URLs use real provider hosts, never loopback or `.invalid`, `.example`,
+      or `.test`; leave `SEED_PORTAL_PASSWORD` and `DEFAULT_PORTAL_PASSWORD` absent or empty.
 - [ ] Run the deployment smoke and every row in `browser-verification.md`.
 - [ ] Stop here on any failed security, ownership, upload persistence, 2FA, consent, email, Nairobi
       time, monitoring, responsive-layout, or indexing check.

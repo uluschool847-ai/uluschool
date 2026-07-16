@@ -15,6 +15,7 @@ const MIN_RESIDUAL_ENTROPY_LENGTH = 12;
 const R2_ENDPOINT_PATTERN =
   /^https:\/\/[a-f0-9]{32}(?:\.(?:eu|fedramp))?\.r2\.cloudflarestorage\.com\/?$/;
 const R2_BUCKET_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])$/;
+const RESERVED_MONITORING_HOST_SUFFIXES = ["invalid", "example", "test"] as const;
 const EXTENDED_PLACEHOLDER_PREFIXES = ["dummy", "example", "placeholder"] as const;
 const CHANGE_PLACEHOLDER_PREFIXES = [
   "changethis",
@@ -142,6 +143,7 @@ const productionEnvironmentSchema = z
     SENTRY_ENABLED: z.string().optional(),
     SENTRY_DSN: z.string().optional(),
     NEXT_PUBLIC_SENTRY_DSN: z.string().optional(),
+    SEED_PORTAL_PASSWORD: z.string().optional(),
     DEFAULT_PORTAL_PASSWORD: z.string().optional(),
   })
   .passthrough()
@@ -189,10 +191,8 @@ const productionEnvironmentSchema = z
     requireHttpsUrl(context, env.ALERT_WEBHOOK_URL, "ALERT_WEBHOOK_URL");
     requireSecret(context, env.ALERT_TEST_TOKEN, "ALERT_TEST_TOKEN");
     requireSentryContract(context, env);
-
-    if (env.DEFAULT_PORTAL_PASSWORD?.trim()) {
-      addIssue(context, "DEFAULT_PORTAL_PASSWORD", "must be empty in production-like environments");
-    }
+    requireEmpty(context, env.SEED_PORTAL_PASSWORD, "SEED_PORTAL_PASSWORD");
+    requireEmpty(context, env.DEFAULT_PORTAL_PASSWORD, "DEFAULT_PORTAL_PASSWORD");
   });
 
 function addIssue(context: z.RefinementCtx, key: string, message: string) {
@@ -408,6 +408,27 @@ function requireR2Bucket(context: z.RefinementCtx, value: string | undefined) {
   }
 }
 
+function isLoopbackIpv4(hostname: string) {
+  const octets = hostname.split(".");
+  return octets.length === 4 && octets.every((octet) => /^\d+$/.test(octet)) && octets[0] === "127";
+}
+
+function isReservedMonitoringHostname(hostname: string) {
+  const normalized = hostname.toLowerCase().replace(/\.+$/, "");
+  if (
+    normalized === "localhost" ||
+    normalized === "[::1]" ||
+    /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(normalized) ||
+    isLoopbackIpv4(normalized)
+  ) {
+    return true;
+  }
+
+  return RESERVED_MONITORING_HOST_SUFFIXES.some(
+    (suffix) => normalized === suffix || normalized.endsWith(`.${suffix}`),
+  );
+}
+
 function isHttpsUrl(value: string | undefined, allowUsername = false) {
   try {
     const parsed = new URL(value ?? "");
@@ -415,7 +436,8 @@ function isHttpsUrl(value: string | undefined, allowUsername = false) {
       parsed.protocol === "https:" &&
       Boolean(parsed.hostname) &&
       !parsed.password &&
-      (allowUsername || !parsed.username)
+      (allowUsername || !parsed.username) &&
+      !isReservedMonitoringHostname(parsed.hostname)
     );
   } catch {
     return false;
@@ -424,7 +446,11 @@ function isHttpsUrl(value: string | undefined, allowUsername = false) {
 
 function requireHttpsUrl(context: z.RefinementCtx, value: string | undefined, key: string) {
   if (!isHttpsUrl(value)) {
-    addIssue(context, key, "must be an HTTPS URL without embedded credentials");
+    addIssue(
+      context,
+      key,
+      "must be an HTTPS URL with a public host and without embedded credentials",
+    );
   }
 }
 
@@ -445,7 +471,7 @@ function requireSentryContract(
     const value = env[key];
     if (env.SENTRY_ENABLED === "true") {
       if (!isHttpsUrl(value, true)) {
-        addIssue(context, key, "must be an HTTPS DSN when Sentry is enabled");
+        addIssue(context, key, "must be an HTTPS DSN with a public host when Sentry is enabled");
       }
     } else if (value !== undefined && value !== "") {
       addIssue(context, key, "must be empty when Sentry is disabled");

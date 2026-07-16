@@ -8,6 +8,9 @@ import { parseEmailSender, parseSingleMailbox } from "@/lib/security/escape-html
 const ROOT = process.cwd();
 const PRODUCTION_ORIGIN = "https://uluglobalacademy.com";
 const R2_ACCOUNT_ID = "0123456789abcdef0123456789abcdef";
+const VALID_ALERT_WEBHOOK_URL = "https://hooks.slack.com/services/unit-test-webhook";
+const VALID_SERVER_SENTRY_DSN = "https://server-public-key@o123456.ingest.sentry.io/1";
+const VALID_CLIENT_SENTRY_DSN = "https://client-public-key@o123456.ingest.sentry.io/2";
 const PROTECTED_SECRET_KEYS = [
   "AUTH_SESSION_SECRET",
   "CRON_SECRET",
@@ -107,7 +110,7 @@ function validProductionEnv(): Record<string, string> {
     PRIVACY_EMAIL_PROCESSOR_NAME: "Transactional Mail Provider",
     CRON_SECRET: "cron-authentication-value-4c8f1a6d2e9b",
     REMINDER_CRON_TOKEN: "reminder-job-token-value-1a7d4e9c6b2f",
-    ALERT_WEBHOOK_URL: "https://alerts.invalid/hooks/operations",
+    ALERT_WEBHOOK_URL: VALID_ALERT_WEBHOOK_URL,
     ALERT_TEST_TOKEN: "alert-test-authentication-6e2c9a4f1d8b",
     SENTRY_ENABLED: "false",
     SENTRY_DSN: "",
@@ -190,7 +193,7 @@ describe("validateProductionEnv", () => {
     ["PRIVACY_EMAIL_PROCESSOR_NAME", ""],
     ["CRON_SECRET", "too-short"],
     ["REMINDER_CRON_TOKEN", "change-this-reminder-token-value-long-enough"],
-    ["ALERT_WEBHOOK_URL", "http://alerts.invalid/hook"],
+    ["ALERT_WEBHOOK_URL", "http://hooks.slack.com/services/unit-test-webhook"],
     ["ALERT_TEST_TOKEN", "too-short"],
   ])("rejects an unsafe or missing %s", (key, value) => {
     expectInvalidKey(key, value);
@@ -444,18 +447,18 @@ describe("validateProductionEnv", () => {
     const enabled = {
       ...validProductionEnv(),
       SENTRY_ENABLED: "true",
-      SENTRY_DSN: "https://server-public-key@sentry.invalid/1",
-      NEXT_PUBLIC_SENTRY_DSN: "https://client-public-key@sentry.invalid/2",
+      SENTRY_DSN: VALID_SERVER_SENTRY_DSN,
+      NEXT_PUBLIC_SENTRY_DSN: VALID_CLIENT_SENTRY_DSN,
     };
 
     expect(validateProductionEnv(enabled).ok).toBe(true);
     expectInvalidKey("SENTRY_DSN", "", enabled);
-    expectInvalidKey("NEXT_PUBLIC_SENTRY_DSN", "http://client@sentry.invalid/2", enabled);
+    expectInvalidKey("NEXT_PUBLIC_SENTRY_DSN", "http://client@o123456.ingest.sentry.io/2", enabled);
   });
 
   it("requires both Sentry DSNs to be empty when Sentry is disabled", () => {
-    expectInvalidKey("SENTRY_DSN", "https://server@sentry.invalid/1");
-    expectInvalidKey("NEXT_PUBLIC_SENTRY_DSN", "https://client@sentry.invalid/2");
+    expectInvalidKey("SENTRY_DSN", VALID_SERVER_SENTRY_DSN);
+    expectInvalidKey("NEXT_PUBLIC_SENTRY_DSN", VALID_CLIENT_SENTRY_DSN);
     expectInvalidKey("SENTRY_DSN", "   ");
   });
 
@@ -463,11 +466,60 @@ describe("validateProductionEnv", () => {
     expectInvalidKey("SENTRY_ENABLED", value);
   });
 
-  it("rejects any nonblank DEFAULT_PORTAL_PASSWORD", () => {
-    expectInvalidKey("DEFAULT_PORTAL_PASSWORD", "shared-portal-credential");
-    expect(
-      validateProductionEnv({ ...validProductionEnv(), DEFAULT_PORTAL_PASSWORD: "   " }).ok,
-    ).toBe(true);
+  it.each([
+    ["production", validProductionEnv()],
+    [
+      "staging",
+      {
+        ...validProductionEnv(),
+        APP_ENV: "staging",
+        NEXT_PUBLIC_SITE_URL: "https://staging.uluglobalacademy.com",
+      },
+    ],
+  ])("rejects every non-empty portal seed password in %s", (_, environment) => {
+    for (const key of ["SEED_PORTAL_PASSWORD", "DEFAULT_PORTAL_PASSWORD"] as const) {
+      for (const value of [" ", "shared-portal-credential"]) {
+        const result = invalidResult({ ...environment, [key]: value });
+        expect(result.errors.map((error) => error.key)).toContain(key);
+      }
+
+      expect(validateProductionEnv({ ...environment, [key]: "" }).ok).toBe(true);
+    }
+  });
+
+  it.each([
+    "https://localhost/hooks",
+    "https://localhost./hooks",
+    "https://127.0.0.2/hooks",
+    "https://127.1/hooks",
+    "https://2130706433/hooks",
+    "https://0x7f000001/hooks",
+    "https://[::1]/hooks",
+    "https://[0:0:0:0:0:0:0:1]/hooks",
+    "https://[::ffff:127.0.0.1]/hooks",
+    "https://invalid/hooks",
+    "https://alerts.invalid/hooks",
+    "https://example/hooks",
+    "https://alerts.example/hooks",
+    "https://test/hooks",
+    "https://alerts.test/hooks",
+  ])("rejects a loopback or reserved monitoring host without exposing it", (url) => {
+    const enabledSentry = {
+      ...validProductionEnv(),
+      SENTRY_ENABLED: "true",
+      SENTRY_DSN: VALID_SERVER_SENTRY_DSN,
+      NEXT_PUBLIC_SENTRY_DSN: VALID_CLIENT_SENTRY_DSN,
+    };
+
+    for (const [key, overrides] of [
+      ["ALERT_WEBHOOK_URL", {}],
+      ["SENTRY_DSN", enabledSentry],
+      ["NEXT_PUBLIC_SENTRY_DSN", enabledSentry],
+    ] as const) {
+      const result = invalidResult({ ...validProductionEnv(), ...overrides, [key]: url });
+      expect(result.errors.map((error) => error.key)).toContain(key);
+      expect(JSON.stringify(result)).not.toContain(url);
+    }
   });
 
   it("returns deterministic deduplicated errors without rejected values or parsed details", () => {

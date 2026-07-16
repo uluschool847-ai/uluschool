@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sendMailMock = vi.hoisted(() => vi.fn());
@@ -52,6 +56,103 @@ const HTML_PAYLOAD = `<img src=x onerror="alert(1)"> & Guardian`;
 const SCRIPT_MESSAGE = "First line\n<script>steal()</script>";
 const MIXED_NEWLINE_MESSAGE = "CRLF\r\nLone CR\rLone LF\n<script>steal()</script>";
 const HEADER_PAYLOAD = `Student\r\nBcc: attacker@example.com${"x".repeat(250)}`;
+const ROOT = process.cwd();
+const REMINDER_RENDERER_SOURCE = `
+import { once } from "node:events";
+import { createServer } from "node:net";
+import { pathToFileURL } from "node:url";
+
+const messages = [];
+const server = createServer((socket) => {
+  let buffer = "";
+  let collectingMessage = false;
+  let messageLines = [];
+
+  socket.setEncoding("utf8");
+  socket.write("220 local reminder renderer\\r\\n");
+  socket.on("data", (chunk) => {
+    buffer += chunk;
+
+    while (true) {
+      const lineEnd = buffer.indexOf("\\r\\n");
+      if (lineEnd < 0) return;
+
+      const line = buffer.slice(0, lineEnd);
+      buffer = buffer.slice(lineEnd + 2);
+
+      if (collectingMessage) {
+        if (line === ".") {
+          messages.push(messageLines.join("\\n"));
+          messageLines = [];
+          collectingMessage = false;
+          socket.write("250 queued\\r\\n");
+        } else {
+          messageLines.push(line);
+        }
+        continue;
+      }
+
+      if (/^(?:EHLO|HELO)\\s/i.test(line)) {
+        socket.write("250-localhost\\r\\n250 OK\\r\\n");
+      } else if (/^(?:MAIL FROM|RCPT TO):/i.test(line)) {
+        socket.write("250 OK\\r\\n");
+      } else if (line === "DATA") {
+        collectingMessage = true;
+        socket.write("354 End data with <CR><LF>.<CR><LF>\\r\\n");
+      } else if (line === "QUIT") {
+        socket.end("221 Bye\\r\\n");
+      } else {
+        socket.write("250 OK\\r\\n");
+      }
+    }
+  });
+});
+
+server.listen(0, "127.0.0.1");
+await once(server, "listening");
+const address = server.address();
+if (!address || typeof address === "string") throw new Error("Local SMTP server did not bind a port");
+
+Object.assign(process.env, {
+  SMTP_HOST: "127.0.0.1",
+  SMTP_PORT: String(address.port),
+  SMTP_USER: "local-user",
+  SMTP_PASS: "local-pass",
+  SMTP_SECURE: "false",
+  SMTP_MAX_RETRIES: "1",
+});
+
+const { sendAssignmentReminderEmail, sendClassReminderEmail } = await import(
+  pathToFileURL(process.env.EMAIL_SERVICE_PATH ?? "").href,
+);
+
+await sendClassReminderEmail({
+  recipientEmail: "student@example.com",
+  recipientName: "Student",
+  classTitle: "Mathematics",
+  startAt: new Date("2026-07-15T08:00:00.000Z"),
+  endAt: new Date("2026-07-15T09:30:00.000Z"),
+  liveLessonUrl: "https://meet.google.com/abc-defg-hij",
+});
+await sendAssignmentReminderEmail({
+  recipientEmail: "student@example.com",
+  recipientName: "Student",
+  assignmentTitle: "Algebra",
+  dueDate: new Date("2026-07-16T10:15:00.000Z"),
+  assignmentHref: "https://school.example.com/assignment",
+});
+
+await new Promise((resolve) => server.close(resolve));
+process.stdout.write(
+  JSON.stringify(
+    messages.map((message) =>
+      message
+        .split("\\n")
+        .filter((line) => /^(?:Start|End|Due):/.test(line)),
+    ),
+  ),
+);
+`;
 
 type StructuredAddress = {
   name: string;
@@ -86,6 +187,33 @@ function resetSmtpEnv() {
   }
 }
 
+function renderReminderDateLines(timeZone: string) {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "ulu-email-timezone-"));
+  const rendererPath = join(temporaryDirectory, "render-reminders.mts");
+
+  try {
+    writeFileSync(rendererPath, REMINDER_RENDERER_SOURCE);
+    const result = spawnSync(
+      process.execPath,
+      [join(ROOT, "node_modules", "tsx", "dist", "cli.mjs"), rendererPath],
+      {
+        cwd: ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          EMAIL_SERVICE_PATH: join(ROOT, "lib", "services", "email.ts"),
+          TZ: timeZone,
+        },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    return JSON.parse(result.stdout) as string[][];
+  } finally {
+    rmSync(temporaryDirectory, { force: true, recursive: true });
+  }
+}
+
 describe("lib/services/email.ts env handling", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -111,6 +239,17 @@ describe("lib/services/email.ts env handling", () => {
     expect(createTransportMock).not.toHaveBeenCalled();
     expect(sendMailMock).not.toHaveBeenCalled();
   });
+
+  it("renders class and assignment reminder dates in Nairobi under a non-Kenyan host timezone", () => {
+    const kenya = renderReminderDateLines("Africa/Nairobi");
+    const losAngeles = renderReminderDateLines("America/Los_Angeles");
+
+    expect(losAngeles).toEqual(kenya);
+    expect(losAngeles).toEqual([
+      ["Start: 15 Jul 2026, 11:00", "End: 15 Jul 2026, 12:30"],
+      ["Due: 16 Jul 2026, 13:15"],
+    ]);
+  }, 30_000);
 
   it("uses SMTP config and default from/to addresses when explicit addresses are not set", async () => {
     process.env.SMTP_HOST = "127.0.0.1";

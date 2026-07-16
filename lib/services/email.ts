@@ -14,6 +14,16 @@ type EmailDeliveryResult =
   | { delivered: true; attempts: number }
   | { delivered: false; reason: "SMTP_NOT_CONFIGURED" | "SEND_FAILED"; attempts: number };
 
+const schoolEmailDateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
+  dateStyle: "medium",
+  timeStyle: "short",
+  timeZone: "Africa/Nairobi",
+});
+
+function formatSchoolEmailDateTime(value: Date) {
+  return schoolEmailDateTimeFormatter.format(value);
+}
+
 function getSmtpConfig() {
   const host = process.env.SMTP_HOST ?? "";
   const port = process.env.SMTP_PORT ?? "";
@@ -203,14 +213,8 @@ export async function sendClassReminderEmail(input: {
   endAt: Date;
   liveLessonUrl: string;
 }) {
-  const formattedStart = new Intl.DateTimeFormat("en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(input.startAt);
-  const formattedEnd = new Intl.DateTimeFormat("en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(input.endAt);
+  const formattedStart = formatSchoolEmailDateTime(input.startAt);
+  const formattedEnd = formatSchoolEmailDateTime(input.endAt);
   const linkValidation = validateLiveLessonUrl(input.liveLessonUrl, "MANUAL_URL", {
     required: false,
   });
@@ -257,10 +261,7 @@ export async function sendAssignmentReminderEmail(input: {
   dueDate: Date;
   assignmentHref: string;
 }) {
-  const formattedDueDate = new Intl.DateTimeFormat("en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(input.dueDate);
+  const formattedDueDate = formatSchoolEmailDateTime(input.dueDate);
   const safeRecipientName = escapeHtml(input.recipientName);
   const safeAssignmentTitle = escapeHtml(input.assignmentTitle);
   const safeFormattedDueDate = escapeHtml(formattedDueDate);

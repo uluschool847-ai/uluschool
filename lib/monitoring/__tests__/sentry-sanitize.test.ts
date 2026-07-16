@@ -34,6 +34,8 @@ const SENTRY_ENV_KEYS = [
   "NEXT_PUBLIC_SENTRY_DSN",
   "NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE",
 ] as const;
+const SERVER_SENTRY_DSN = "https://server-public-key@o123456.ingest.sentry.io/1";
+const CLIENT_SENTRY_DSN = "https://client-public-key@o123456.ingest.sentry.io/2";
 
 type InitOptions = {
   beforeBreadcrumb?: unknown;
@@ -269,6 +271,65 @@ describe("sanitizeSentryEvent", () => {
     expect(request?.data).toBeUndefined();
     expect(request?.body).toBeUndefined();
   });
+
+  it.each([
+    {
+      label: "private signed file route with absolute request and transaction URLs",
+      route: "/api/files",
+      token: "PRIVATE_SIGNED_FILE_TOKEN_1a7d4e",
+      requestUrl: "https://school.example/api/files/PRIVATE_SIGNED_FILE_TOKEN_1a7d4e?download=1",
+      transaction:
+        "GET https://school.example/api/files/PRIVATE_SIGNED_FILE_TOKEN_1a7d4e?download=1",
+      expectedRequestUrl: "https://school.example/api/files/:token",
+      expectedTransaction: "GET https://school.example/api/files/:token",
+    },
+    {
+      label: "public signed file route with path request and transaction URLs",
+      route: "/api/public-files",
+      token: "PUBLIC_SIGNED_FILE_TOKEN_8c2f6b",
+      requestUrl: "/api/public-files/PUBLIC_SIGNED_FILE_TOKEN_8c2f6b?download=1",
+      transaction: "POST /api/public-files/PUBLIC_SIGNED_FILE_TOKEN_8c2f6b?download=1",
+      expectedRequestUrl: "/api/public-files/:token",
+      expectedTransaction: "POST /api/public-files/:token",
+    },
+  ])(
+    "redacts the dynamic token for $label without losing its route family or HTTP method",
+    (fixture) => {
+      const event = {
+        transaction: fixture.transaction,
+        request: {
+          url: fixture.requestUrl,
+          method: fixture.transaction.split(" ")[0],
+          query_string: "download=1",
+          headers: {
+            Cookie: `ulu_file=${fixture.token}`,
+            "User-Agent": "safe-test-agent",
+          },
+          data: { safeField: "sensitive-file-route-payload" },
+          body: { safeField: "sensitive-file-route-body" },
+        },
+      } as Event;
+      const snapshot = JSON.parse(JSON.stringify(event)) as Event;
+
+      const sanitized = sanitizeSentryEvent(event);
+      const request = sanitized.request as Event["request"] & { body?: unknown };
+      const serialized = JSON.stringify(sanitized);
+
+      expect(event).toEqual(snapshot);
+      expect(sanitized.transaction).toBe(fixture.expectedTransaction);
+      expect(request?.url).toBe(fixture.expectedRequestUrl);
+      expect(request?.query_string).toBeUndefined();
+      expect(request?.headers).toEqual({
+        Cookie: FILTERED,
+        "User-Agent": "safe-test-agent",
+      });
+      expect(request?.data).toBeUndefined();
+      expect(request?.body).toBeUndefined();
+      expect(serialized).not.toContain(fixture.token);
+      expect(sanitized.transaction).toContain(fixture.route);
+      expect(sanitized.transaction).toMatch(/^(?:GET|POST) /);
+    },
+  );
 
   it.each([
     [undefined, "POST /portal/login"],
@@ -593,7 +654,7 @@ describe("sanitizeSentryEvent", () => {
     expect(request?.body).toEqual({ safeField: "safe-canonical-body" });
   });
 
-  it.each(["/contact-us", "/portal/logins", "/api/authentication", "/api/files/auth"])(
+  it.each(["/contact-us", "/portal/logins", "/api/authentication", "/api/filesafe/auth"])(
     "preserves safe request payloads outside sensitive route boundaries for %s",
     (url) => {
       const event = {
@@ -709,9 +770,9 @@ describe("Sentry runtime configuration", () => {
   it("uses identical privacy hooks and sample-rate parsing in server, edge, and client", async () => {
     setSentryEnv({
       SENTRY_ENABLED: "true",
-      SENTRY_DSN: "https://server-public-key@sentry.invalid/1",
+      SENTRY_DSN: SERVER_SENTRY_DSN,
       SENTRY_TRACES_SAMPLE_RATE: "0.2",
-      NEXT_PUBLIC_SENTRY_DSN: "https://client-public-key@sentry.invalid/2",
+      NEXT_PUBLIC_SENTRY_DSN: CLIENT_SENTRY_DSN,
       NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: "0.2",
     });
     const sanitizer = await import("@/lib/monitoring/sentry-sanitize");
@@ -738,19 +799,19 @@ describe("Sentry runtime configuration", () => {
     async (runtime) => {
       const enabled = await captureInitOptions(runtime, {
         SENTRY_ENABLED: "true",
-        SENTRY_DSN: "  https://server-public-key@sentry.invalid/1  ",
+        SENTRY_DSN: `  ${SERVER_SENTRY_DSN}  `,
       });
       const disabledByFlag = await captureInitOptions(runtime, {
         SENTRY_ENABLED: "false",
-        SENTRY_DSN: "https://server-public-key@sentry.invalid/1",
+        SENTRY_DSN: SERVER_SENTRY_DSN,
       });
       const disabledByDsn = await captureInitOptions(runtime, {
         SENTRY_ENABLED: "true",
         SENTRY_DSN: "   ",
-        NEXT_PUBLIC_SENTRY_DSN: "https://client-public-key@sentry.invalid/2",
+        NEXT_PUBLIC_SENTRY_DSN: CLIENT_SENTRY_DSN,
       });
 
-      expect(enabled.dsn).toBe("https://server-public-key@sentry.invalid/1");
+      expect(enabled.dsn).toBe(SERVER_SENTRY_DSN);
       expect(enabled.enabled).toBe(true);
       expect(disabledByFlag.enabled).toBe(false);
       expect(disabledByDsn.enabled).toBe(false);
@@ -761,14 +822,14 @@ describe("Sentry runtime configuration", () => {
   it("enables the client only with a non-empty public DSN", async () => {
     const enabled = await captureInitOptions("client", {
       SENTRY_ENABLED: "false",
-      NEXT_PUBLIC_SENTRY_DSN: "  https://client-public-key@sentry.invalid/2  ",
+      NEXT_PUBLIC_SENTRY_DSN: `  ${CLIENT_SENTRY_DSN}  `,
     });
     const disabled = await captureInitOptions("client", {
       SENTRY_ENABLED: "true",
       NEXT_PUBLIC_SENTRY_DSN: "   ",
     });
 
-    expect(enabled.dsn).toBe("https://client-public-key@sentry.invalid/2");
+    expect(enabled.dsn).toBe(CLIENT_SENTRY_DSN);
     expect(enabled.enabled).toBe(true);
     expect(disabled.dsn).toBe("");
     expect(disabled.enabled).toBe(false);

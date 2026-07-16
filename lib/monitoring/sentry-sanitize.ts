@@ -3,6 +3,8 @@ import type { Breadcrumb, Event } from "@sentry/nextjs";
 const FILTERED = "[Filtered]";
 const MAX_SANITIZE_DEPTH = 32;
 const MAX_PATH_DECODE_PASSES = 4;
+const FILE_ROUTE_PREFIXES = ["/api/files", "/api/public-files"] as const;
+const FILE_ROUTE_TOKEN_PLACEHOLDER = ":token";
 const SENSITIVE_ROUTE_PREFIXES = [
   "/enrol",
   "/contact",
@@ -11,6 +13,7 @@ const SENSITIVE_ROUTE_PREFIXES = [
   "/api/auth",
   "/api/enrol",
   "/api/contact",
+  ...FILE_ROUTE_PREFIXES,
 ] as const;
 const SENSITIVE_BREADCRUMB_CATEGORIES = new Set([
   "auth",
@@ -89,12 +92,8 @@ function pathnameFromRouteValue(value: unknown) {
     return stripUrlQuery(candidate);
   }
 
-  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate)) {
-    return null;
-  }
-
   try {
-    const parsed = new URL(candidate, "https://sentry.invalid");
+    const parsed = new URL(candidate);
     return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.pathname : null;
   } catch {
     return null;
@@ -170,6 +169,45 @@ function routeFromTransaction(value: unknown) {
   return transaction.match(HTTP_METHOD_TRANSACTION)?.[2]?.trim() ?? transaction;
 }
 
+function redactFileRouteToken(value: string) {
+  const pathname = pathnameFromRouteValue(value);
+  if (pathname === null) {
+    return value;
+  }
+
+  const canonicalPathname = canonicalizePathname(pathname);
+  if (canonicalPathname === null) {
+    return value;
+  }
+
+  const normalizedPathname = canonicalPathname.toLowerCase();
+  const prefix = FILE_ROUTE_PREFIXES.find((candidate) =>
+    normalizedPathname.startsWith(`${candidate}/`),
+  );
+  if (!prefix) {
+    return value;
+  }
+
+  const sanitizedPathname = `${prefix}/${FILE_ROUTE_TOKEN_PLACEHOLDER}`;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      parsed.pathname = sanitizedPathname;
+      parsed.search = "";
+      parsed.hash = "";
+      return parsed.toString();
+    }
+  } catch {
+    // Path-only route values are intentionally normalized below.
+  }
+
+  return sanitizedPathname;
+}
+
+function sanitizeRouteValue(value: string) {
+  return redactFileRouteToken(stripUrlQuery(value));
+}
+
 function sanitizeTransaction(event: UnknownRecord) {
   if (typeof event.transaction !== "string") {
     return;
@@ -180,11 +218,11 @@ function sanitizeTransaction(event: UnknownRecord) {
   const methodPrefix = match?.[1] ?? "";
   const route = match?.[2]?.trim() ?? transaction;
 
-  if (!route.startsWith("/") && !route.startsWith("\\") && !/^https?:\/\//i.test(route)) {
+  if (pathnameFromRouteValue(route) === null) {
     return;
   }
 
-  const sanitizedRoute = stripUrlQuery(route);
+  const sanitizedRoute = sanitizeRouteValue(route);
   if (sanitizedRoute !== route) {
     event.transaction = `${methodPrefix}${sanitizedRoute}`;
   }
@@ -273,6 +311,10 @@ function sanitizeRequest(event: UnknownRecord) {
 
   const request = event.request;
   Reflect.deleteProperty(request, "query_string");
+
+  if (typeof request.url === "string") {
+    request.url = sanitizeRouteValue(request.url);
+  }
 
   const requestRoute = classifyRoute(request.url);
   const route =
