@@ -4,6 +4,8 @@ import { EnrolForm } from "@/components/enrol/enrol-form";
 import { PageHero } from "@/components/sections/page-hero";
 import { getCatalogueData } from "@/lib/repositories/catalogue-repository";
 
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "Enrol",
   description: "Book a free trial class and submit an enrolment enquiry for ULU Online School.",
