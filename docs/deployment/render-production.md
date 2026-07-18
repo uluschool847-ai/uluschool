@@ -22,11 +22,13 @@ feature, and point-in-time recovery is not available for a free Render PostgreSQ
 | Branch | `staging` | `main` |
 | Region | Frankfurt | Frankfurt |
 | Root directory | repository root | repository root |
-| Build command | `npm ci && npx prisma generate && npm run build` | `npm ci && npx prisma generate && npm run build` |
+| Build command | `npm ci --include=dev && npx prisma generate && npm run build` | `npm ci --include=dev && npx prisma generate && npm run build` |
 | Pre-deploy command | `npm run env:check && npx prisma migrate deploy && npm run bootstrap:production` | `npm run env:check && npx prisma migrate deploy && npm run bootstrap:production` |
 | Start command | `npm run start` | `npm run start` |
 | Health check path | `/api/health` | `/api/health` |
 | Auto-deploy | after required GitHub checks pass | after required GitHub checks pass |
+
+`--include=dev` is required because Render builds with `NODE_ENV=production`, while the build script runs Biome from `devDependencies` before `next build`.
 
 The repository pins Node.js 22 in `package.json` and `.nvmrc`. Do not override the service with a
 different major version.

@@ -23,7 +23,7 @@ describe("deployment runbook contract", () => {
     const docs = combinedDeploymentDocs();
     const requiredText = [
       "Frankfurt",
-      "npm ci && npx prisma generate && npm run build",
+      "npm ci --include=dev && npx prisma generate && npm run build",
       "npm run env:check && npx prisma migrate deploy && npm run bootstrap:production",
       "npm run start",
       "/api/health",
