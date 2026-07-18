@@ -5,11 +5,16 @@ import {
   type ProductionAdminDatabase,
   bootstrapProductionAdmin,
 } from "../lib/bootstrap/production-admin";
+import {
+  type ProductionCatalogueDatabase,
+  bootstrapProductionCatalogue,
+} from "../lib/bootstrap/production-catalogue";
 
 type BootstrapLogger = Pick<Console, "error" | "log">;
-type BootstrapCliDatabase = ProductionAdminDatabase & {
-  $disconnect(): Promise<void>;
-};
+type BootstrapCliDatabase = ProductionAdminDatabase &
+  ProductionCatalogueDatabase & {
+    $disconnect(): Promise<void>;
+  };
 
 export async function runProductionAdminBootstrap(
   environment: unknown,
@@ -20,6 +25,7 @@ export async function runProductionAdminBootstrap(
   let disconnectAttempted = false;
 
   try {
+    await bootstrapProductionCatalogue(database);
     result = await bootstrapProductionAdmin(environment, database);
     disconnectAttempted = true;
     await database.$disconnect();

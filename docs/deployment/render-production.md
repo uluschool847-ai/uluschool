@@ -142,8 +142,11 @@ older regular session redirects to login and that a fresh password/TOTP login cr
 
 ## First administrator bootstrap
 
-The pre-deploy command is idempotent. For a new database with no active administrator, set all
-three variables in Render:
+The pre-deploy command is idempotent. It ensures the default catalogue levels and subjects required
+by the public enrolment form, using slug-based upserts that leave existing catalogue records
+unchanged. It does not create demo users, classes, or submissions.
+
+For a new database with no active administrator, set all three variables in Render:
 
 - `BOOTSTRAP_ADMIN_EMAIL`
 - `BOOTSTRAP_ADMIN_NAME`

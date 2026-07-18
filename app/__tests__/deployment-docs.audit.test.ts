@@ -25,6 +25,7 @@ describe("deployment runbook contract", () => {
       "Frankfurt",
       "npm ci --include=dev && npx prisma generate && npm run build",
       "npm run env:check && npx prisma migrate deploy && npm run bootstrap:production",
+      "default catalogue levels and subjects",
       "npm run start",
       "/api/health",
       "APP_ENV=staging",
