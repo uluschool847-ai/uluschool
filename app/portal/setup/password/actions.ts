@@ -3,7 +3,6 @@
 import { redirect } from "next/navigation";
 
 import {
-  clearAdminPendingTwoFactor,
   clearInitialSetupSession,
   clearSession,
   createSession,
@@ -28,7 +27,6 @@ function getStringEntry(formData: FormData, name: string) {
 
 async function clearAllAuthCookies() {
   await clearSession();
-  await clearAdminPendingTwoFactor();
   await clearInitialSetupSession();
 }
 

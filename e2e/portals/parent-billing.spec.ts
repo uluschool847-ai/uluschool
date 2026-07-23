@@ -30,7 +30,6 @@ async function createParentSessionToken() {
   return await createSessionToken({
     email: parentEmail,
     fullName: "QA Parent Billing",
-    mfaVerified: true,
     role: UserRole.PARENT,
     uid: parentId,
   });

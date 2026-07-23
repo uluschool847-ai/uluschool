@@ -1,6 +1,8 @@
 import { UserRole } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createLegacyVersionTwoSessionToken } from "@/e2e/helpers/session";
+
 type SessionValidationResult = {
   valid: boolean;
   expired: boolean;
@@ -86,6 +88,7 @@ async function createSignedSessionToken(input: {
   role: UserRole;
   email?: string;
   fullName?: string | null;
+  authMethod?: "password" | "sso";
 }) {
   cookieSetMock.mockClear();
   await sessionModule.createSession({
@@ -93,30 +96,9 @@ async function createSignedSessionToken(input: {
     role: input.role,
     email: input.email ?? "teacher@example.com",
     fullName: input.fullName ?? "Teacher One",
+    authMethod: input.authMethod,
   });
   const token = cookieSetMock.mock.calls.find(([name]) => name === "ulu_session")?.[1];
-  expect(token).toEqual(expect.any(String));
-  return token as string;
-}
-
-async function createSignedPendingTwoFactorToken(
-  input: {
-    uid?: string;
-    email?: string;
-    challengeId?: string;
-    authMethod?: "password" | "sso";
-    expiresAt?: Date;
-  } = {},
-) {
-  cookieSetMock.mockClear();
-  await sessionModule.createAdminPendingTwoFactor({
-    uid: input.uid ?? "admin-1",
-    email: input.email ?? "admin@example.com",
-    challengeId: input.challengeId ?? "challenge-1",
-    authMethod: input.authMethod ?? "password",
-    expiresAt: input.expiresAt ?? new Date(Date.now() + 10 * 60 * 1000),
-  });
-  const token = cookieSetMock.mock.calls.find(([name]) => name === "ulu_admin_2fa_pending")?.[1];
   expect(token).toEqual(expect.any(String));
   return token as string;
 }
@@ -370,17 +352,63 @@ describe("session validation and expiry handling", () => {
   });
 
   describe("signed auth payload purpose separation", () => {
+    it("expires the legacy pending 2FA cookie when creating a session", async () => {
+      await createSignedSessionToken({
+        uid: "admin-1",
+        role: UserRole.ADMIN,
+        email: "admin@example.com",
+      });
+
+      expect(cookieDeleteMock).toHaveBeenCalledWith("ulu_admin_2fa_pending");
+    });
+
+    it("expires the session and legacy pending 2FA cookies when clearing a session", async () => {
+      await sessionModule.clearSession();
+
+      expect(cookieDeleteMock).toHaveBeenCalledWith("ulu_session");
+      expect(cookieDeleteMock).toHaveBeenCalledWith("ulu_admin_2fa_pending");
+    });
+
+    it("accepts version 3 password sessions without an MFA field", async () => {
+      const token = await createSignedSessionToken({
+        uid: "admin-1",
+        role: UserRole.ADMIN,
+        email: "admin@example.com",
+        fullName: "Admin User",
+        authMethod: "password",
+      });
+
+      await expect(sessionModule.verifySessionToken(token)).resolves.toMatchObject({
+        version: 3,
+        uid: "admin-1",
+        role: UserRole.ADMIN,
+        authMethod: "password",
+      });
+    });
+
+    it("rejects version 2 MFA-bearing sessions", async () => {
+      const token = await createLegacyVersionTwoSessionToken({
+        uid: "admin-1",
+        role: UserRole.ADMIN,
+        email: "admin@example.com",
+        fullName: "Admin User",
+        authMethod: "password",
+      });
+
+      await expect(sessionModule.verifySessionToken(token)).resolves.toBeNull();
+    });
+
     it("includes SESSION purpose and accepts a valid normal session", async () => {
       const token = await createSignedSessionToken({ uid: "teacher-1", role: UserRole.TEACHER });
 
       await expect(sessionModule.verifySessionToken(token)).resolves.toEqual(
-        expect.objectContaining({ purpose: "SESSION", version: 2, uid: "teacher-1" }),
+        expect.objectContaining({ purpose: "SESSION", version: 3, uid: "teacher-1" }),
       );
     });
 
     it.each([
-      ["legacy password session", UserRole.TEACHER, "password", undefined],
-      ["legacy SSO MFA-bypass session", UserRole.ADMIN, "sso", undefined],
+      ["unversioned password session", UserRole.TEACHER, "password", undefined],
+      ["unversioned SSO session", UserRole.ADMIN, "sso", undefined],
       ["older versioned password session", UserRole.TEACHER, "password", 1],
     ] as const)(
       "rejects a signed %s in backend and lightweight readers",
@@ -395,7 +423,6 @@ describe("session validation and expiry handling", () => {
           email,
           fullName: null,
           exp: Date.now() + 60_000,
-          mfaVerified: true,
           authMethod,
         });
         setDbUser(makeDbUser({ id: uid, email, role }));
@@ -431,103 +458,24 @@ describe("session validation and expiry handling", () => {
       expect(findUserByIdMock).not.toHaveBeenCalled();
     });
 
-    it("rejects a setup token renamed to the pending-admin cookie", async () => {
-      const token = await createSignedInitialSetupToken();
-      cookieGetMock.mockImplementation((name: string) =>
-        name === "ulu_admin_2fa_pending" ? { value: token } : undefined,
-      );
-      cookieDeleteMock.mockImplementation(() => {
-        throw new Error("Server Component cookies are read-only");
-      });
-
-      await expect(sessionModule.getAdminPendingTwoFactor()).resolves.toBeNull();
-      expect(cookieDeleteMock).not.toHaveBeenCalled();
-    });
-
-    it("purpose-binds pending-admin tokens and rejects them as normal or setup sessions", async () => {
-      const token = await createSignedPendingTwoFactorToken();
-      cookieGetMock.mockImplementation((name: string) =>
-        name === "ulu_initial_setup" ? { value: token } : undefined,
-      );
-
-      await expect(sessionModule.getAdminPendingTwoFactor()).resolves.toBeNull();
-      cookieGetMock.mockImplementation((name: string) =>
-        name === "ulu_admin_2fa_pending" ? { value: token } : undefined,
-      );
-      await expect(sessionModule.getAdminPendingTwoFactor()).resolves.toEqual(
-        expect.objectContaining({
-          purpose: "ADMIN_PENDING_2FA",
-          challengeId: "challenge-1",
-          authMethod: "password",
-        }),
-      );
-      await expect(sessionModule.verifySessionToken(token)).resolves.toBeNull();
-      cookieGetMock.mockImplementation((name: string) =>
-        name === "ulu_initial_setup" ? { value: token } : undefined,
-      );
-      await expect(sessionModule.getInitialSetupSession()).resolves.toBeNull();
-      expect(findUserByIdMock).not.toHaveBeenCalled();
-    });
-
-    it.each([
-      ["missing purpose", { purpose: undefined }],
-      ["missing email", { email: undefined }],
-      ["missing challenge id", { challengeId: undefined }],
-      ["missing auth method", { authMethod: undefined }],
-      ["unsupported auth method", { authMethod: "magic" }],
-      ["malformed expiry", { exp: 1.5 }],
-      ["unknown field", { unexpected: true }],
-    ])("rejects a signed pending-admin payload with %s", async (_case, overrides) => {
-      const token = await createSignedTestPayload({
-        purpose: "ADMIN_PENDING_2FA",
-        uid: "admin-1",
-        email: "admin@example.com",
-        challengeId: "challenge-1",
-        authMethod: "password",
-        exp: Date.now() + 60_000,
-        ...overrides,
-      });
-      cookieGetMock.mockImplementation((name: string) =>
-        name === "ulu_admin_2fa_pending" ? { value: token } : undefined,
-      );
-
-      await expect(sessionModule.getAdminPendingTwoFactor()).resolves.toBeNull();
-    });
-
-    it("rejects a pending-admin token exactly at its expiry boundary", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-07-14T10:00:00.000Z"));
-      const token = await createSignedPendingTwoFactorToken();
-      cookieGetMock.mockReturnValue({ value: token });
-      cookieDeleteMock.mockImplementation(() => {
-        throw new Error("Server Component cookies are read-only");
-      });
-      vi.advanceTimersByTime(10 * 60 * 1000);
-
-      await expect(sessionModule.getAdminPendingTwoFactor()).resolves.toBeNull();
-      expect(cookieDeleteMock).not.toHaveBeenCalled();
-    });
-
     it.each([
       ["missing purpose", { purpose: undefined }],
       ["wrong purpose", { purpose: "INITIAL_SETUP" }],
       ["missing uid", { purpose: "SESSION", uid: undefined }],
       ["invalid role", { purpose: "SESSION", role: "OWNER" }],
       ["invalid auth method", { purpose: "SESSION", authMethod: "magic" }],
-      ["invalid MFA value", { purpose: "SESSION", mfaVerified: "true" }],
       ["malformed expiry", { purpose: "SESSION", exp: "never" }],
       ["invalid optional fullName", { purpose: "SESSION", fullName: 42 }],
       ["unknown field", { purpose: "SESSION", unexpected: true }],
     ])("rejects a signed normal-session payload with %s", async (_case, overrides) => {
       const token = await createSignedTestPayload({
         purpose: "SESSION",
-        version: 2,
+        version: 3,
         uid: "teacher-1",
         role: UserRole.TEACHER,
         email: "teacher@example.com",
         fullName: null,
         exp: Date.now() + 60_000,
-        mfaVerified: true,
         authMethod: "password",
         ...overrides,
       });
@@ -668,6 +616,7 @@ describe("session validation and expiry handling", () => {
     const dbUser = makeDbUser({ isActive: false });
     setDbUser(dbUser);
     const token = await createSignedSessionToken({ uid: dbUser.id, role: UserRole.TEACHER });
+    cookieDeleteMock.mockClear();
     cookieGetMock.mockReturnValue({ value: token });
     cookieDeleteMock.mockImplementation(() => {
       throw new Error("Server Component cookies are read-only");

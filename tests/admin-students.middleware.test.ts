@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const verifySessionTokenMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({
-  verifyAdminPendingTwoFactorToken: vi.fn(async () => null),
   verifySessionToken: verifySessionTokenMock,
   getPortalLoginPath: vi.fn((path: string) => `/portal/login?next=${encodeURIComponent(path)}`),
   getPortalDashboardPath: vi.fn((role: string) => `/portal/${role.toLowerCase()}`),
@@ -15,7 +14,7 @@ const redirectMock = vi.fn((url: string | URL) => ({ type: "redirect", url: url.
 vi.mock("next/server", () => ({
   NextResponse: {
     redirect: (...args: unknown[]) => redirectMock(...(args as [string | URL])),
-    next: () => ({ cookies: { set: vi.fn() } }),
+    next: () => ({ cookies: { set: vi.fn(), delete: vi.fn() } }),
   },
 }));
 
@@ -98,11 +97,12 @@ describe("middleware /admin/students access control", () => {
 
   it("redirects non-admin authenticated users away from /admin/students", async () => {
     verifySessionTokenMock.mockResolvedValueOnce({
+      purpose: "SESSION",
+      version: 3,
       uid: "student-1",
       role: "STUDENT",
       email: "student@example.com",
       exp: Date.now() + 60000,
-      mfaVerified: true,
       authMethod: "password",
     });
 
@@ -116,11 +116,12 @@ describe("middleware /admin/students access control", () => {
 
   it("redirects non-admin authenticated users away from /admin/students/[id]/edit", async () => {
     verifySessionTokenMock.mockResolvedValueOnce({
+      purpose: "SESSION",
+      version: 3,
       uid: "student-1",
       role: "STUDENT",
       email: "student@example.com",
       exp: Date.now() + 60000,
-      mfaVerified: true,
       authMethod: "password",
     });
 
@@ -134,11 +135,12 @@ describe("middleware /admin/students access control", () => {
 
   it("redirects non-admin authenticated users away from /admin/students/[id]", async () => {
     verifySessionTokenMock.mockResolvedValueOnce({
+      purpose: "SESSION",
+      version: 3,
       uid: "student-1",
       role: "STUDENT",
       email: "student@example.com",
       exp: Date.now() + 60000,
-      mfaVerified: true,
       authMethod: "password",
     });
 

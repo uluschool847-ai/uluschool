@@ -1,12 +1,11 @@
 import { UserRole } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { verifyAdminPendingTwoFactorToken, verifySessionToken } from "../lib/auth/session";
+import { verifySessionToken } from "../lib/auth/session";
 import { middleware } from "../middleware";
 
 // Mock the auth session module
 vi.mock("../lib/auth/session", () => ({
-  verifyAdminPendingTwoFactorToken: vi.fn(),
   verifySessionToken: vi.fn(),
   getPortalLoginPath: vi.fn((path) => `/portal/login?next=${encodeURIComponent(path)}`),
   getPortalDashboardPath: vi.fn((role: UserRole) => `/portal/${role.toLowerCase()}`),
@@ -18,7 +17,11 @@ const responseCookieDeleteMock = vi.fn();
 const nextMock = vi.fn(() => ({
   cookies: { set: responseCookieSetMock, delete: responseCookieDeleteMock },
 }));
-const redirectMock = vi.fn((url: string | URL) => ({ type: "redirect", url: url.toString() }));
+const redirectMock = vi.fn((url: string | URL) => ({
+  type: "redirect",
+  url: url.toString(),
+  cookies: { set: responseCookieSetMock, delete: responseCookieDeleteMock },
+}));
 const rewriteMock = vi.fn((url: string | URL) => ({ type: "rewrite", url: url.toString() }));
 const jsonMock = vi.fn((body: unknown, init?: { status: number }) => ({
   type: "json",
@@ -62,6 +65,19 @@ function createMockRequest(path: string, token?: string, bucket?: string, pendin
 
 const futureExp = () => Date.now() + 60_000;
 
+function sessionV3(role: UserRole) {
+  return {
+    purpose: "SESSION" as const,
+    version: 3 as const,
+    uid: `${role.toLowerCase()}-1`,
+    role,
+    email: `${role.toLowerCase()}@example.com`,
+    fullName: `${role} User`,
+    exp: futureExp(),
+    authMethod: "password" as const,
+  };
+}
+
 describe("Middleware Routing and Access Control", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -101,7 +117,17 @@ describe("Middleware Routing and Access Control", () => {
   });
 
   describe("Restricted Initial Setup", () => {
-    it.each(["/portal/setup/password", "/portal/setup/2fa"])(
+    it.each(["/portal/setup/2fa", "/portal/login/verify-2fa"])(
+      "redirects retired route %s to portal login",
+      async (path) => {
+        await middleware(createMockRequest(path));
+
+        expect(redirectMock).toHaveBeenCalledWith(new URL("http://localhost/portal/login"));
+        expect(responseCookieDeleteMock).toHaveBeenCalledWith("ulu_admin_2fa_pending");
+      },
+    );
+
+    it.each(["/portal/setup/password"])(
       "allows %s to render without a normal session",
       async (path) => {
         const response = await middleware(createMockRequest(path));
@@ -114,13 +140,17 @@ describe("Middleware Routing and Access Control", () => {
   });
 
   describe("Authorized Access", () => {
+    it("allows an administrator session without mfaVerified", async () => {
+      vi.mocked(verifySessionToken).mockResolvedValue(sessionV3(UserRole.ADMIN));
+
+      const response = await middleware(createMockRequest("/admin", "valid-admin-token"));
+
+      expect(redirectMock).not.toHaveBeenCalled();
+      expect(response).toEqual(expect.objectContaining({ cookies: expect.any(Object) }));
+    });
+
     it("allows ADMIN to access /admin", async () => {
-      vi.mocked(verifySessionToken).mockResolvedValue({
-        role: UserRole.ADMIN,
-        mfaVerified: true,
-        authMethod: "password",
-        exp: futureExp(),
-      } as Awaited<ReturnType<typeof verifySessionToken>>);
+      vi.mocked(verifySessionToken).mockResolvedValue(sessionV3(UserRole.ADMIN));
 
       const req = createMockRequest("/admin", "valid-admin-token");
       const res = await middleware(req);
@@ -132,10 +162,7 @@ describe("Middleware Routing and Access Control", () => {
     });
 
     it("allows TEACHER to access /portal/teacher", async () => {
-      vi.mocked(verifySessionToken).mockResolvedValue({
-        role: UserRole.TEACHER,
-        exp: futureExp(),
-      } as Awaited<ReturnType<typeof verifySessionToken>>);
+      vi.mocked(verifySessionToken).mockResolvedValue(sessionV3(UserRole.TEACHER));
       const req = createMockRequest("/portal/teacher", "valid-teacher-token");
       const res = await middleware(req);
 
@@ -154,21 +181,15 @@ describe("Middleware Routing and Access Control", () => {
       expect(jsonMock).not.toHaveBeenCalled();
     });
 
-    it.each(["/portal/login", "/portal/login/verify-2fa"])(
-      "clears a rejected pending-admin cookie before returning %s",
-      async (path) => {
-        vi.mocked(verifyAdminPendingTwoFactorToken).mockResolvedValue(null);
+    it("clears a legacy pending-admin cookie before returning portal login", async () => {
+      const response = await middleware(
+        createMockRequest("/portal/login", undefined, undefined, "legacy-pending-token"),
+      );
 
-        const response = await middleware(
-          createMockRequest(path, undefined, undefined, "rejected-pending-token"),
-        );
-
-        expect(verifyAdminPendingTwoFactorToken).toHaveBeenCalledWith("rejected-pending-token");
-        expect(responseCookieDeleteMock).toHaveBeenCalledWith("ulu_admin_2fa_pending");
-        expect(response).toEqual(expect.objectContaining({ cookies: expect.any(Object) }));
-        expect(redirectMock).not.toHaveBeenCalled();
-      },
-    );
+      expect(responseCookieDeleteMock).toHaveBeenCalledWith("ulu_admin_2fa_pending");
+      expect(response).toEqual(expect.objectContaining({ cookies: expect.any(Object) }));
+      expect(redirectMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("Rewrite Rules - The /pricing fix", () => {
@@ -213,10 +234,7 @@ describe("Middleware Routing and Access Control", () => {
 
     it("rejects cross-role access with a hard 403 or explicit unauthorized state (not a soft fallback redirect)", async () => {
       // Mock authenticated STUDENT
-      vi.mocked(verifySessionToken).mockResolvedValue({
-        role: UserRole.STUDENT,
-        exp: futureExp(),
-      } as Awaited<ReturnType<typeof verifySessionToken>>);
+      vi.mocked(verifySessionToken).mockResolvedValue(sessionV3(UserRole.STUDENT));
 
       // Attempting to access Admin area
       const req = createMockRequest("/admin");
@@ -233,39 +251,6 @@ describe("Middleware Routing and Access Control", () => {
       const isUnauthorizedRedirect = lastCall.includes("/portal/unauthorized");
       expect(is403Response || isUnauthorizedRedirect).toBe(true);
     });
-
-    it("preserves destination via next parameter for Admin 2FA checks", async () => {
-      // Mock authenticated Admin but MFA not verified
-      vi.mocked(verifySessionToken).mockResolvedValue({
-        role: UserRole.ADMIN,
-        mfaVerified: false,
-        authMethod: "password",
-        exp: futureExp(),
-      } as Awaited<ReturnType<typeof verifySessionToken>>);
-
-      const req = createMockRequest("/admin/settings");
-      await middleware(req);
-
-      expect(redirectMock).toHaveBeenCalled();
-      const redirectUrl = redirectMock.mock.lastCall?.[0]?.toString() || "";
-      expect(redirectUrl).toContain("/portal/login/verify-2fa");
-      expect(redirectUrl).toContain("next=%2Fadmin%2Fsettings");
-    });
-
-    it("does not exempt an SSO-labelled admin session from the required TOTP gate", async () => {
-      vi.mocked(verifySessionToken).mockResolvedValue({
-        role: UserRole.ADMIN,
-        mfaVerified: false,
-        authMethod: "sso",
-        exp: futureExp(),
-      } as Awaited<ReturnType<typeof verifySessionToken>>);
-
-      await middleware(createMockRequest("/admin/security", "sso-pending-token"));
-
-      const redirectUrl = redirectMock.mock.lastCall?.[0]?.toString() || "";
-      expect(redirectUrl).toContain("/portal/login/verify-2fa");
-      expect(redirectUrl).toContain("next=%2Fadmin%2Fsecurity");
-    });
   });
 
   describe("Teacher Portal Route Behavior", () => {
@@ -280,10 +265,7 @@ describe("Middleware Routing and Access Control", () => {
     });
 
     it("allows an active teacher cookie to pass /portal/teacher as a first-level check", async () => {
-      vi.mocked(verifySessionToken).mockResolvedValue({
-        role: UserRole.TEACHER,
-        exp: futureExp(),
-      } as Awaited<ReturnType<typeof verifySessionToken>>);
+      vi.mocked(verifySessionToken).mockResolvedValue(sessionV3(UserRole.TEACHER));
 
       const req = createMockRequest("/portal/teacher", "teacher-cookie");
       const res = await middleware(req);
@@ -296,10 +278,7 @@ describe("Middleware Routing and Access Control", () => {
     it.each([[UserRole.STUDENT], [UserRole.PARENT]])(
       "redirects %s cookie on /portal/teacher to unauthorized",
       async (role) => {
-        vi.mocked(verifySessionToken).mockResolvedValue({
-          role,
-          exp: futureExp(),
-        } as Awaited<ReturnType<typeof verifySessionToken>>);
+        vi.mocked(verifySessionToken).mockResolvedValue(sessionV3(role));
 
         const req = createMockRequest("/portal/teacher", `${role.toLowerCase()}-cookie`);
         await middleware(req);
@@ -310,12 +289,7 @@ describe("Middleware Routing and Access Control", () => {
     );
 
     it("redirects admin cookie on /portal/teacher to unauthorized or an admin route pattern", async () => {
-      vi.mocked(verifySessionToken).mockResolvedValue({
-        role: UserRole.ADMIN,
-        mfaVerified: true,
-        authMethod: "password",
-        exp: futureExp(),
-      } as Awaited<ReturnType<typeof verifySessionToken>>);
+      vi.mocked(verifySessionToken).mockResolvedValue(sessionV3(UserRole.ADMIN));
 
       const req = createMockRequest("/portal/teacher", "admin-cookie");
       await middleware(req);
@@ -327,10 +301,7 @@ describe("Middleware Routing and Access Control", () => {
     });
 
     it("keeps middleware as a first-level cookie check without requiring DB state in the test", async () => {
-      vi.mocked(verifySessionToken).mockResolvedValue({
-        role: UserRole.TEACHER,
-        exp: futureExp(),
-      } as Awaited<ReturnType<typeof verifySessionToken>>);
+      vi.mocked(verifySessionToken).mockResolvedValue(sessionV3(UserRole.TEACHER));
 
       await middleware(createMockRequest("/portal/teacher", "teacher-cookie"));
 

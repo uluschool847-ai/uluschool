@@ -269,10 +269,9 @@ function isParentRole(expression: ts.Expression) {
 }
 
 function hasPreservedParentBillingIdentity(object: ts.ObjectLiteralExpression) {
-  if (object.properties.length !== 5) return false;
+  if (object.properties.length !== 4) return false;
   const email = propertyAssignment(object, "email")?.initializer;
   const fullName = propertyAssignment(object, "fullName")?.initializer;
-  const mfaVerified = propertyAssignment(object, "mfaVerified")?.initializer;
   const role = propertyAssignment(object, "role")?.initializer;
   const uid = propertyAssignment(object, "uid")?.initializer;
 
@@ -282,7 +281,6 @@ function hasPreservedParentBillingIdentity(object: ts.ObjectLiteralExpression) {
       fullName &&
       ts.isStringLiteral(fullName) &&
       fullName.text === "QA Parent Billing" &&
-      mfaVerified?.kind === ts.SyntaxKind.TrueKeyword &&
       role &&
       isParentRole(role) &&
       uid &&
@@ -386,7 +384,6 @@ describe("session cookie source audit", () => {
         return await createSessionToken({
           email: parentEmail,
           fullName: "Changed Parent",
-          mfaVerified: true,
           role: UserRole.PARENT,
           uid: parentId,
         });
@@ -407,7 +404,6 @@ describe("session cookie source audit", () => {
         return await createSessionToken({
           email: "changed@example.com",
           fullName: "Changed Parent",
-          mfaVerified: true,
           role: UserRole.PARENT,
           uid: "changed-parent",
         });
@@ -456,7 +452,6 @@ describe("session cookie source audit", () => {
         return await createSessionToken({
           email: parentEmail,
           fullName: "QA Parent Billing",
-          mfaVerified: true,
           role: UserRole.PARENT,
           uid: parentId,
         });

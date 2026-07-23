@@ -8,7 +8,6 @@ const redirectMock = vi.hoisted(() =>
 );
 const getInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const clearSessionMock = vi.hoisted(() => vi.fn());
-const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const createSessionMock = vi.hoisted(() => vi.fn());
 const getPortalRedirectPathMock = vi.hoisted(() => vi.fn());
@@ -30,7 +29,6 @@ vi.mock("next/navigation", () => ({ redirect: redirectMock }));
 vi.mock("@/lib/auth/session", () => ({
   getInitialSetupSession: getInitialSetupSessionMock,
   clearSession: clearSessionMock,
-  clearAdminPendingTwoFactor: clearAdminPendingTwoFactorMock,
   clearInitialSetupSession: clearInitialSetupSessionMock,
   createSession: createSessionMock,
   getPortalRedirectPath: getPortalRedirectPathMock,
@@ -79,19 +77,16 @@ function safeUser(overrides: Record<string, unknown> = {}) {
 
 function expectNoCookieOrSessionSideEffects() {
   expect(clearSessionMock).not.toHaveBeenCalled();
-  expect(clearAdminPendingTwoFactorMock).not.toHaveBeenCalled();
   expect(clearInitialSetupSessionMock).not.toHaveBeenCalled();
   expect(createSessionMock).not.toHaveBeenCalled();
 }
 
 function expectAllCookiesClearedBefore(issueMock: ReturnType<typeof vi.fn>) {
   expect(clearSessionMock).toHaveBeenCalledOnce();
-  expect(clearAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
   expect(clearInitialSetupSessionMock).toHaveBeenCalledOnce();
 
   const issueOrder = issueMock.mock.invocationCallOrder[0];
   expect(clearSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
-  expect(clearAdminPendingTwoFactorMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
   expect(clearInitialSetupSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
 }
 

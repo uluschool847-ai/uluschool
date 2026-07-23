@@ -1,16 +1,12 @@
 import { UserRole } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import {
-  getPortalDashboardPath,
-  getPortalLoginPath,
-  verifyAdminPendingTwoFactorToken,
-  verifySessionToken,
-} from "./lib/auth/session";
+import { verifySessionToken } from "./lib/auth/session";
 
 const SESSION_COOKIE = "ulu_session";
-const ADMIN_PENDING_2FA_COOKIE = "ulu_admin_2fa_pending";
+const LEGACY_ADMIN_PENDING_2FA_COOKIE = "ulu_admin_2fa_pending";
 const ATTRIBUTION_MAX_AGE = 60 * 60 * 24 * 30;
+const RETIRED_TWO_FACTOR_PATHS = ["/portal/setup/2fa", "/portal/login/verify-2fa"] as const;
 
 const TOKEN_AUTH_API_PREFIXES = [
   "/api/alerts/test",
@@ -92,18 +88,19 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
+  if (matchesAnyPrefix(pathname, RETIRED_TWO_FACTOR_PATHS)) {
+    const redirectResponse = NextResponse.redirect(new URL("/portal/login", request.url));
+    redirectResponse.cookies.delete(LEGACY_ADMIN_PENDING_2FA_COOKIE);
+    return redirectResponse;
+  }
+
   const response = NextResponse.next();
   setAttributionCookies(request, response);
-  const pendingAdminTwoFactorToken = request.cookies.get(ADMIN_PENDING_2FA_COOKIE)?.value;
-  const pendingAdminTwoFactor = await verifyAdminPendingTwoFactorToken(pendingAdminTwoFactorToken);
-  if (pendingAdminTwoFactorToken && !pendingAdminTwoFactor) {
-    response.cookies.delete(ADMIN_PENDING_2FA_COOKIE);
-  }
+  response.cookies.delete(LEGACY_ADMIN_PENDING_2FA_COOKIE);
 
   // Define active route policies
   const isPortalLoginPath = matchesPrefix(pathname, "/portal/login");
   const isPortalSetupPath = matchesPrefix(pathname, "/portal/setup");
-  const isAdminPath = matchesAnyPrefix(pathname, ["/admin"]);
   const isPublicRoute = matchesAnyPrefix(pathname, PUBLIC_ROUTES);
 
   // To avoid catching dead prefixes like /api/v1 or /portal-old, only protect defined active zones
@@ -140,16 +137,6 @@ export async function middleware(request: NextRequest) {
       return NextResponse.json({ error }, { status });
     }
     if (status === 401) {
-      if (isAdminPath) {
-        const hasPendingAdminTwoFactor = Boolean(pendingAdminTwoFactor);
-        if (hasPendingAdminTwoFactor) {
-          const nextPath = `${pathname}${request.nextUrl.search}`;
-          const nextParam = nextPath ? `?next=${encodeURIComponent(nextPath)}` : "";
-          return NextResponse.redirect(
-            new URL(`/portal/login/verify-2fa${nextParam}`, request.url),
-          );
-        }
-      }
       const nextPath = `${pathname}${request.nextUrl.search}`;
       const loginUrl = new URL("/portal/login", request.url);
       if (reason) {
@@ -190,19 +177,6 @@ export async function middleware(request: NextRequest) {
     if (matchesPrefix(pathname, rule.prefix) && !rule.roles.includes(role)) {
       return denyAccess(403, "Forbidden");
     }
-  }
-
-  // 3. Admin 2FA enforcement
-  if (
-    session.role === "ADMIN" &&
-    (process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false" &&
-    !session.mfaVerified &&
-    !matchesPrefix(pathname, "/portal/login/verify-2fa")
-  ) {
-    if (isApiPath) return NextResponse.json({ error: "MFA required" }, { status: 403 });
-    const nextPath = `${pathname}${request.nextUrl.search}`;
-    const nextParam = nextPath ? `?next=${encodeURIComponent(nextPath)}` : "";
-    return NextResponse.redirect(new URL(`/portal/login/verify-2fa${nextParam}`, request.url));
   }
 
   return response;

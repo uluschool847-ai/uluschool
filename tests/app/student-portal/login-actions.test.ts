@@ -10,14 +10,11 @@ const findUserByEmailMock = vi.hoisted(() => vi.fn());
 const createSessionMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const logAuthEventMock = vi.hoisted(() => vi.fn());
-const createAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const createInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const clearSessionMock = vi.hoisted(() => vi.fn());
 const getSessionMock = vi.hoisted(() => vi.fn());
-const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const revalidatePathMock = vi.hoisted(() => vi.fn());
-const startAdminTwoFactorChallengeMock = vi.hoisted(() => vi.fn());
 const getPortalRedirectPathMock = vi.hoisted(() =>
   vi.fn((role: string) => (role === "ADMIN" ? "/admin" : "/portal/login")),
 );
@@ -36,20 +33,11 @@ vi.mock("@/lib/auth/password", () => ({
 
 vi.mock("@/lib/repositories/user-repository", () => ({
   findUserByEmail: findUserByEmailMock,
-  findAdminUserForTwoFactor: vi.fn(),
-  consumeAdminBackupCode: vi.fn(),
-}));
-
-vi.mock("@/lib/repositories/admin-two-factor-challenge-repository", () => ({
-  startAdminTwoFactorChallenge: startAdminTwoFactorChallengeMock,
 }));
 
 vi.mock("@/lib/auth/session", () => ({
-  clearAdminPendingTwoFactor: clearAdminPendingTwoFactorMock,
-  createAdminPendingTwoFactor: createAdminPendingTwoFactorMock,
   createInitialSetupSession: createInitialSetupSessionMock,
   createSession: createSessionMock,
-  getAdminPendingTwoFactor: vi.fn(),
   getSession: getSessionMock,
   clearSession: clearSessionMock,
   clearInitialSetupSession: clearInitialSetupSessionMock,
@@ -58,24 +46,17 @@ vi.mock("@/lib/auth/session", () => ({
 
 function expectAllAuthCookiesClearedBefore(issueMock: ReturnType<typeof vi.fn>) {
   expect(clearSessionMock).toHaveBeenCalledOnce();
-  expect(clearAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
   expect(clearInitialSetupSessionMock).toHaveBeenCalledOnce();
 
   const issueOrder = issueMock.mock.invocationCallOrder[0];
   expect(issueOrder).toBeDefined();
   expect(clearSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
-  expect(clearAdminPendingTwoFactorMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
   expect(clearInitialSetupSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
 }
 
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   createAdminAuditLog: createAdminAuditLogMock,
   logAuthEvent: logAuthEventMock,
-}));
-
-vi.mock("@/lib/auth/two-factor", () => ({
-  verifyTotpCode: vi.fn(),
-  consumeBackupCode: vi.fn(),
 }));
 
 function makeLoginFormData() {
@@ -123,8 +104,6 @@ describe("app/student-portal/actions.ts login actions", () => {
       authMethod: "password",
     });
     expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
-    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
-    expect(startAdminTwoFactorChallengeMock).not.toHaveBeenCalled();
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
     expect(logAuthEventMock).toHaveBeenCalledWith(
       expect.objectContaining({

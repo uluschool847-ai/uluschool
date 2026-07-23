@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const verifySessionTokenMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({
-  verifyAdminPendingTwoFactorToken: vi.fn(async () => null),
   verifySessionToken: verifySessionTokenMock,
   getPortalLoginPath: vi.fn((path: string) => `/portal/login?next=${encodeURIComponent(path)}`),
   getPortalDashboardPath: vi.fn((role: string) => `/portal/${role.toLowerCase()}`),
@@ -15,7 +14,7 @@ const redirectMock = vi.fn((url: string | URL) => ({ type: "redirect", url: url.
 vi.mock("next/server", () => ({
   NextResponse: {
     redirect: (...args: unknown[]) => redirectMock(...(args as [string | URL])),
-    next: () => ({ cookies: { set: vi.fn() } }),
+    next: () => ({ cookies: { set: vi.fn(), delete: vi.fn() } }),
   },
 }));
 
@@ -77,11 +76,12 @@ describe("middleware /admin/parents access control", () => {
     ["PARENT", "/admin/parents/parent-1/edit"],
   ])("redirects %s users away from %s", async (role, path) => {
     verifySessionTokenMock.mockResolvedValueOnce({
+      purpose: "SESSION",
+      version: 3,
       uid: `${role.toLowerCase()}-1`,
       role,
       email: `${role.toLowerCase()}@example.com`,
       exp: Date.now() + 60000,
-      mfaVerified: true,
       authMethod: "password",
     });
 

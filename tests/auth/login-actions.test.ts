@@ -3,12 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const verifyPasswordMock = vi.hoisted(() => vi.fn(() => Promise.resolve(true)));
 const findUserByEmailMock = vi.hoisted(() => vi.fn());
 const createSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
-const createAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const createInitialSetupSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const clearSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
-const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn(() => Promise.resolve()));
-const completeAdminTwoFactorChallengeMock = vi.hoisted(() => vi.fn());
 
 // Mock redirect to throw an error so we can catch and assert it
 const redirectMock = vi.hoisted(() =>
@@ -28,14 +25,6 @@ vi.mock("@/lib/auth/password", () => ({
 
 vi.mock("@/lib/repositories/user-repository", () => ({
   findUserByEmail: findUserByEmailMock,
-  findAdminUserForTwoFactor: vi.fn(() =>
-    Promise.resolve({
-      id: "admin-1",
-      role: "ADMIN",
-      twoFactorEnabled: true,
-      twoFactorSecret: "mock-secret",
-    }),
-  ),
 }));
 
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
@@ -43,25 +32,11 @@ vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   logAuthEvent: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock("@/lib/repositories/admin-two-factor-challenge-repository", () => ({
-  completeAdminTwoFactorChallenge: completeAdminTwoFactorChallengeMock,
-}));
-
 vi.mock("@/lib/auth/session", () => ({
   createSession: createSessionMock,
-  createAdminPendingTwoFactor: createAdminPendingTwoFactorMock,
   createInitialSetupSession: createInitialSetupSessionMock,
   clearSession: clearSessionMock,
-  clearAdminPendingTwoFactor: clearAdminPendingTwoFactorMock,
   clearInitialSetupSession: clearInitialSetupSessionMock,
-  getAdminPendingTwoFactor: vi.fn(() =>
-    Promise.resolve({
-      uid: "admin-1",
-      email: "admin@uluglobalacademy.com",
-      challengeId: "challenge-1",
-      authMethod: "password",
-    }),
-  ),
   getPortalRedirectPath: vi.fn((role, nextPath) => {
     // Emulate proper nextPath resolution
     if (nextPath) return nextPath;
@@ -71,13 +46,11 @@ vi.mock("@/lib/auth/session", () => ({
 
 function expectAllAuthCookiesClearedBefore(issueMock: ReturnType<typeof vi.fn>) {
   expect(clearSessionMock).toHaveBeenCalledOnce();
-  expect(clearAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
   expect(clearInitialSetupSessionMock).toHaveBeenCalledOnce();
 
   const issueOrder = issueMock.mock.invocationCallOrder[0];
   expect(issueOrder).toBeDefined();
   expect(clearSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
-  expect(clearAdminPendingTwoFactorMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
   expect(clearInitialSetupSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
 }
 
@@ -88,10 +61,6 @@ function mailboxAddress(length: 254 | 255) {
   expect(address).toHaveLength(length);
   return address;
 }
-
-vi.mock("@/lib/auth/two-factor", () => ({
-  verifyTotpCode: vi.fn(() => true),
-}));
 
 describe("Auth Server Actions - Next Parameter Resolution", () => {
   beforeEach(() => {
@@ -106,15 +75,6 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
       passwordHash: "hashed",
       mustChangePassword: false,
       twoFactorEnabled: false,
-    });
-    completeAdminTwoFactorChallengeMock.mockResolvedValue({
-      outcome: "success",
-      user: {
-        id: "admin-1",
-        email: "admin@uluglobalacademy.com",
-        fullName: "Admin User",
-        role: "ADMIN",
-      },
     });
   });
 
@@ -135,7 +95,6 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
     );
     expectAllAuthCookiesClearedBefore(createSessionMock);
     expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
-    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
   });
 
   it("routes a temporary-password user to password setup without a normal session", async () => {
@@ -167,7 +126,6 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
       nextPath: "/portal/student/assignments",
     });
     expect(createSessionMock).not.toHaveBeenCalled();
-    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
   });
 
   it("does not clear or issue auth cookies when password verification fails", async () => {
@@ -182,10 +140,8 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
     );
 
     expect(clearSessionMock).not.toHaveBeenCalled();
-    expect(clearAdminPendingTwoFactorMock).not.toHaveBeenCalled();
     expect(clearInitialSetupSessionMock).not.toHaveBeenCalled();
     expect(createSessionMock).not.toHaveBeenCalled();
-    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
     expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
   });
 
@@ -214,10 +170,8 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
       expect(findUserByEmailMock).not.toHaveBeenCalled();
       expect(verifyPasswordMock).not.toHaveBeenCalled();
       expect(clearSessionMock).not.toHaveBeenCalled();
-      expect(clearAdminPendingTwoFactorMock).not.toHaveBeenCalled();
       expect(clearInitialSetupSessionMock).not.toHaveBeenCalled();
       expect(createSessionMock).not.toHaveBeenCalled();
-      expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
       expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
     },
   );

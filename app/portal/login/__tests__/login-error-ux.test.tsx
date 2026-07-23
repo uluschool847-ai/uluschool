@@ -5,10 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const useActionStateMock = vi.hoisted(() => vi.fn());
 const useFormStatusMock = vi.hoisted(() => vi.fn());
 const getSessionMock = vi.hoisted(() => vi.fn());
-const getAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const createSessionMock = vi.hoisted(() => vi.fn());
 const clearSessionMock = vi.hoisted(() => vi.fn());
-const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const verifyPasswordMock = vi.hoisted(() => vi.fn());
 const findUserByEmailMock = vi.hoisted(() => vi.fn());
@@ -37,12 +35,10 @@ vi.mock("@/lib/auth/session", async () => {
   const actual = await vi.importActual<typeof import("@/lib/auth/session")>("@/lib/auth/session");
   return {
     ...actual,
-    clearAdminPendingTwoFactor: clearAdminPendingTwoFactorMock,
     clearInitialSetupSession: clearInitialSetupSessionMock,
     clearSession: clearSessionMock,
     createSession: createSessionMock,
     getSession: getSessionMock,
-    getAdminPendingTwoFactor: getAdminPendingTwoFactorMock,
   };
 });
 
@@ -79,7 +75,6 @@ type LoginUser = {
   role: UserRole;
   isActive: boolean;
   passwordHash: string;
-  twoFactorEnabled?: boolean;
 };
 
 async function renderServerComponent(Component: () => Promise<JSX.Element>) {
@@ -125,10 +120,8 @@ describe("Portal login error UX", () => {
     useActionStateMock.mockReset();
     useFormStatusMock.mockReset();
     getSessionMock.mockReset();
-    getAdminPendingTwoFactorMock.mockReset();
     createSessionMock.mockReset();
     clearSessionMock.mockReset();
-    clearAdminPendingTwoFactorMock.mockReset();
     clearInitialSetupSessionMock.mockReset();
     verifyPasswordMock.mockReset();
     findUserByEmailMock.mockReset();
@@ -141,7 +134,6 @@ describe("Portal login error UX", () => {
     useFormStatusMock.mockReturnValue({ pending: false });
     useActionStateMock.mockReturnValue([{ success: false, message: "" }, vi.fn()]);
     getSessionMock.mockResolvedValue(null);
-    getAdminPendingTwoFactorMock.mockResolvedValue(null);
     createSessionMock.mockResolvedValue(undefined);
     verifyPasswordMock.mockResolvedValue(true);
     findUserByEmailMock.mockResolvedValue(makeTeacher());
@@ -230,22 +222,6 @@ describe("Portal login error UX", () => {
     expect(screen.queryByText(/session has expired/i)).toBeNull();
     expect(screen.queryByText(/invalid session/i)).toBeNull();
     expect(screen.getAllByRole("heading", { name: /portal login/i }).length).toBeGreaterThan(0);
-  });
-
-  it("renders the login form when a stale administrator pending-2FA cookie exists", async () => {
-    getAdminPendingTwoFactorMock.mockResolvedValue({
-      uid: "admin-1",
-      email: "admin@example.com",
-      challengeId: "challenge-1",
-      authMethod: "password",
-    });
-
-    await renderLoginPage();
-
-    expect(screen.getByRole("heading", { name: "Login" })).toBeTruthy();
-    expect(screen.getByText(/mock login form/i)).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Admin Verification" })).toBeNull();
-    expect(screen.queryByRole("link", { name: /continue 2fa/i })).toBeNull();
   });
 
   it("rejects inactive teacher login with the same generic failure used for bad credentials", async () => {

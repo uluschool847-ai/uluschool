@@ -2,18 +2,15 @@ import { UserRole } from "@prisma/client";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { getBackupCodeHashFingerprint } from "@/lib/auth/backup-code-hash";
 import { findUserById } from "@/lib/repositories/user-repository";
 
 const SESSION_COOKIE = "ulu_session";
-const ADMIN_PENDING_2FA_COOKIE = "ulu_admin_2fa_pending";
+const LEGACY_ADMIN_PENDING_2FA_COOKIE = "ulu_admin_2fa_pending";
 const INITIAL_SETUP_COOKIE = "ulu_initial_setup";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
-const SESSION_SECURITY_VERSION = 2 as const;
+const SESSION_SECURITY_VERSION = 3 as const;
 const INITIAL_SETUP_DURATION_MS = 1000 * 60 * 15;
-const INITIAL_TWO_FACTOR_HANDOFF_DURATION_MS = 1000 * 60 * 10;
 const MAX_INITIAL_SETUP_NEXT_PATH_LENGTH = 2048;
-const MAX_INITIAL_TWO_FACTOR_CAPABILITY_LENGTH = 1024;
 
 export type AuthMethod = "password" | "sso";
 
@@ -22,7 +19,6 @@ type SessionInput = {
   role: UserRole;
   email: string;
   fullName?: string | null;
-  mfaVerified?: boolean;
   authMethod?: AuthMethod;
 };
 
@@ -38,28 +34,6 @@ export type PreparedSessionCookie = {
   };
 };
 
-type InitialTwoFactorSetupCapability = {
-  purpose: "INITIAL_2FA_SETUP";
-  uid: string;
-  secretFingerprint: string;
-  exp: number;
-};
-
-export type InitialTwoFactorHandoffCapability = {
-  purpose: "INITIAL_2FA_HANDOFF";
-  uid: string;
-  backupCodeHashFingerprint: string;
-  iat: number;
-  exp: number;
-};
-
-export class AuthCookieReplacementError extends Error {
-  constructor() {
-    super("Auth cookie replacement failed");
-    this.name = "AuthCookieReplacementError";
-  }
-}
-
 export type SessionPayload = {
   purpose: "SESSION";
   version: typeof SESSION_SECURITY_VERSION;
@@ -68,7 +42,6 @@ export type SessionPayload = {
   email: string;
   fullName?: string | null;
   exp: number;
-  mfaVerified: boolean;
   authMethod: AuthMethod;
 };
 
@@ -86,15 +59,6 @@ export type SessionValidationResult = {
   expired: boolean;
   reason?: string;
   user?: { id: string; role: string };
-};
-
-export type PendingTwoFactorPayload = {
-  purpose: "ADMIN_PENDING_2FA";
-  uid: string;
-  email: string;
-  challengeId: string;
-  authMethod: AuthMethod;
-  exp: number;
 };
 
 type SessionReadResult = {
@@ -274,7 +238,6 @@ function isSessionPayload(payload: unknown): payload is SessionPayload {
         "email",
         "fullName",
         "exp",
-        "mfaVerified",
         "authMethod",
       ]) &&
       payload.purpose === "SESSION" &&
@@ -286,7 +249,6 @@ function isSessionPayload(payload: unknown): payload is SessionPayload {
         payload.fullName === null ||
         typeof payload.fullName === "string") &&
       isValidExpiry(payload.exp) &&
-      typeof payload.mfaVerified === "boolean" &&
       (payload.authMethod === "password" || payload.authMethod === "sso"),
   );
 }
@@ -307,144 +269,6 @@ function isInitialSetupPayload(payload: unknown): payload is InitialSetupPayload
   return (
     payload.nextPath === undefined || isValidInitialSetupNextPath(payload.nextPath, payload.role)
   );
-}
-
-function isPendingTwoFactorPayload(payload: unknown): payload is PendingTwoFactorPayload {
-  return Boolean(
-    isRecord(payload) &&
-      hasOnlyKeys(payload, ["purpose", "uid", "email", "challengeId", "authMethod", "exp"]) &&
-      payload.purpose === "ADMIN_PENDING_2FA" &&
-      isNonEmptyString(payload.uid) &&
-      isNonEmptyString(payload.email) &&
-      isNonEmptyString(payload.challengeId) &&
-      payload.challengeId === payload.challengeId.trim() &&
-      payload.challengeId.length <= 191 &&
-      (payload.authMethod === "password" || payload.authMethod === "sso") &&
-      isValidExpiry(payload.exp),
-  );
-}
-
-function isInitialTwoFactorSetupCapability(
-  payload: unknown,
-): payload is InitialTwoFactorSetupCapability {
-  return Boolean(
-    isRecord(payload) &&
-      hasOnlyKeys(payload, ["purpose", "uid", "secretFingerprint", "exp"]) &&
-      payload.purpose === "INITIAL_2FA_SETUP" &&
-      isNonEmptyString(payload.uid) &&
-      payload.uid === payload.uid.trim() &&
-      payload.uid.length <= 191 &&
-      typeof payload.secretFingerprint === "string" &&
-      /^[a-f0-9]{64}$/.test(payload.secretFingerprint) &&
-      isValidExpiry(payload.exp),
-  );
-}
-
-function isInitialTwoFactorHandoffCapability(
-  payload: unknown,
-): payload is InitialTwoFactorHandoffCapability {
-  return Boolean(
-    isRecord(payload) &&
-      hasOnlyKeys(payload, ["purpose", "uid", "backupCodeHashFingerprint", "iat", "exp"]) &&
-      payload.purpose === "INITIAL_2FA_HANDOFF" &&
-      isNonEmptyString(payload.uid) &&
-      payload.uid === payload.uid.trim() &&
-      payload.uid.length <= 191 &&
-      typeof payload.backupCodeHashFingerprint === "string" &&
-      /^[a-f0-9]{64}$/.test(payload.backupCodeHashFingerprint) &&
-      isValidExpiry(payload.iat) &&
-      isValidExpiry(payload.exp),
-  );
-}
-
-function hasValidInitialTwoFactorHandoffLifetime(payload: InitialTwoFactorHandoffCapability) {
-  const now = Date.now();
-  return (
-    payload.iat <= now &&
-    payload.exp > now &&
-    payload.exp > payload.iat &&
-    payload.exp - payload.iat <= INITIAL_TWO_FACTOR_HANDOFF_DURATION_MS
-  );
-}
-
-export async function getInitialTwoFactorSecretFingerprint(secret: string) {
-  if (!/^[A-Z2-7]{16,128}$/.test(secret)) {
-    throw new Error("Invalid two-factor setup secret");
-  }
-
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-export async function createInitialTwoFactorSetupCapability(input: {
-  uid: string;
-  secret: string;
-}) {
-  if (!input.uid || input.uid !== input.uid.trim() || input.uid.length > 191) {
-    throw new Error("Invalid initial setup identity");
-  }
-
-  return encodeSignedPayload({
-    purpose: "INITIAL_2FA_SETUP",
-    uid: input.uid,
-    secretFingerprint: await getInitialTwoFactorSecretFingerprint(input.secret),
-    exp: Date.now() + INITIAL_SETUP_DURATION_MS,
-  } satisfies InitialTwoFactorSetupCapability);
-}
-
-export async function readInitialTwoFactorSetupCapability(
-  token: string,
-): Promise<InitialTwoFactorSetupCapability | null> {
-  if (!token || token.length > MAX_INITIAL_TWO_FACTOR_CAPABILITY_LENGTH) {
-    return null;
-  }
-
-  const payload = await decodeSignedPayload(token);
-  if (!isInitialTwoFactorSetupCapability(payload) || !isNotExpired(payload.exp)) {
-    return null;
-  }
-
-  return payload;
-}
-
-export async function createInitialTwoFactorHandoffCapability(input: {
-  uid: string;
-  backupCodeHashes: unknown;
-}) {
-  if (!input.uid || input.uid !== input.uid.trim() || input.uid.length > 191) {
-    throw new Error("Invalid initial two-factor handoff identity");
-  }
-
-  const iat = Date.now();
-  return encodeSignedPayload({
-    purpose: "INITIAL_2FA_HANDOFF",
-    uid: input.uid,
-    backupCodeHashFingerprint: await getBackupCodeHashFingerprint(input.backupCodeHashes),
-    iat,
-    exp: iat + INITIAL_TWO_FACTOR_HANDOFF_DURATION_MS,
-  } satisfies InitialTwoFactorHandoffCapability);
-}
-
-export async function readInitialTwoFactorHandoffCapability(
-  token: unknown,
-): Promise<InitialTwoFactorHandoffCapability | null> {
-  if (
-    typeof token !== "string" ||
-    !token ||
-    token.length > MAX_INITIAL_TWO_FACTOR_CAPABILITY_LENGTH
-  ) {
-    return null;
-  }
-
-  const payload = await decodeSignedPayload(token);
-  if (
-    !isInitialTwoFactorHandoffCapability(payload) ||
-    !hasValidInitialTwoFactorHandoffLifetime(payload)
-  ) {
-    return null;
-  }
-
-  return payload;
 }
 
 export function getPortalDashboardPath(role: UserRole) {
@@ -478,7 +302,6 @@ export async function prepareSessionCookie(input: SessionInput): Promise<Prepare
     email: input.email,
     fullName: input.fullName ?? null,
     exp: Date.now() + SESSION_DURATION_MS,
-    mfaVerified: input.mfaVerified ?? true,
     authMethod: input.authMethod ?? "password",
   };
 
@@ -499,29 +322,13 @@ export async function createSession(input: SessionInput) {
   const prepared = await prepareSessionCookie(input);
   const cookieStore = await cookies();
   cookieStore.set(prepared.name, prepared.value, prepared.options);
-}
-
-export async function replaceAuthCookieFamilyWithSession(prepared: PreparedSessionCookie) {
-  let cookieStore: Awaited<ReturnType<typeof cookies>> | null = null;
-
-  try {
-    cookieStore = await cookies();
-    cookieStore.set(prepared.name, prepared.value, prepared.options);
-    cookieStore.delete(ADMIN_PENDING_2FA_COOKIE);
-    cookieStore.delete(INITIAL_SETUP_COOKIE);
-  } catch {
-    try {
-      cookieStore?.delete(SESSION_COOKIE);
-    } catch {
-      // A delivered handoff result carries separate short-lived recovery authorization.
-    }
-    throw new AuthCookieReplacementError();
-  }
+  cookieStore.delete(LEGACY_ADMIN_PENDING_2FA_COOKIE);
 }
 
 export async function clearSession() {
   const cookieStore = await cookies();
   cookieStore.delete(SESSION_COOKIE);
+  cookieStore.delete(LEGACY_ADMIN_PENDING_2FA_COOKIE);
 }
 
 export async function createInitialSetupSession(
@@ -657,61 +464,6 @@ export async function validateSession(sessionToken: string): Promise<SessionVali
   };
 }
 
-export async function createAdminPendingTwoFactor(input: {
-  uid: string;
-  email: string;
-  challengeId: string;
-  authMethod: AuthMethod;
-  expiresAt: Date;
-}) {
-  const exp = input.expiresAt.getTime();
-  if (!Number.isFinite(exp) || exp <= Date.now()) {
-    throw new Error("Invalid administrator two-factor challenge expiry.");
-  }
-
-  const payload: PendingTwoFactorPayload = {
-    purpose: "ADMIN_PENDING_2FA",
-    uid: input.uid,
-    email: input.email,
-    challengeId: input.challengeId,
-    authMethod: input.authMethod,
-    exp,
-  };
-
-  const token = await encodeSignedPayload(payload);
-  const cookieStore = await cookies();
-  cookieStore.set(ADMIN_PENDING_2FA_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: (process.env.NODE_ENV ?? "development") === "production",
-    path: "/",
-    maxAge: Math.max(0, (exp - Date.now()) / 1000),
-  });
-}
-
-export async function getAdminPendingTwoFactor(): Promise<PendingTwoFactorPayload | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_PENDING_2FA_COOKIE)?.value;
-  return verifyAdminPendingTwoFactorToken(token);
-}
-
-/** Lightweight pending-token verification for Middleware (Edge Runtime). */
-export async function verifyAdminPendingTwoFactorToken(
-  token: string | undefined,
-): Promise<PendingTwoFactorPayload | null> {
-  if (!token) return null;
-  const payload = await decodeSignedPayload(token);
-  if (!isPendingTwoFactorPayload(payload) || !isNotExpired(payload.exp)) {
-    return null;
-  }
-  return payload;
-}
-
-export async function clearAdminPendingTwoFactor() {
-  const cookieStore = await cookies();
-  cookieStore.delete(ADMIN_PENDING_2FA_COOKIE);
-}
-
 export async function requireSession() {
   const { session, reason } = await readSessionFromCookie();
   if (!session) {
@@ -730,14 +482,6 @@ export async function requireRole(allowedRoles: UserRole[]) {
   const session = await requireSession();
   if (!allowedRoles.includes(session.role)) {
     redirect(getPortalDashboardPath(session.role));
-  }
-
-  if (
-    session.role === UserRole.ADMIN &&
-    (process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false" &&
-    !session.mfaVerified
-  ) {
-    redirect("/portal/login/verify-2fa");
   }
 
   return session;

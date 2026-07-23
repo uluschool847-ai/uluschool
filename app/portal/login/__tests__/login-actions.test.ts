@@ -8,15 +8,12 @@ const redirectMock = vi.hoisted(() =>
 );
 const verifyPasswordMock = vi.hoisted(() => vi.fn());
 const findUserByEmailMock = vi.hoisted(() => vi.fn());
-const createAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
-const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const clearSessionMock = vi.hoisted(() => vi.fn());
 const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const createInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const createSessionMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const logAuthEventMock = vi.hoisted(() => vi.fn());
-const startAdminTwoFactorChallengeMock = vi.hoisted(() => vi.fn());
 
 vi.mock("next/navigation", () => ({
   redirect: redirectMock,
@@ -31,8 +28,6 @@ vi.mock("@/lib/repositories/user-repository", () => ({
 }));
 
 vi.mock("@/lib/auth/session", () => ({
-  createAdminPendingTwoFactor: createAdminPendingTwoFactorMock,
-  clearAdminPendingTwoFactor: clearAdminPendingTwoFactorMock,
   clearSession: clearSessionMock,
   clearInitialSetupSession: clearInitialSetupSessionMock,
   createInitialSetupSession: createInitialSetupSessionMock,
@@ -42,23 +37,17 @@ vi.mock("@/lib/auth/session", () => ({
 
 function expectAllAuthCookiesClearedBefore(issueMock: ReturnType<typeof vi.fn>) {
   expect(clearSessionMock).toHaveBeenCalledOnce();
-  expect(clearAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
   expect(clearInitialSetupSessionMock).toHaveBeenCalledOnce();
 
   const issueOrder = issueMock.mock.invocationCallOrder[0];
   expect(issueOrder).toBeDefined();
   expect(clearSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
-  expect(clearAdminPendingTwoFactorMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
   expect(clearInitialSetupSessionMock.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
 }
 
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   createAdminAuditLog: createAdminAuditLogMock,
   logAuthEvent: logAuthEventMock,
-}));
-
-vi.mock("@/lib/repositories/admin-two-factor-challenge-repository", () => ({
-  startAdminTwoFactorChallenge: startAdminTwoFactorChallengeMock,
 }));
 
 function makeLoginFormData(nextPath = "/admin/security") {
@@ -78,10 +67,6 @@ describe("portal login administrator actions", () => {
     verifyPasswordMock.mockResolvedValue(true);
     createAdminAuditLogMock.mockResolvedValue(undefined);
     logAuthEventMock.mockResolvedValue(undefined);
-    startAdminTwoFactorChallengeMock.mockResolvedValue({
-      id: "challenge-1",
-      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
-    });
     findUserByEmailMock.mockResolvedValue({
       id: "admin-1",
       email: "admin@example.com",
@@ -111,8 +96,6 @@ describe("portal login administrator actions", () => {
     });
     expectAllAuthCookiesClearedBefore(createSessionMock);
     expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
-    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
-    expect(startAdminTwoFactorChallengeMock).not.toHaveBeenCalled();
     expect(logAuthEventMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "LOGIN_SUCCESS",
@@ -145,6 +128,5 @@ describe("portal login administrator actions", () => {
     expect(createInitialSetupSessionMock).toHaveBeenCalled();
     expectAllAuthCookiesClearedBefore(createInitialSetupSessionMock);
     expect(createSessionMock).not.toHaveBeenCalled();
-    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
 import { UserRole } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createLegacySessionToken, createSessionToken } from "@/e2e/helpers/session";
+import { createLegacyVersionTwoSessionToken, createSessionToken } from "@/e2e/helpers/session";
 import { validateSession, verifySessionToken } from "@/lib/auth/session";
 
 const TEST_SECRET = "test-auth-session-secret-at-least-32-chars";
@@ -30,35 +30,27 @@ describe("E2E session helper", () => {
 
     await expect(verifySessionToken(token)).resolves.toEqual({
       purpose: "SESSION",
-      version: 2,
+      version: 3,
       uid: "teacher-1",
       role: UserRole.TEACHER,
       email: "teacher@example.com",
       fullName: "Teacher One",
       exp: START.getTime() + 60 * 60 * 1000,
-      mfaVerified: true,
       authMethod: "password",
     });
   });
 
-  it.each([
-    ["password", UserRole.TEACHER],
-    ["sso", UserRole.ADMIN],
-  ] as const)(
-    "rejects a signed legacy %s session without the security version",
-    async (authMethod, role) => {
-      const token = await createLegacySessionToken({
-        uid: role === UserRole.ADMIN ? "admin-1" : "teacher-1",
-        role,
-        email: role === UserRole.ADMIN ? "admin@example.com" : "teacher@example.com",
-        fullName: role === UserRole.ADMIN ? "Admin One" : "Teacher One",
-        mfaVerified: true,
-        authMethod,
-      });
+  it("rejects a signed legacy version 2 session", async () => {
+    const token = await createLegacyVersionTwoSessionToken({
+      uid: "admin-1",
+      role: UserRole.ADMIN,
+      email: "admin@example.com",
+      fullName: "Admin One",
+      authMethod: "password",
+    });
 
-      await expect(verifySessionToken(token)).resolves.toBeNull();
-    },
-  );
+    await expect(verifySessionToken(token)).resolves.toBeNull();
+  });
 
   it("is rejected by server validation at exact expiry while middleware can classify it", async () => {
     const token = await createSessionToken({

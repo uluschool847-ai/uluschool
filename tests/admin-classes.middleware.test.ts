@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const verifySessionTokenMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({
-  verifyAdminPendingTwoFactorToken: vi.fn(async () => null),
   verifySessionToken: verifySessionTokenMock,
   getPortalLoginPath: vi.fn((path: string) => `/portal/login?next=${encodeURIComponent(path)}`),
   getPortalDashboardPath: vi.fn((role: string) => `/portal/${role.toLowerCase()}`),
@@ -15,7 +14,7 @@ const redirectMock = vi.fn((url: string | URL) => ({ type: "redirect", url: url.
 vi.mock("next/server", () => ({
   NextResponse: {
     redirect: (...args: unknown[]) => redirectMock(...(args as [string | URL])),
-    next: () => ({ cookies: { set: vi.fn() } }),
+    next: () => ({ cookies: { set: vi.fn(), delete: vi.fn() } }),
   },
 }));
 
@@ -74,11 +73,12 @@ describe("middleware /admin/classes access control", () => {
     "redirects non-admin authenticated users away from %s",
     async (path) => {
       verifySessionTokenMock.mockResolvedValueOnce({
+        purpose: "SESSION",
+        version: 3,
         uid: "teacher-1",
         role: "TEACHER",
         email: "teacher@example.com",
         exp: Date.now() + 60_000,
-        mfaVerified: true,
         authMethod: "password",
       });
 

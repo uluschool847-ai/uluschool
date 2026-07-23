@@ -73,11 +73,12 @@ describe("app/api/upload/route local-first upload integration", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     getSessionMock.mockResolvedValue({
+      purpose: "SESSION",
+      version: 3,
       uid: "teacher-1",
       role: "TEACHER",
       email: "teacher@example.com",
       exp: Date.now() + 60_000,
-      mfaVerified: true,
       authMethod: "password",
     });
     reservePendingUploadMock.mockResolvedValue(undefined);
@@ -140,11 +141,12 @@ describe("app/api/upload/route local-first upload integration", () => {
 
   it.each(["STUDENT", "PARENT"])("returns 403 for %s", async (role) => {
     getSessionMock.mockResolvedValueOnce({
+      purpose: "SESSION",
+      version: 3,
       uid: `${role.toLowerCase()}-1`,
       role,
       email: `${role.toLowerCase()}@example.com`,
       exp: Date.now() + 60_000,
-      mfaVerified: true,
       authMethod: "password",
     });
 
@@ -198,11 +200,12 @@ describe("app/api/upload/route local-first upload integration", () => {
     "allows an admin upload for %s",
     async (purpose) => {
       getSessionMock.mockResolvedValueOnce({
+        purpose: "SESSION",
+        version: 3,
         uid: "admin-1",
         role: "ADMIN",
         email: "admin@example.com",
         exp: Date.now() + 60_000,
-        mfaVerified: true,
         authMethod: "password",
       });
       const storageKey =
@@ -239,11 +242,12 @@ describe("app/api/upload/route local-first upload integration", () => {
 
   it("rejects an admin upload for an unapproved purpose", async () => {
     getSessionMock.mockResolvedValueOnce({
+      purpose: "SESSION",
+      version: 3,
       uid: "admin-1",
       role: "ADMIN",
       email: "admin@example.com",
       exp: Date.now() + 60_000,
-      mfaVerified: true,
       authMethod: "password",
     });
 

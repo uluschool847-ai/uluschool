@@ -2,17 +2,18 @@ import { UserRole } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createLegacySessionToken } from "@/e2e/helpers/session";
+import { createLegacyVersionTwoSessionToken } from "@/e2e/helpers/session";
 
 const cookieSetMock = vi.hoisted(() => vi.fn());
+const cookieDeleteMock = vi.hoisted(() => vi.fn());
 
 vi.mock("next/headers", () => ({
-  cookies: vi.fn(async () => ({ set: cookieSetMock })),
+  cookies: vi.fn(async () => ({ set: cookieSetMock, delete: cookieDeleteMock })),
 }));
 
 vi.mock("next/server", () => ({
   NextResponse: {
-    next: vi.fn(() => ({ cookies: { set: vi.fn() } })),
+    next: vi.fn(() => ({ cookies: { set: vi.fn(), delete: vi.fn() } })),
     redirect: vi.fn((url: URL) => ({ type: "redirect", url: url.toString() })),
     json: vi.fn((body: unknown, init?: { status: number }) => ({
       type: "json",
@@ -75,14 +76,13 @@ describe("middleware signed-session expiry integration", () => {
     ["password", UserRole.TEACHER, "/portal/teacher"],
     ["sso", UserRole.ADMIN, "/admin/security"],
   ] as const)(
-    "rejects a signed legacy %s session in middleware",
+    "rejects a signed legacy version 2 %s session in middleware",
     async (authMethod, role, path) => {
-      const token = await createLegacySessionToken({
+      const token = await createLegacyVersionTwoSessionToken({
         uid: role === UserRole.ADMIN ? "admin-1" : "teacher-1",
         role,
         email: role === UserRole.ADMIN ? "admin@example.com" : "teacher@example.com",
         fullName: role === UserRole.ADMIN ? "Admin One" : "Teacher One",
-        mfaVerified: true,
         authMethod,
       });
 

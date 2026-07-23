@@ -2,7 +2,7 @@ import { type Page, expect, test } from "@playwright/test";
 import { UserRole } from "@prisma/client";
 import { authenticator } from "otplib";
 
-import { createAdminPendingTwoFactorToken, createSessionToken } from "@/e2e/helpers/session";
+import { createSessionToken } from "@/e2e/helpers/session";
 import { hashPassword } from "@/lib/auth/password";
 import { prisma } from "@/lib/prisma";
 const PASSWORD =
@@ -26,7 +26,6 @@ async function setPortalSession(
     role: UserRole;
     email: string;
     fullName: string;
-    mfaVerified?: boolean;
   },
 ) {
   await page.context().clearCookies();
@@ -106,12 +105,12 @@ async function loginWithPassword(page: Page, email: string) {
   await page.getByRole("button", { name: /login|sign in/i }).click();
 }
 
-async function setPendingAdminTwoFactorCookie(page: Page, value: string) {
+async function setLegacyPendingAdminTwoFactorCookie(page: Page) {
   await page.context().clearCookies();
   await page.context().addCookies([
     {
       name: "ulu_admin_2fa_pending",
-      value,
+      value: "legacy-pending-token",
       domain: "localhost",
       path: "/",
       httpOnly: true,
@@ -134,48 +133,26 @@ test.describe("Admin Security", () => {
     await prisma.$disconnect();
   });
 
-  test("direct login GETs reject malformed, expired, and legacy pending cookies without a 500", async ({
+  test("clears a stale legacy pending cookie and redirects retired 2FA routes", async ({
     page,
   }) => {
-    const rejectedTokens = [
-      { name: "malformed", value: "not-a-signed-pending-token" },
-      {
-        name: "expired",
-        value: await createAdminPendingTwoFactorToken({ exp: Date.now() - 60_000 }),
-      },
-      {
-        name: "pre-migration",
-        value: await createAdminPendingTwoFactorToken({
-          exp: Date.now() + 60_000,
-          legacy: true,
-        }),
-      },
-    ];
+    for (const path of ["/portal/login", "/portal/setup/2fa", "/portal/login/verify-2fa"]) {
+      await test.step(path, async () => {
+        await setLegacyPendingAdminTwoFactorCookie(page);
 
-    for (const rejectedToken of rejectedTokens) {
-      for (const path of ["/portal/login", "/portal/login/verify-2fa"]) {
-        await test.step(`${rejectedToken.name} token on ${path}`, async () => {
-          await setPendingAdminTwoFactorCookie(page, rejectedToken.value);
+        const response = await page.goto(path);
 
-          const response = await page.goto(path);
-
-          expect(response?.status()).toBe(200);
-          if (path === "/portal/login") {
-            await expect(page.getByRole("heading", { name: "Login", exact: true })).toBeVisible();
-            await expect(page.getByText(/Admin 2FA verification is pending/i)).toHaveCount(0);
-          } else {
-            await expect(page.getByText(/2FA session is missing or expired/i)).toBeVisible();
-            await expect(page.getByLabel(/authenticator code/i)).toHaveCount(0);
-          }
-          await expect
-            .poll(async () =>
-              (await page.context().cookies()).some(
-                (cookie) => cookie.name === "ulu_admin_2fa_pending",
-              ),
-            )
-            .toBe(false);
-        });
-      }
+        expect(response?.status()).toBe(200);
+        await expect(page).toHaveURL(/\/portal\/login$/);
+        await expect(page.getByRole("heading", { name: "Login", exact: true })).toBeVisible();
+        await expect
+          .poll(async () =>
+            (await page.context().cookies()).some(
+              (cookie) => cookie.name === "ulu_admin_2fa_pending",
+            ),
+          )
+          .toBe(false);
+      });
     }
   });
 

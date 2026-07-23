@@ -2,7 +2,6 @@
 
 import { verifyPassword } from "@/lib/auth/password";
 import {
-  clearAdminPendingTwoFactor,
   clearInitialSetupSession,
   clearSession,
   createInitialSetupSession,
@@ -97,7 +96,6 @@ export async function loginAction(
   recordSuccessfulLogin(identifier);
 
   await clearSession();
-  await clearAdminPendingTwoFactor();
   await clearInitialSetupSession();
 
   if (user.mustChangePassword) {
