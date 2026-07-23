@@ -1,82 +1,69 @@
 import { expect, test } from "@playwright/test";
+import { UserRole } from "@prisma/client";
 
 import { hashPassword } from "@/lib/auth/password";
 import { prisma } from "@/lib/prisma";
 
-const INITIAL_STUDENT_EMAIL = "fixed.initial.student@uluglobalacademy.com";
-const INITIAL_STUDENT_ID = "student-initial-setup-123";
-const INITIAL_PASSWORD = process.env.E2E_INITIAL_PASSWORD ?? "C5InitialStudent123!";
+const fixtureRunId = crypto.randomUUID();
+const INITIAL_STUDENT_EMAIL = `e2e-initial-student-${fixtureRunId}@example.test`;
+const INITIAL_STUDENT_ID = `e2e-initial-student-${fixtureRunId}`;
+const INITIAL_STUDENT_PASSWORD = `Initial-Student-${crypto.randomUUID()}!`;
 const ROTATED_CREDENTIAL = `C5-Rotated-${crypto.randomUUID()}!`;
-const INITIAL_ADMIN_EMAIL = "fixed.admin@uluglobalacademy.com";
-const INITIAL_ADMIN_ID = "admin-123";
+const INITIAL_ADMIN_EMAIL = `e2e-initial-admin-${fixtureRunId}@example.test`;
+const INITIAL_ADMIN_ID = `e2e-initial-admin-${fixtureRunId}`;
 const INITIAL_ADMIN_PASSWORD = `Initial-Admin-${crypto.randomUUID()}!`;
 
-let originalAdminState: {
-  passwordHash: string;
-  mustChangePassword: boolean;
-  isActive: boolean;
-} | null = null;
+const initialPasswordFixtures = [
+  {
+    id: INITIAL_STUDENT_ID,
+    email: INITIAL_STUDENT_EMAIL,
+    fullName: "Initial Password Student",
+    password: INITIAL_STUDENT_PASSWORD,
+    role: UserRole.STUDENT,
+  },
+  {
+    id: INITIAL_ADMIN_ID,
+    email: INITIAL_ADMIN_EMAIL,
+    fullName: "Initial Password Administrator",
+    password: INITIAL_ADMIN_PASSWORD,
+    role: UserRole.ADMIN,
+  },
+];
 
 function assertLocalDatabase() {
   const databaseUrl = new URL(process.env.DATABASE_URL ?? "");
   expect(["localhost", "127.0.0.1"]).toContain(databaseUrl.hostname);
 }
 
-async function restoreInitialPasswordFixture() {
+async function createInitialPasswordFixture(fixture: (typeof initialPasswordFixtures)[number]) {
   assertLocalDatabase();
-  const passwordHash = await hashPassword(INITIAL_PASSWORD);
-  const [, restored] = await prisma.$transaction([
-    prisma.adminAuditLog.deleteMany({
-      where: {
-        OR: [{ targetId: INITIAL_STUDENT_ID }, { actorEmail: INITIAL_STUDENT_EMAIL }],
-      },
-    }),
-    prisma.appUser.updateMany({
-      where: { id: INITIAL_STUDENT_ID, email: INITIAL_STUDENT_EMAIL },
-      data: {
-        passwordHash,
-        mustChangePassword: true,
-        isActive: true,
-      },
-    }),
-  ]);
-  return restored;
+  const passwordHash = await hashPassword(fixture.password);
+  await prisma.appUser.create({
+    data: {
+      id: fixture.id,
+      email: fixture.email,
+      fullName: fixture.fullName,
+      role: fixture.role,
+      passwordHash,
+      mustChangePassword: true,
+      isActive: true,
+    },
+  });
 }
 
-async function resetAdminInitialPasswordFixture() {
-  assertLocalDatabase();
-  const passwordHash = await hashPassword(INITIAL_ADMIN_PASSWORD);
-  const [, restored] = await prisma.$transaction([
-    prisma.adminAuditLog.deleteMany({
-      where: {
-        OR: [{ targetId: INITIAL_ADMIN_ID }, { actorEmail: INITIAL_ADMIN_EMAIL }],
-      },
-    }),
-    prisma.appUser.updateMany({
-      where: { id: INITIAL_ADMIN_ID, email: INITIAL_ADMIN_EMAIL },
-      data: {
-        passwordHash,
-        mustChangePassword: true,
-        isActive: true,
-      },
-    }),
-  ]);
-  return restored;
-}
-
-async function restoreAdminFixture() {
-  if (!originalAdminState) return;
-
+async function cleanupInitialPasswordFixtures() {
+  const fixtureIds = initialPasswordFixtures.map((fixture) => fixture.id);
   await prisma.$transaction([
     prisma.adminAuditLog.deleteMany({
       where: {
-        OR: [{ targetId: INITIAL_ADMIN_ID }, { actorEmail: INITIAL_ADMIN_EMAIL }],
+        OR: [
+          { targetId: { in: fixtureIds } },
+          { actorId: { in: fixtureIds } },
+          { adminUserId: { in: fixtureIds } },
+        ],
       },
     }),
-    prisma.appUser.updateMany({
-      where: { id: INITIAL_ADMIN_ID, email: INITIAL_ADMIN_EMAIL },
-      data: originalAdminState,
-    }),
+    prisma.appUser.deleteMany({ where: { id: { in: fixtureIds } } }),
   ]);
 }
 
@@ -96,27 +83,15 @@ test.describe("Initial password setup", () => {
 
   test.beforeAll(async () => {
     assertLocalDatabase();
-    const [studentRestored, admin] = await Promise.all([
-      restoreInitialPasswordFixture(),
-      prisma.appUser.findUniqueOrThrow({
-        where: { id: INITIAL_ADMIN_ID },
-        select: {
-          passwordHash: true,
-          mustChangePassword: true,
-          isActive: true,
-        },
-      }),
-    ]);
-    originalAdminState = admin;
-    const adminRestored = await resetAdminInitialPasswordFixture();
-    expect(studentRestored.count).toBe(1);
-    expect(adminRestored.count).toBe(1);
+    await Promise.all(initialPasswordFixtures.map(createInitialPasswordFixture));
   });
 
   test.afterAll(async () => {
-    await restoreInitialPasswordFixture();
-    await restoreAdminFixture();
-    await prisma.$disconnect();
+    try {
+      await cleanupInitialPasswordFixtures();
+    } finally {
+      await prisma.$disconnect();
+    }
   });
 
   test("student must rotate the temporary password before entering the portal", async ({
@@ -125,7 +100,7 @@ test.describe("Initial password setup", () => {
   }) => {
     await page.goto("/portal/login");
     await page.getByLabel(/email/i).fill(INITIAL_STUDENT_EMAIL);
-    await page.getByLabel(/password/i).fill(INITIAL_PASSWORD);
+    await page.getByLabel(/password/i).fill(INITIAL_STUDENT_PASSWORD);
     await page.getByRole("button", { name: /login|sign in/i }).click();
     await expect(page).toHaveURL(/\/portal\/setup\/password$/);
     await expect(page.getByRole("heading", { name: /change your password/i })).toBeVisible();
@@ -135,13 +110,13 @@ test.describe("Initial password setup", () => {
     await expect(deniedPage).toHaveURL(/\/portal\/login\?/);
     await deniedPage.close();
 
-    await fillPasswordForm(page, INITIAL_PASSWORD, "too-short");
+    await fillPasswordForm(page, INITIAL_STUDENT_PASSWORD, "too-short");
     await expect(page.getByText(/use at least 12 characters/i).first()).toBeVisible();
 
-    await fillPasswordForm(page, INITIAL_PASSWORD, INITIAL_PASSWORD);
+    await fillPasswordForm(page, INITIAL_STUDENT_PASSWORD, INITIAL_STUDENT_PASSWORD);
     await expect(page.locator('output[role="alert"]')).toContainText(/password you have not used/i);
 
-    await fillPasswordForm(page, INITIAL_PASSWORD, ROTATED_CREDENTIAL);
+    await fillPasswordForm(page, INITIAL_STUDENT_PASSWORD, ROTATED_CREDENTIAL);
     await expect(page).toHaveURL(/\/portal\/student$/);
     await expect(page.getByRole("heading", { name: /student dashboard/i })).toBeVisible();
     await expect(page.getByRole("main")).toContainText(INITIAL_STUDENT_EMAIL);
