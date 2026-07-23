@@ -232,6 +232,22 @@ describe("Portal login error UX", () => {
     expect(screen.getAllByRole("heading", { name: /portal login/i }).length).toBeGreaterThan(0);
   });
 
+  it("renders the login form when a stale administrator pending-2FA cookie exists", async () => {
+    getAdminPendingTwoFactorMock.mockResolvedValue({
+      uid: "admin-1",
+      email: "admin@example.com",
+      challengeId: "challenge-1",
+      authMethod: "password",
+    });
+
+    await renderLoginPage();
+
+    expect(screen.getByRole("heading", { name: "Login" })).toBeTruthy();
+    expect(screen.getByText(/mock login form/i)).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Admin Verification" })).toBeNull();
+    expect(screen.queryByRole("link", { name: /continue 2fa/i })).toBeNull();
+  });
+
   it("rejects inactive teacher login with the same generic failure used for bad credentials", async () => {
     findUserByEmailMock.mockResolvedValue(makeTeacher({ isActive: false }));
 

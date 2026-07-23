@@ -4,14 +4,11 @@ import { UserRole } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createSessionMock = vi.hoisted(() => vi.fn());
-const createAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const findUserByEmailMock = vi.hoisted(() => vi.fn());
-const startAdminTwoFactorChallengeMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({
   createSession: createSessionMock,
-  createAdminPendingTwoFactor: createAdminPendingTwoFactorMock,
 }));
 
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
@@ -20,10 +17,6 @@ vi.mock("@/lib/repositories/admin-audit-repository", () => ({
 
 vi.mock("@/lib/repositories/user-repository", () => ({
   findUserByEmail: findUserByEmailMock,
-}));
-
-vi.mock("@/lib/repositories/admin-two-factor-challenge-repository", () => ({
-  startAdminTwoFactorChallenge: startAdminTwoFactorChallengeMock,
 }));
 
 import { GET } from "../route";
@@ -65,10 +58,6 @@ describe("admin SSO callback route", () => {
       isActive: true,
       mustChangePassword: false,
       twoFactorEnabled: true,
-    });
-    startAdminTwoFactorChallengeMock.mockResolvedValue({
-      id: "challenge-1",
-      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
     });
   });
 
@@ -178,17 +167,15 @@ describe("admin SSO callback route", () => {
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { mustChangePassword: true, twoFactorEnabled: true },
-    { mustChangePassword: false, twoFactorEnabled: false },
-  ])("rejects SSO accounts that are not ready for required TOTP: %o", async (accountState) => {
+  it("rejects an administrator that must complete local password setup", async () => {
     findUserByEmailMock.mockResolvedValueOnce({
       id: "admin-1",
       email: ADMIN_EMAIL,
       fullName: "SSO Admin",
       role: UserRole.ADMIN,
       isActive: true,
-      ...accountState,
+      mustChangePassword: true,
+      twoFactorEnabled: false,
     });
     const ts = String(Date.now());
 
@@ -199,12 +186,14 @@ describe("admin SSO callback route", () => {
     });
 
     expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: "Admin user must complete local password setup",
+    });
     expect(createSessionMock).not.toHaveBeenCalled();
-    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
-    expect(startAdminTwoFactorChallengeMock).not.toHaveBeenCalled();
   });
 
-  it("starts a normal pending TOTP challenge instead of creating an SSO session", async () => {
+  it("creates a final SSO session for an active administrator", async () => {
     const ts = String(Date.now());
     const response = await callSsoCallback({
       email: `  ${ADMIN_EMAIL.toUpperCase()}  `,
@@ -213,28 +202,23 @@ describe("admin SSO callback route", () => {
     });
 
     expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("http://localhost:3000/portal/login/verify-2fa");
+    expect(response.headers.get("location")).toBe("http://localhost:3000/admin");
     expect(findUserByEmailMock).toHaveBeenCalledWith(ADMIN_EMAIL);
-    expect(createSessionMock).not.toHaveBeenCalled();
-    expect(startAdminTwoFactorChallengeMock).toHaveBeenCalledWith({
-      userId: "admin-1",
-      authMethod: "sso",
-    });
-    expect(createAdminPendingTwoFactorMock).toHaveBeenCalledWith({
+    expect(createSessionMock).toHaveBeenCalledWith({
       uid: "admin-1",
+      role: UserRole.ADMIN,
       email: ADMIN_EMAIL,
-      challengeId: "challenge-1",
+      fullName: "SSO Admin",
       authMethod: "sso",
-      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
     });
     expect(createAdminAuditLogMock).toHaveBeenCalledWith({
       adminUserId: "admin-1",
-      action: "ADMIN_SSO_LOGIN_PENDING_2FA",
+      action: "ADMIN_SSO_LOGIN_SUCCESS",
       targetType: "Auth",
       targetId: "admin-1",
       meta: {
         authMethod: "sso",
-        authenticationStage: "pending_two_factor",
+        authenticationStage: "final",
       },
     });
     expect(JSON.stringify(createAdminAuditLogMock.mock.calls)).not.toMatch(

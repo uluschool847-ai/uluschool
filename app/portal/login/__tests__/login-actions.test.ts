@@ -69,7 +69,7 @@ function makeLoginFormData(nextPath = "/admin/security") {
   return formData;
 }
 
-describe("portal login admin 2FA actions", () => {
+describe("portal login administrator actions", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -95,74 +95,36 @@ describe("portal login admin 2FA actions", () => {
     });
   });
 
-  it("routes 2FA-enabled admins to verify-2fa even in development", async () => {
+  it("creates a normal administrator session after valid password authentication", async () => {
     const { loginAction } = await import("@/app/portal/login/actions");
 
     await expect(loginAction({ success: false, message: "" }, makeLoginFormData())).rejects.toThrow(
-      "REDIRECT:/portal/login/verify-2fa?next=%2Fadmin%2Fsecurity",
+      "REDIRECT:/admin/security",
     );
 
-    expect(createAdminPendingTwoFactorMock).toHaveBeenCalledWith({
+    expect(createSessionMock).toHaveBeenCalledWith({
       uid: "admin-1",
       email: "admin@example.com",
-      challengeId: "challenge-1",
-      authMethod: "password",
-      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
-    });
-    expect(startAdminTwoFactorChallengeMock).toHaveBeenCalledWith({
-      userId: "admin-1",
+      fullName: "Admin User",
+      role: UserRole.ADMIN,
       authMethod: "password",
     });
-    expectAllAuthCookiesClearedBefore(createAdminPendingTwoFactorMock);
-    expect(createSessionMock).not.toHaveBeenCalled();
+    expectAllAuthCookiesClearedBefore(createSessionMock);
     expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
+    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
+    expect(startAdminTwoFactorChallengeMock).not.toHaveBeenCalled();
     expect(logAuthEventMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        eventType: "ADMIN_LOGIN_PASSWORD_VERIFIED",
+        eventType: "LOGIN_SUCCESS",
         userId: "admin-1",
         identifier: "admin@example.com",
+        metadata: { authenticationStage: "final", authMethod: "password" },
       }),
     );
-    expect(
-      logAuthEventMock.mock.calls.some(([event]) => event?.eventType === "LOGIN_SUCCESS"),
-    ).toBe(false);
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
   });
 
-  it.each(["development", "production"])(
-    "routes an admin without configured 2FA to restricted setup in %s",
-    async (environment) => {
-      process.env.NODE_ENV = environment;
-      findUserByEmailMock.mockResolvedValueOnce({
-        id: "admin-1",
-        email: "admin@example.com",
-        fullName: "Admin User",
-        role: UserRole.ADMIN,
-        isActive: true,
-        passwordHash: "hashed",
-        mustChangePassword: false,
-        twoFactorEnabled: false,
-        twoFactorSecret: null,
-      });
-      const { loginAction } = await import("@/app/portal/login/actions");
-
-      await expect(
-        loginAction({ success: false, message: "" }, makeLoginFormData()),
-      ).rejects.toThrow("REDIRECT:/portal/setup/2fa");
-
-      expectAllAuthCookiesClearedBefore(createInitialSetupSessionMock);
-      expect(createInitialSetupSessionMock).toHaveBeenCalledWith({
-        uid: "admin-1",
-        email: "admin@example.com",
-        role: UserRole.ADMIN,
-        nextPath: "/admin/security",
-      });
-      expect(createSessionMock).not.toHaveBeenCalled();
-      expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
-    },
-  );
-
-  it("routes password setup before admin 2FA enrollment", async () => {
+  it("routes password setup before creating an administrator session", async () => {
     findUserByEmailMock.mockResolvedValueOnce({
       id: "admin-1",
       email: "admin@example.com",

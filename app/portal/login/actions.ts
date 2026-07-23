@@ -5,13 +5,11 @@ import {
   clearAdminPendingTwoFactor,
   clearInitialSetupSession,
   clearSession,
-  createAdminPendingTwoFactor,
   createInitialSetupSession,
   createSession,
   getPortalRedirectPath,
 } from "@/lib/auth/session";
 import { logAuthEvent } from "@/lib/repositories/admin-audit-repository";
-import { startAdminTwoFactorChallenge } from "@/lib/repositories/admin-two-factor-challenge-repository";
 import { findUserByEmail } from "@/lib/repositories/user-repository";
 import {
   checkLoginRateLimit,
@@ -19,7 +17,6 @@ import {
   recordSuccessfulLogin,
 } from "@/lib/security/rate-limit";
 import { type LoginFormState, loginSchema } from "@/lib/validations/auth";
-import { UserRole } from "@prisma/client";
 import { redirect } from "next/navigation";
 
 export async function loginAction(
@@ -103,88 +100,28 @@ export async function loginAction(
   await clearAdminPendingTwoFactor();
   await clearInitialSetupSession();
 
-  const require2FA = (process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false";
-  const adminNeedsEnrollment = user.role === UserRole.ADMIN && require2FA && !user.twoFactorEnabled;
-
-  if (user.mustChangePassword || adminNeedsEnrollment) {
-    if (user.role === UserRole.ADMIN) {
-      await logAuthEvent({
-        eventType: "ADMIN_LOGIN_PASSWORD_VERIFIED",
-        userId: user.id,
-        identifier,
-        metadata: { authenticationStage: "password_verified" },
-        timestamp: new Date(),
-      });
-    }
+  if (user.mustChangePassword) {
     await createInitialSetupSession({
       uid: user.id,
       email: user.email,
       role: user.role,
       ...(nextPath ? { nextPath } : {}),
     });
-    redirect(user.mustChangePassword ? "/portal/setup/password" : "/portal/setup/2fa");
+    redirect("/portal/setup/password");
   }
 
-  if (user.role === UserRole.ADMIN) {
-    if (require2FA) {
-      await logAuthEvent({
-        eventType: "ADMIN_LOGIN_PASSWORD_VERIFIED",
-        userId: user.id,
-        identifier,
-        metadata: { authenticationStage: "password_verified" },
-        timestamp: new Date(),
-      });
-
-      const challenge = await startAdminTwoFactorChallenge({
-        userId: user.id,
-        authMethod: "password",
-      });
-      await createAdminPendingTwoFactor({
-        uid: user.id,
-        email: user.email,
-        challengeId: challenge.id,
-        authMethod: "password",
-        expiresAt: challenge.expiresAt,
-      });
-
-      const nextQuery = nextPath ? `?next=${encodeURIComponent(nextPath)}` : "";
-      redirect(`/portal/login/verify-2fa${nextQuery}`);
-    }
-
-    // 2FA Disabled
-    await createSession({
-      uid: user.id,
-      role: user.role,
-      email: user.email,
-      fullName: user.fullName,
-      mfaVerified: false,
-      authMethod: "password",
-    });
-    await logAuthEvent({
-      eventType: "LOGIN_SUCCESS",
-      userId: user.id,
-      identifier,
-      metadata: { authenticationStage: "password_only", mfaVerified: false },
-      timestamp: new Date(),
-    });
-
-    redirect(getPortalRedirectPath(user.role, nextPath));
-  }
-
-  // Non-Admin Login
   await createSession({
     uid: user.id,
     role: user.role,
     email: user.email,
     fullName: user.fullName,
-    mfaVerified: true,
     authMethod: "password",
   });
   await logAuthEvent({
     eventType: "LOGIN_SUCCESS",
     userId: user.id,
     identifier,
-    metadata: { authenticationStage: "final", mfaVerified: true },
+    metadata: { authenticationStage: "final", authMethod: "password" },
     timestamp: new Date(),
   });
 

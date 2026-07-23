@@ -131,7 +131,7 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
       "REDIRECT:/portal/student/assignments?view=past",
     );
     expect(createSessionMock).toHaveBeenCalledWith(
-      expect.objectContaining({ uid: "user-1", role: "STUDENT", mfaVerified: true }),
+      expect.objectContaining({ uid: "user-1", role: "STUDENT", authMethod: "password" }),
     );
     expectAllAuthCookiesClearedBefore(createSessionMock);
     expect(createInitialSetupSessionMock).not.toHaveBeenCalled();

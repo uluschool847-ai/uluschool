@@ -85,11 +85,10 @@ function makeLoginFormData() {
   return formData;
 }
 
-describe("app/student-portal/actions.ts 2FA env defaults", () => {
+describe("app/student-portal/actions.ts login actions", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    Reflect.deleteProperty(process.env, "ADMIN_REQUIRE_2FA");
     (process.env as Record<string, string | undefined>).NODE_ENV = "development";
     findUserByEmailMock.mockResolvedValue({
       id: "admin-1",
@@ -106,47 +105,31 @@ describe("app/student-portal/actions.ts 2FA env defaults", () => {
     createSessionMock.mockResolvedValue(undefined);
     createAdminAuditLogMock.mockResolvedValue(undefined);
     logAuthEventMock.mockResolvedValue(undefined);
-    startAdminTwoFactorChallengeMock.mockResolvedValue({
-      id: "challenge-1",
-      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
-    });
   });
 
-  it("routes an admin without configured 2FA to restricted setup by default", async () => {
-    const { loginPortal } = await import("../../../app/student-portal/actions");
-
-    await expect(loginPortal({ success: false, message: "" }, makeLoginFormData())).rejects.toThrow(
-      "REDIRECT:/portal/setup/2fa",
-    );
-
-    expectAllAuthCookiesClearedBefore(createInitialSetupSessionMock);
-    expect(createInitialSetupSessionMock).toHaveBeenCalledWith({
-      uid: "admin-1",
-      email: "admin@uluglobalacademy.com",
-      role: "ADMIN",
-    });
-    expect(createSessionMock).not.toHaveBeenCalled();
-    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
-    expect(startAdminTwoFactorChallengeMock).not.toHaveBeenCalled();
-    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
-  });
-
-  it("allows admin login without 2FA when ADMIN_REQUIRE_2FA=false", async () => {
-    process.env.ADMIN_REQUIRE_2FA = "false";
+  it("creates an administrator password session without an ADMIN_REQUIRE_2FA setting", async () => {
     const { loginPortal } = await import("../../../app/student-portal/actions");
 
     await expect(loginPortal({ success: false, message: "" }, makeLoginFormData())).rejects.toThrow(
       "REDIRECT:/admin",
     );
 
-    expect(createSessionMock).toHaveBeenCalledTimes(1);
     expectAllAuthCookiesClearedBefore(createSessionMock);
+    expect(createSessionMock).toHaveBeenCalledWith({
+      uid: "admin-1",
+      email: "admin@uluglobalacademy.com",
+      fullName: "Admin",
+      role: "ADMIN",
+      authMethod: "password",
+    });
     expect(createInitialSetupSessionMock).not.toHaveBeenCalled();
     expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
     expect(startAdminTwoFactorChallengeMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
     expect(logAuthEventMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: "LOGIN_SUCCESS",
+        metadata: { authenticationStage: "final", authMethod: "password" },
       }),
     );
   });
