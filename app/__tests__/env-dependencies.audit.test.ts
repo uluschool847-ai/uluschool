@@ -1,7 +1,7 @@
 import "../../__tests__/env-dependencies.test";
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
@@ -118,6 +118,19 @@ function usesRequiredPortalPasswordFallback(content: string) {
 }
 
 describe("Google Calendar environment and dependency readiness", () => {
+  it("does not ship application-managed 2FA routes or runtime modules", () => {
+    const removedPaths = [
+      "app/portal/setup/2fa",
+      "app/portal/login/verify-2fa",
+      "app/(admin)/admin/security",
+      "lib/auth/two-factor.ts",
+      "lib/repositories/admin-two-factor-challenge-repository.ts",
+    ];
+    for (const relativePath of removedPaths) {
+      expect(existsSync(resolve(process.cwd(), relativePath))).toBe(false);
+    }
+  });
+
   it(".env.example declares every Google Calendar integration variable", () => {
     const envExample = readEnvExample();
     const missing = GOOGLE_CALENDAR_ENV_KEYS.filter(

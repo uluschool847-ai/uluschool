@@ -97,7 +97,6 @@ import {
   listSubmissionsForAssignmentByTeacher as listScopedSubmissionsForAssignmentByTeacher,
 } from "@/lib/repositories/submission-repository";
 import {
-  consumeAdminBackupCode,
   getChildren,
   getStudentProfile,
   getUsersByIds,
@@ -265,7 +264,6 @@ export async function auditRepositoryUsageConnections() {
   await getTeacherClassDetails("teacher-1", "class-1");
   await getUsersByIds(["student-1"]);
   await listUsersByRole("STUDENT");
-  await consumeAdminBackupCode("admin-1", ["backup-code-hash"]);
   await getChildren("parent-1");
   await getStudentProfile("student-1");
 }
