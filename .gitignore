@@ -4,6 +4,7 @@ out
 coverage
 test-results
 .e2e-debug
+.worktrees/
 *.log
 *.tsbuildinfo
 public/uploads
