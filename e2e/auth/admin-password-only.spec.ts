@@ -7,11 +7,14 @@ import { prisma } from "@/lib/prisma";
 const fixtureRunId = crypto.randomUUID();
 const configuredAdminId = `e2e-password-admin-configured-${fixtureRunId}`;
 const bootstrapAdminId = `e2e-password-admin-bootstrap-${fixtureRunId}`;
+const studentId = `e2e-password-student-${fixtureRunId}`;
 const configuredAdminEmail = `e2e-password-admin-configured-${fixtureRunId}@example.test`;
 const bootstrapAdminEmail = `e2e-password-admin-bootstrap-${fixtureRunId}@example.test`;
+const studentEmail = `e2e-password-student-${fixtureRunId}@example.test`;
 const password = `Configured-Admin-${crypto.randomUUID()}!`;
 const temporaryPassword = `Bootstrap-Admin-${crypto.randomUUID()}!`;
 const rotatedPassword = `Rotated-Admin-${crypto.randomUUID()}!`;
+const studentPassword = `Student-Password-${crypto.randomUUID()}!`;
 
 function assertLocalDatabase() {
   const databaseUrl = new URL(process.env.DATABASE_URL ?? "");
@@ -38,7 +41,7 @@ async function createAdminFixture(input: {
 }
 
 async function cleanupAdminFixtures() {
-  const fixtureIds = [configuredAdminId, bootstrapAdminId];
+  const fixtureIds = [configuredAdminId, bootstrapAdminId, studentId];
   await prisma.$transaction([
     prisma.adminAuditLog.deleteMany({
       where: {
@@ -51,6 +54,20 @@ async function cleanupAdminFixtures() {
     }),
     prisma.appUser.deleteMany({ where: { id: { in: fixtureIds } } }),
   ]);
+}
+
+async function createStudentFixture() {
+  await prisma.appUser.create({
+    data: {
+      id: studentId,
+      email: studentEmail,
+      fullName: `Password-only Student ${studentId}`,
+      passwordHash: await hashPassword(studentPassword),
+      role: UserRole.STUDENT,
+      isActive: true,
+      mustChangePassword: false,
+    },
+  });
 }
 
 async function login(page: import("@playwright/test").Page, email: string, credential: string) {
@@ -105,6 +122,7 @@ test.describe("Administrator password-only login", () => {
         password: temporaryPassword,
         mustChangePassword: true,
       }),
+      createStudentFixture(),
     ]);
   });
 
@@ -120,7 +138,7 @@ test.describe("Administrator password-only login", () => {
     await login(page, configuredAdminEmail, password);
 
     await expect(page).toHaveURL(/\/admin(?:\?|$)/);
-    await expect(page.getByRole("heading", { name: /admin dashboard/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Admin Dashboard", exact: true })).toBeVisible();
   });
 
   test("a bootstrap admin changes the temporary password and reaches admin directly", async ({
@@ -132,11 +150,24 @@ test.describe("Administrator password-only login", () => {
     await changePassword(page, temporaryPassword, rotatedPassword);
     await expect(page).toHaveURL(/\/admin(?:\?|$)/);
 
-    await page.getByRole("button", { name: /logout|sign out/i }).click();
-    await expect(page).toHaveURL(/\/portal\/login(?:\?|$)/);
+    await page.getByRole("button", { name: "Log Out", exact: true }).click();
+    await expect(page).toHaveURL(/\/$/);
 
     await login(page, bootstrapAdminEmail, rotatedPassword);
     await expect(page).toHaveURL(/\/admin(?:\?|$)/);
+  });
+
+  test("a student password login targeting admin stays in the student portal", async ({ page }) => {
+    await login(page, studentEmail, studentPassword);
+
+    await expect(page).toHaveURL(/\/portal\/student$/);
+    await expect(page).not.toHaveURL(/\/admin(?:\?|$)/);
+    await expect(
+      page.getByRole("heading", { name: "Student Dashboard", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Admin Dashboard", exact: true })).toHaveCount(
+      0,
+    );
   });
 
   test("retired 2FA routes clear stale pending cookies and redirect to login", async ({ page }) => {
