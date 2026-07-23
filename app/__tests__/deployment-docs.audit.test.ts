@@ -51,8 +51,8 @@ describe("deployment runbook contract", () => {
     const requiredText = [
       "/enrol",
       "/contact",
-      "TOTP",
-      "backup codes",
+      "Sign in with the bootstrap credential, rotate it, sign out, and sign in again with the new password.",
+      "Password rotation cannot be skipped, no authenticator prompt appears, and the second login reaches `/admin`.",
       "one-time credential",
       "student",
       "parent",
