@@ -33,9 +33,6 @@ type ExistingUser = {
   role: UserRole;
   isActive: boolean;
   mustChangePassword: boolean;
-  twoFactorEnabled: boolean;
-  twoFactorSecret: string | null;
-  twoFactorBackupCodes: string[];
 };
 
 type CreatedUser = {
@@ -87,9 +84,6 @@ type BootstrapUserFindArgs = {
     role: true;
     isActive: true;
     mustChangePassword: true;
-    twoFactorEnabled: true;
-    twoFactorSecret: true;
-    twoFactorBackupCodes: true;
   };
 };
 
@@ -244,9 +238,6 @@ function isExpectedBootstrapWinner(
     user.role === UserRole.ADMIN &&
     user.isActive &&
     user.mustChangePassword &&
-    !user.twoFactorEnabled &&
-    user.twoFactorSecret === null &&
-    user.twoFactorBackupCodes.length === 0 &&
     isExpectedBootstrapAudit(audit, user.id)
   );
 }
@@ -258,9 +249,6 @@ const bootstrapUserSelect = {
   role: true,
   isActive: true,
   mustChangePassword: true,
-  twoFactorEnabled: true,
-  twoFactorSecret: true,
-  twoFactorBackupCodes: true,
 } as const;
 
 const bootstrapAuditSelect = {

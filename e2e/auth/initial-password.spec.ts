@@ -28,9 +28,6 @@ async function restoreInitialPasswordFixture() {
         passwordHash,
         mustChangePassword: true,
         isActive: true,
-        twoFactorEnabled: false,
-        twoFactorSecret: null,
-        twoFactorBackupCodes: [],
       },
     }),
   ]);

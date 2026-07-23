@@ -13,6 +13,15 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 type UserRepositoryModule = {
+  findUserByEmail: (email: string) => Promise<{
+    id: string;
+    email: string;
+    fullName: string;
+    role: "ADMIN" | "TEACHER" | "PARENT" | "STUDENT";
+    passwordHash: string;
+    mustChangePassword: boolean;
+    isActive: boolean;
+  } | null>;
   findUserById: (userId: string) => Promise<{
     id: string;
     email: string;
@@ -33,9 +42,6 @@ type UserRepositoryModule = {
     passwordHash: string;
     mustChangePassword: boolean;
     isActive: boolean;
-    twoFactorEnabled: boolean;
-    twoFactorSecret: string | null;
-    twoFactorBackupCodes: string[];
   } | null>;
   listUsersByRole: (role: UserRole) => Promise<
     Array<{
@@ -71,6 +77,43 @@ async function loadUserRepository() {
 describe("user-repository lookup contract", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("findUserByEmail selects only password authentication fields", async () => {
+    prismaMock.appUser.findUnique.mockResolvedValueOnce({
+      id: "admin-1",
+      email: "admin@example.com",
+      fullName: "Admin User",
+      role: "ADMIN",
+      passwordHash: "password-hash",
+      mustChangePassword: true,
+      isActive: true,
+    });
+
+    const { findUserByEmail } = await loadUserRepository();
+    const result = await findUserByEmail("Admin@Example.com");
+
+    expect(prismaMock.appUser.findUnique).toHaveBeenCalledWith({
+      where: { email: "admin@example.com" },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        passwordHash: true,
+        mustChangePassword: true,
+        isActive: true,
+      },
+    });
+    expect(result).toEqual({
+      id: "admin-1",
+      email: "admin@example.com",
+      fullName: "Admin User",
+      role: "ADMIN",
+      passwordHash: "password-hash",
+      mustChangePassword: true,
+      isActive: true,
+    });
   });
 
   it("findUserById selects the edit-page contract including phoneWhatsapp and timestamps", async () => {
@@ -128,9 +171,6 @@ describe("user-repository lookup contract", () => {
       passwordHash: "password-hash",
       mustChangePassword: true,
       isActive: true,
-      twoFactorEnabled: false,
-      twoFactorSecret: "totp-secret",
-      twoFactorBackupCodes: ["backup-code-hash"],
     });
 
     const { findUserForInitialSetup } = await loadUserRepository();
@@ -146,9 +186,6 @@ describe("user-repository lookup contract", () => {
         passwordHash: true,
         mustChangePassword: true,
         isActive: true,
-        twoFactorEnabled: true,
-        twoFactorSecret: true,
-        twoFactorBackupCodes: true,
       },
     });
     expect(result).toEqual({
@@ -159,9 +196,6 @@ describe("user-repository lookup contract", () => {
       passwordHash: "password-hash",
       mustChangePassword: true,
       isActive: true,
-      twoFactorEnabled: false,
-      twoFactorSecret: "totp-secret",
-      twoFactorBackupCodes: ["backup-code-hash"],
     });
   });
 

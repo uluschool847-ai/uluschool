@@ -1,13 +1,11 @@
 "use server";
 
-import { UserRole } from "@prisma/client";
 import { redirect } from "next/navigation";
 
 import {
   clearAdminPendingTwoFactor,
   clearInitialSetupSession,
   clearSession,
-  createAdminPendingTwoFactor,
   createSession,
   getInitialSetupSession,
   getPortalRedirectPath,
@@ -16,8 +14,6 @@ import {
   InitialPasswordChangeError,
   changeInitialPassword,
 } from "@/lib/repositories/account-setup-repository";
-import { logAuthEvent } from "@/lib/repositories/admin-audit-repository";
-import { startAdminTwoFactorChallenge } from "@/lib/repositories/admin-two-factor-challenge-repository";
 import {
   type InitialPasswordFormState,
   getSafeInitialPasswordFieldErrors,
@@ -97,44 +93,13 @@ export async function changeInitialPasswordAction(
     };
   }
 
-  const requireAdminTwoFactor = (process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false";
-  if (user.role !== UserRole.ADMIN || !requireAdminTwoFactor) {
-    await clearAllAuthCookies();
-    await createSession({
-      uid: user.id,
-      role: user.role,
-      email: user.email,
-      fullName: user.fullName,
-      mfaVerified: user.role !== UserRole.ADMIN,
-      authMethod: "password",
-    });
-    redirect(getPortalRedirectPath(user.role, setup.nextPath));
-  }
-
-  if (user.twoFactorEnabled) {
-    await clearAllAuthCookies();
-    await logAuthEvent({
-      eventType: "ADMIN_LOGIN_PASSWORD_VERIFIED",
-      userId: user.id,
-      identifier: user.email,
-      metadata: { authenticationStage: "post_password_setup" },
-      timestamp: new Date(),
-    });
-    const challenge = await startAdminTwoFactorChallenge({
-      userId: user.id,
-      authMethod: "password",
-    });
-    await createAdminPendingTwoFactor({
-      uid: user.id,
-      email: user.email,
-      challengeId: challenge.id,
-      authMethod: "password",
-      expiresAt: challenge.expiresAt,
-    });
-    redirect("/portal/login/verify-2fa");
-  }
-
-  await clearSession();
-  await clearAdminPendingTwoFactor();
-  redirect("/portal/setup/2fa");
+  await clearAllAuthCookies();
+  await createSession({
+    uid: user.id,
+    role: user.role,
+    email: user.email,
+    fullName: user.fullName,
+    authMethod: "password",
+  });
+  redirect(getPortalRedirectPath(user.role, setup.nextPath));
 }

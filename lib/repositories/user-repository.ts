@@ -1,7 +1,6 @@
-import { Prisma, UserRole } from "@prisma/client";
+import { Prisma, type UserRole } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 
 const RETRYABLE_PRISMA_CODES = new Set(["P1001", "P1017", "P2024"]);
 const RETRY_DELAYS_MS = [200, 500];
@@ -50,6 +49,15 @@ export async function findUserByEmail(email: string) {
   return withPrismaRetry(() =>
     prisma.appUser.findUnique({
       where: { email: email.toLowerCase() },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        passwordHash: true,
+        mustChangePassword: true,
+        isActive: true,
+      },
     }),
   );
 }
@@ -86,9 +94,6 @@ export async function findUserForInitialSetup(userId: string) {
         passwordHash: true,
         mustChangePassword: true,
         isActive: true,
-        twoFactorEnabled: true,
-        twoFactorSecret: true,
-        twoFactorBackupCodes: true,
       },
     }),
   );
@@ -124,143 +129,6 @@ export async function listUsersByRole(role: UserRole) {
         phoneWhatsapp: true,
       },
       orderBy: { fullName: "asc" },
-    }),
-  );
-}
-
-export async function findAdminUserForTwoFactor(userId: string) {
-  return withPrismaRetry(() =>
-    prisma.appUser.findFirst({
-      where: {
-        id: userId,
-        role: UserRole.ADMIN,
-        isActive: true,
-      },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        role: true,
-        twoFactorEnabled: true,
-        twoFactorSecret: true,
-        twoFactorBackupCodes: true,
-      },
-    }),
-  );
-}
-
-export async function saveAdminTwoFactorSecret(userId: string, secret: string) {
-  return withPrismaRetry(() =>
-    prisma.appUser.update({
-      where: { id: userId },
-      data: {
-        twoFactorSecret: secret,
-        twoFactorEnabled: false,
-        twoFactorBackupCodes: [],
-      },
-    }),
-  );
-}
-
-export async function enableAdminTwoFactorWithAudit(input: {
-  userId: string;
-  actorId: string;
-  secret: string;
-  backupCodeHashes: string[];
-}) {
-  return prisma.$transaction(
-    async (transaction) => {
-      const admin = await transaction.appUser.findFirst({
-        where: {
-          id: input.userId,
-          role: UserRole.ADMIN,
-          isActive: true,
-        },
-        select: {
-          id: true,
-          twoFactorEnabled: true,
-          twoFactorSecret: true,
-        },
-      });
-      if (!admin || input.actorId !== admin.id || admin.twoFactorSecret !== input.secret) {
-        throw new Error("Administrator two-factor setup state is invalid.");
-      }
-
-      await transaction.appUser.update({
-        where: { id: admin.id },
-        data: {
-          twoFactorEnabled: true,
-          twoFactorSecret: input.secret,
-          twoFactorBackupCodes: input.backupCodeHashes,
-        },
-      });
-      await createAdminAuditLog(
-        {
-          adminUserId: input.actorId,
-          action: "ADMIN_2FA_ENABLED",
-          targetType: "AppUser",
-          targetId: admin.id,
-          before: { twoFactorEnabled: admin.twoFactorEnabled },
-          after: { twoFactorEnabled: true },
-          meta: { actorRole: UserRole.ADMIN },
-        },
-        transaction,
-      );
-    },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-  );
-}
-
-export async function disableAdminTwoFactorWithAudit(input: { userId: string; actorId: string }) {
-  return prisma.$transaction(
-    async (transaction) => {
-      const admin = await transaction.appUser.findFirst({
-        where: {
-          id: input.userId,
-          role: UserRole.ADMIN,
-          isActive: true,
-        },
-        select: {
-          id: true,
-          twoFactorEnabled: true,
-        },
-      });
-      if (!admin || input.actorId !== admin.id || !admin.twoFactorEnabled) {
-        throw new Error("Administrator two-factor setup state is invalid.");
-      }
-
-      await transaction.appUser.update({
-        where: { id: admin.id },
-        data: {
-          twoFactorEnabled: false,
-          twoFactorSecret: null,
-          twoFactorBackupCodes: [],
-        },
-      });
-      await createAdminAuditLog(
-        {
-          adminUserId: input.actorId,
-          action: "ADMIN_2FA_DISABLED",
-          targetType: "AppUser",
-          targetId: admin.id,
-          before: { twoFactorEnabled: true },
-          after: { twoFactorEnabled: false },
-          meta: { actorRole: UserRole.ADMIN },
-        },
-        transaction,
-      );
-    },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-  );
-}
-
-export async function consumeAdminBackupCode(userId: string, remainingCodeHashes: string[]) {
-  return withPrismaRetry(() =>
-    prisma.appUser.update({
-      where: { id: userId },
-      data: {
-        twoFactorBackupCodes: remainingCodeHashes,
-      },
     }),
   );
 }

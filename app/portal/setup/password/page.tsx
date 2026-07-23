@@ -1,4 +1,3 @@
-import { UserRole } from "@prisma/client";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
@@ -29,11 +28,6 @@ export default async function InitialPasswordSetupPage() {
   }
 
   if (!user.mustChangePassword) {
-    const requireAdminTwoFactor = (process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false";
-    if (user.role === UserRole.ADMIN && requireAdminTwoFactor && !user.twoFactorEnabled) {
-      redirect("/portal/setup/2fa");
-    }
-
     redirect("/portal/login");
   }
 

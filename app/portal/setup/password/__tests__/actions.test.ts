@@ -11,10 +11,7 @@ const clearSessionMock = vi.hoisted(() => vi.fn());
 const clearAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const createSessionMock = vi.hoisted(() => vi.fn());
-const createAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const getPortalRedirectPathMock = vi.hoisted(() => vi.fn());
-const startAdminTwoFactorChallengeMock = vi.hoisted(() => vi.fn());
-const logAuthEventMock = vi.hoisted(() => vi.fn());
 const accountSetupMocks = vi.hoisted(() => {
   class InitialPasswordChangeError extends Error {
     constructor(public readonly code: string) {
@@ -36,21 +33,12 @@ vi.mock("@/lib/auth/session", () => ({
   clearAdminPendingTwoFactor: clearAdminPendingTwoFactorMock,
   clearInitialSetupSession: clearInitialSetupSessionMock,
   createSession: createSessionMock,
-  createAdminPendingTwoFactor: createAdminPendingTwoFactorMock,
   getPortalRedirectPath: getPortalRedirectPathMock,
 }));
 
 vi.mock("@/lib/repositories/account-setup-repository", () => ({
   changeInitialPassword: accountSetupMocks.changeInitialPassword,
   InitialPasswordChangeError: accountSetupMocks.InitialPasswordChangeError,
-}));
-
-vi.mock("@/lib/repositories/admin-two-factor-challenge-repository", () => ({
-  startAdminTwoFactorChallenge: startAdminTwoFactorChallengeMock,
-}));
-
-vi.mock("@/lib/repositories/admin-audit-repository", () => ({
-  logAuthEvent: logAuthEventMock,
 }));
 
 type PasswordActionModule = typeof import("@/app/portal/setup/password/actions");
@@ -85,7 +73,6 @@ function safeUser(overrides: Record<string, unknown> = {}) {
     email: "student@example.com",
     fullName: "Student One",
     role: UserRole.STUDENT,
-    twoFactorEnabled: false,
     ...overrides,
   };
 }
@@ -95,7 +82,6 @@ function expectNoCookieOrSessionSideEffects() {
   expect(clearAdminPendingTwoFactorMock).not.toHaveBeenCalled();
   expect(clearInitialSetupSessionMock).not.toHaveBeenCalled();
   expect(createSessionMock).not.toHaveBeenCalled();
-  expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
 }
 
 function expectAllCookiesClearedBefore(issueMock: ReturnType<typeof vi.fn>) {
@@ -113,15 +99,9 @@ describe("changeInitialPasswordAction", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    Reflect.deleteProperty(process.env, "ADMIN_REQUIRE_2FA");
     getInitialSetupSessionMock.mockResolvedValue(setupSession());
     accountSetupMocks.changeInitialPassword.mockResolvedValue(safeUser());
     getPortalRedirectPathMock.mockReturnValue("/portal/student/assignments");
-    startAdminTwoFactorChallengeMock.mockResolvedValue({
-      id: "challenge-1",
-      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
-    });
-    logAuthEventMock.mockResolvedValue(undefined);
   });
 
   it.each(["missing", "expired"])(
@@ -323,14 +303,12 @@ describe("changeInitialPasswordAction", () => {
       role: UserRole.STUDENT,
       email: "student@example.com",
       fullName: "Student One",
-      mfaVerified: true,
       authMethod: "password",
     });
     expect(createSessionMock).toHaveBeenCalledOnce();
-    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
   });
 
-  it("hands a configured required admin to pending TOTP after clearing all auth cookies", async () => {
+  it("creates an administrator session immediately after password rotation", async () => {
     getInitialSetupSessionMock.mockResolvedValueOnce(
       setupSession({ uid: "admin-1", email: "admin@example.com", role: UserRole.ADMIN }),
     );
@@ -340,69 +318,6 @@ describe("changeInitialPasswordAction", () => {
         email: "admin@example.com",
         fullName: "Admin One",
         role: UserRole.ADMIN,
-        twoFactorEnabled: true,
-      }),
-    );
-    const { changeInitialPasswordAction } = await loadAction();
-
-    await expect(
-      changeInitialPasswordAction({ success: false, message: "" }, validForm()),
-    ).rejects.toThrow("REDIRECT:/portal/login/verify-2fa");
-
-    expectAllCookiesClearedBefore(createAdminPendingTwoFactorMock);
-    expect(createAdminPendingTwoFactorMock).toHaveBeenCalledWith({
-      uid: "admin-1",
-      email: "admin@example.com",
-      challengeId: "challenge-1",
-      authMethod: "password",
-      expiresAt: new Date("2030-01-01T00:10:00.000Z"),
-    });
-    expect(startAdminTwoFactorChallengeMock).toHaveBeenCalledWith({
-      userId: "admin-1",
-      authMethod: "password",
-    });
-    expect(createAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
-    expect(createSessionMock).not.toHaveBeenCalled();
-  });
-
-  it("retains the setup cookie for an unconfigured required admin 2FA handoff", async () => {
-    getInitialSetupSessionMock.mockResolvedValueOnce(
-      setupSession({ uid: "admin-1", email: "admin@example.com", role: UserRole.ADMIN }),
-    );
-    accountSetupMocks.changeInitialPassword.mockResolvedValueOnce(
-      safeUser({
-        id: "admin-1",
-        email: "admin@example.com",
-        fullName: "Admin One",
-        role: UserRole.ADMIN,
-        twoFactorEnabled: false,
-      }),
-    );
-    const { changeInitialPasswordAction } = await loadAction();
-
-    await expect(
-      changeInitialPasswordAction({ success: false, message: "" }, validForm()),
-    ).rejects.toThrow("REDIRECT:/portal/setup/2fa");
-
-    expect(clearSessionMock).toHaveBeenCalledOnce();
-    expect(clearAdminPendingTwoFactorMock).toHaveBeenCalledOnce();
-    expect(clearInitialSetupSessionMock).not.toHaveBeenCalled();
-    expect(createSessionMock).not.toHaveBeenCalled();
-    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
-  });
-
-  it("creates a normal admin session when ADMIN_REQUIRE_2FA=false", async () => {
-    process.env.ADMIN_REQUIRE_2FA = "false";
-    getInitialSetupSessionMock.mockResolvedValueOnce(
-      setupSession({ uid: "admin-1", email: "admin@example.com", role: UserRole.ADMIN }),
-    );
-    accountSetupMocks.changeInitialPassword.mockResolvedValueOnce(
-      safeUser({
-        id: "admin-1",
-        email: "admin@example.com",
-        fullName: "Admin One",
-        role: UserRole.ADMIN,
-        twoFactorEnabled: false,
       }),
     );
     getPortalRedirectPathMock.mockReturnValueOnce("/admin");
@@ -418,10 +333,8 @@ describe("changeInitialPasswordAction", () => {
       role: UserRole.ADMIN,
       email: "admin@example.com",
       fullName: "Admin One",
-      mfaVerified: false,
       authMethod: "password",
     });
     expect(createSessionMock).toHaveBeenCalledOnce();
-    expect(createAdminPendingTwoFactorMock).not.toHaveBeenCalled();
   });
 });

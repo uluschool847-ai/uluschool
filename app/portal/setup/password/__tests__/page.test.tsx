@@ -47,9 +47,6 @@ function setupUser(overrides: Record<string, unknown> = {}) {
     passwordHash: "server-only-hash",
     mustChangePassword: true,
     isActive: true,
-    twoFactorEnabled: false,
-    twoFactorSecret: null,
-    twoFactorBackupCodes: [],
     ...overrides,
   };
 }
@@ -58,7 +55,6 @@ describe("Initial password setup page", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    Reflect.deleteProperty(process.env, "ADMIN_REQUIRE_2FA");
     getInitialSetupSessionMock.mockResolvedValue(setupSession());
     findUserForInitialSetupMock.mockResolvedValue(setupUser());
   });
@@ -105,7 +101,7 @@ describe("Initial password setup page", () => {
     expect(document.body.textContent).not.toContain("server-only-hash");
   });
 
-  it("redirects an admin with completed rotation but required unconfigured 2FA to enrollment", async () => {
+  it("redirects completed admin setup back to login", async () => {
     getInitialSetupSessionMock.mockResolvedValueOnce(
       setupSession({ uid: "admin-1", email: "admin@example.com", role: UserRole.ADMIN }),
     );
@@ -115,32 +111,11 @@ describe("Initial password setup page", () => {
         email: "admin@example.com",
         role: UserRole.ADMIN,
         mustChangePassword: false,
-        twoFactorEnabled: false,
-      }),
-    );
-    const { default: PasswordSetupPage } = await loadPage();
-
-    await expect(PasswordSetupPage()).rejects.toThrow("REDIRECT:/portal/setup/2fa");
-  });
-
-  it("does not force 2FA enrollment after rotation when ADMIN_REQUIRE_2FA=false", async () => {
-    process.env.ADMIN_REQUIRE_2FA = "false";
-    getInitialSetupSessionMock.mockResolvedValueOnce(
-      setupSession({ uid: "admin-1", email: "admin@example.com", role: UserRole.ADMIN }),
-    );
-    findUserForInitialSetupMock.mockResolvedValueOnce(
-      setupUser({
-        id: "admin-1",
-        email: "admin@example.com",
-        role: UserRole.ADMIN,
-        mustChangePassword: false,
-        twoFactorEnabled: false,
       }),
     );
     const { default: PasswordSetupPage } = await loadPage();
 
     await expect(PasswordSetupPage()).rejects.toThrow("REDIRECT:/portal/login");
-    expect(redirectMock).not.toHaveBeenCalledWith("/portal/setup/2fa");
   });
 
   it("redirects completed non-admin setup back to login", async () => {

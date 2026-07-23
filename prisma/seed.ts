@@ -24,7 +24,6 @@ async function main() {
   const passwordHash = await hashPassword(seedPortalPassword);
   const shouldSeedInitialPasswordFixture = isLoopbackDatabaseUrl(process.env.DATABASE_URL ?? "");
   const initialPassword = process.env.E2E_INITIAL_PASSWORD ?? "C5InitialStudent123!";
-  const adminTwoFactorSecret = (process.env.ADMIN_2FA_SECRET ?? "").trim();
   const seedLiveLessonUrl = process.env.SEED_LIVE_LESSON_URL ?? "https://meet.google.com/";
   const seedHomeworkContentUrl =
     process.env.SEED_HOMEWORK_CONTENT_URL ?? "https://example.com/homework.pdf";
@@ -112,7 +111,6 @@ async function main() {
   ];
 
   for (const user of users) {
-    const isAdmin = user.role === UserRole.ADMIN;
     await prisma.appUser.upsert({
       where: { email: user.email },
       update: {
@@ -121,9 +119,6 @@ async function main() {
         phoneWhatsapp: user.phoneWhatsapp,
         passwordHash,
         isActive: true,
-        twoFactorEnabled: isAdmin ? Boolean(adminTwoFactorSecret) : false,
-        twoFactorSecret: isAdmin ? adminTwoFactorSecret || null : null,
-        twoFactorBackupCodes: [],
       },
       create: {
         id: (user as { id?: string }).id,
@@ -132,9 +127,6 @@ async function main() {
         role: user.role,
         phoneWhatsapp: user.phoneWhatsapp,
         passwordHash,
-        twoFactorEnabled: isAdmin ? Boolean(adminTwoFactorSecret) : false,
-        twoFactorSecret: isAdmin ? adminTwoFactorSecret || null : null,
-        twoFactorBackupCodes: [],
       },
     });
   }
@@ -198,9 +190,6 @@ async function main() {
         role: user.role,
         passwordHash,
         isActive: true,
-        twoFactorEnabled: false,
-        twoFactorSecret: null,
-        twoFactorBackupCodes: [],
       },
       create: {
         id: user.id,
@@ -209,9 +198,6 @@ async function main() {
         role: user.role,
         passwordHash,
         isActive: true,
-        twoFactorEnabled: false,
-        twoFactorSecret: null,
-        twoFactorBackupCodes: [],
       },
     });
   }
@@ -241,9 +227,6 @@ async function main() {
         passwordHash: initialPasswordHash,
         isActive: true,
         mustChangePassword: true,
-        twoFactorEnabled: false,
-        twoFactorSecret: null,
-        twoFactorBackupCodes: [],
       },
       create: {
         ...initialStudent,
@@ -251,9 +234,6 @@ async function main() {
         passwordHash: initialPasswordHash,
         isActive: true,
         mustChangePassword: true,
-        twoFactorEnabled: false,
-        twoFactorSecret: null,
-        twoFactorBackupCodes: [],
       },
     });
   }

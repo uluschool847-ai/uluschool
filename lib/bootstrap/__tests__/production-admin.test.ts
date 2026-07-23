@@ -20,9 +20,6 @@ type BootstrapUser = {
   isActive: boolean;
   passwordHash: string;
   mustChangePassword: boolean;
-  twoFactorEnabled: boolean;
-  twoFactorSecret: string | null;
-  twoFactorBackupCodes: string[];
 };
 
 function adminUser(overrides: Partial<BootstrapUser> = {}): BootstrapUser {
@@ -34,9 +31,6 @@ function adminUser(overrides: Partial<BootstrapUser> = {}): BootstrapUser {
     isActive: true,
     passwordHash: "existing-password-hash",
     mustChangePassword: false,
-    twoFactorEnabled: true,
-    twoFactorSecret: "existing-two-factor-secret",
-    twoFactorBackupCodes: ["existing-backup-code-hash"],
     ...overrides,
   };
 }
@@ -45,9 +39,6 @@ function bootstrapWinner(overrides: Partial<BootstrapUser> = {}): BootstrapUser 
   return adminUser({
     fullName: "Bootstrap Admin",
     mustChangePassword: true,
-    twoFactorEnabled: false,
-    twoFactorSecret: null,
-    twoFactorBackupCodes: [],
     ...overrides,
   });
 }
@@ -341,7 +332,7 @@ describe("bootstrapProductionAdmin", () => {
     });
   });
 
-  it("does not reset an existing admin password or 2FA", async () => {
+  it("does not reset an existing admin password", async () => {
     const { database, transaction } = createDatabase();
     const existing = adminUser();
     database.appUser.count.mockResolvedValue(1);
@@ -352,6 +343,17 @@ describe("bootstrapProductionAdmin", () => {
     });
 
     expect(existing).toEqual(adminUser());
+    expect(database.appUser.findUnique).toHaveBeenCalledWith({
+      where: { email: "admin@example.com" },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        isActive: true,
+        mustChangePassword: true,
+      },
+    });
     expect(hashPasswordMock).not.toHaveBeenCalled();
     expect(database.$transaction).not.toHaveBeenCalled();
     expect(transaction.appUser.create).not.toHaveBeenCalled();
@@ -506,9 +508,6 @@ describe("bootstrapProductionAdmin", () => {
   it.each([
     ["full name", { fullName: "Unrelated Admin" }],
     ["password-change state", { mustChangePassword: false }],
-    ["2FA enabled state", { twoFactorEnabled: true }],
-    ["2FA secret", { twoFactorSecret: "unrelated-secret" }],
-    ["backup hashes", { twoFactorBackupCodes: ["unrelated-backup-hash"] }],
     ["activation", { isActive: false }],
   ])("rejects a post-miss winner with mismatched %s", async (_label, userOverride) => {
     const { database, transaction } = createDatabase();
