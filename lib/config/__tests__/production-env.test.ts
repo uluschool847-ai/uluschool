@@ -86,7 +86,6 @@ function validProductionEnv(): Record<string, string> {
     DIRECT_URL:
       "postgres://migration_user:direct-credential@direct.internal:5432/ulu_school?sslmode=require",
     AUTH_SESSION_SECRET: "auth-session-value-7f4b2d9c6a1e8f3d",
-    ADMIN_REQUIRE_2FA: "true",
     ADMIN_SSO_ENABLED: "false",
     ADMIN_SSO_LOGIN_URL: "",
     ADMIN_SSO_SHARED_SECRET: "",
@@ -172,7 +171,6 @@ describe("validateProductionEnv", () => {
     ["DATABASE_URL", "mysql://database.invalid/ulu_school"],
     ["DIRECT_URL", "https://database.invalid/ulu_school"],
     ["AUTH_SESSION_SECRET", "too-short"],
-    ["ADMIN_REQUIRE_2FA", "false"],
     ["GOOGLE_TIMEZONE", "UTC"],
     ["NEXT_PUBLIC_SITE_URL", "http://uluglobalacademy.com"],
     ["TURNSTILE_ENFORCE", "false"],

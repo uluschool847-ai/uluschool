@@ -79,8 +79,6 @@ const environmentKeys = [
   "PLAYWRIGHT_REUSE_EXISTING_SERVER",
   "PLAYWRIGHT_SERVER_COMMAND",
   "E2E_PLAYWRIGHT_SERVER_COMMAND",
-  "E2E_ADMIN_REQUIRE_2FA",
-  "ADMIN_REQUIRE_2FA",
   "E2E_PARTITION",
   "STORAGE_DRIVER",
   "RUN_S4_SIGNED_DELIVERY_E2E",
@@ -153,8 +151,6 @@ const environmentKeys = [
   "PLAYWRIGHT_REUSE_EXISTING_SERVER",
   "PLAYWRIGHT_SERVER_COMMAND",
   "E2E_PLAYWRIGHT_SERVER_COMMAND",
-  "E2E_ADMIN_REQUIRE_2FA",
-  "ADMIN_REQUIRE_2FA",
   "E2E_PARTITION",
   "STORAGE_DRIVER",
   "RUN_S4_SIGNED_DELIVERY_E2E",
@@ -410,11 +406,8 @@ function playwrightSummaryCounts(output: string) {
     .map((line) => line.replace(/ \([^)]+\)$/, ""));
 }
 
-function configFor(
-  partition: "focused" | "standard" | "admin-2fa" | "signed-delivery" | "storage",
-) {
+function configFor(partition: "focused" | "standard" | "signed-delivery" | "storage") {
   const partitionFlags = {
-    "admin-2fa": "--admin-2fa-partition",
     "signed-delivery": "--signed-delivery-partition",
     standard: "--standard-partition",
     storage: "--storage-partition",
@@ -447,7 +440,6 @@ function expectWrapperFlagsRemoved(capture: Capture) {
   expect(capture.source).toBe("explicit");
   expect(capture.args).not.toContain("--isolated-server");
   expect(capture.args).not.toContain("--next-start");
-  expect(capture.args).not.toContain("--admin-2fa-partition");
   expect(capture.args).not.toContain("--standard-partition");
   expect(capture.args).not.toContain("--storage-partition");
   expect(capture.args).not.toContain("--signed-delivery-partition");
@@ -470,7 +462,6 @@ function cliIt(name: string, callback: () => void) {
 
 const releaseConfigOverrideCases = [
   ["standard", "--standard-partition"],
-  ["admin 2FA", "--admin-2fa-partition"],
   ["signed delivery", "--signed-delivery-partition"],
   ["storage", "--storage-partition"],
 ].flatMap(([partitionName, partitionFlag]) => [
@@ -509,7 +500,7 @@ const releaseConfigOverrideCases = [
 describe("Playwright E2E partition contract", () => {
   cliIt("forbids focused tests only in release partitions", () => {
     expect(configFor("focused").forbidOnly).toBe(false);
-    for (const partition of ["standard", "admin-2fa", "signed-delivery", "storage"] as const) {
+    for (const partition of ["standard", "signed-delivery", "storage"] as const) {
       expect(configFor(partition).forbidOnly).toBe(true);
     }
   });
@@ -519,7 +510,7 @@ describe("Playwright E2E partition contract", () => {
     expect(focusedConfig.environment.PW_TEST_REPORTER).toBe(hostileEnvironment.PW_TEST_REPORTER);
     expect(focusedConfig.reporters).toEqual([]);
     expect(focusedConfig.retries).toBe(1);
-    for (const partition of ["standard", "admin-2fa", "signed-delivery", "storage"] as const) {
+    for (const partition of ["standard", "signed-delivery", "storage"] as const) {
       const releaseConfig = configFor(partition);
       expect(releaseConfig.environment.PW_TEST_REPORTER).toBeNull();
       expect(releaseConfig.reporters).toEqual(["./scripts/playwright-release-reporter.mjs"]);
@@ -858,26 +849,27 @@ test.skip("controlled focused skipped test", () => {});
     expect(playwrightSummaryCounts(result.output)).toEqual(["1 skipped"]);
   });
 
-  it("runs the production release partitions with required admin 2FA isolated", () => {
+  it("runs the production release partitions without application 2FA", () => {
     const scripts = readPackageScripts().scripts;
 
     expect(scripts["test:e2e"]).toBe(
-      "npm run test:e2e:standard && npm run test:e2e:admin-2fa && npm run test:e2e:signed-delivery && npm run test:e2e:storage",
+      "npm run test:e2e:standard && npm run test:e2e:signed-delivery && npm run test:e2e:storage",
     );
     expect(scripts["test:e2e:release"]).toBe(
-      "npm run test:e2e:standard && npm run test:e2e:admin-2fa && npm run test:e2e:signed-delivery && npm run test:e2e:storage",
+      "npm run test:e2e:standard && npm run test:e2e:signed-delivery && npm run test:e2e:storage",
     );
     expect(scripts["test:e2e:standard"]).toContain("--next-start");
-    expect(scripts["test:e2e:admin-2fa"]).toBe(
-      "node scripts/playwright-test.mjs --isolated-server --admin-2fa-partition --next-start e2e/portals/admin-security.spec.ts e2e/portals/initial-admin-2fa.spec.ts",
-    );
     expect(scripts["test:e2e:signed-delivery"]).toBe(
       "node scripts/playwright-test.mjs --isolated-server --signed-delivery-partition --next-start e2e/storage/signed-file-delivery.spec.ts",
     );
-    expect(scripts["test:e2e:initial-admin-2fa"]).toBe(
-      "node scripts/playwright-test.mjs --isolated-server --admin-2fa-partition --next-start e2e/portals/initial-admin-2fa.spec.ts",
-    );
+    expect(scripts["test:e2e:admin-2fa"]).toBeUndefined();
+    expect(scripts["test:e2e:initial-admin-2fa"]).toBeUndefined();
     expect(scripts["test:e2e:focused"]).toBe("node scripts/playwright-test.mjs --isolated-server");
+
+    const source = readFileSync(RUNNER, "utf8");
+    expect(source).not.toContain("admin-2fa");
+    expect(source).not.toContain("E2E_ADMIN_REQUIRE_2FA");
+    expect(source).not.toContain("ADMIN_REQUIRE_2FA");
   });
 
   cliIt("standard Playwright collection excludes only the partitioned signed-delivery path", () => {
@@ -905,8 +897,6 @@ test.skip("controlled focused skipped test", () => {});
     expect(output).toContain(decoyRelativePath);
     expect(output).toContain("signed delivery decoy remains in standard collection");
     expect(output).not.toContain("storage/signed-file-delivery.spec.ts");
-    expect(output).not.toContain("portals/admin-security.spec.ts");
-    expect(output).not.toContain("portals/initial-admin-2fa.spec.ts");
     expect(output).not.toContain("portals/admin-teachers.spec.ts");
     expect(output).not.toContain("portals/teacher-academics.spec.ts");
     expect(output).not.toContain("portals/teacher-materials.spec.ts");
@@ -929,47 +919,17 @@ test.skip("controlled focused skipped test", () => {});
     });
   });
 
-  cliIt("normalizes an isolated admin-2fa child and forwards only Playwright arguments", () => {
-    const { capture, status } = runRunner(
-      [
-        "--isolated-server",
-        "--admin-2fa-partition",
-        "--next-start",
-        "e2e/portals/admin-security.spec.ts",
-        "--grep",
-        "TOTP",
-      ],
-      { ADMIN_REQUIRE_2FA: "false", E2E_ADMIN_REQUIRE_2FA: "false" },
-    );
-
-    expect(status).toBe(0);
-    expectIsolatedServer(capture);
-    expect(capture.environment).toMatchObject({
-      ADMIN_REQUIRE_2FA: "true",
-      E2E_ADMIN_REQUIRE_2FA: "true",
-      E2E_PARTITION: "admin-2fa",
-      E2E_PLAYWRIGHT_SERVER_COMMAND: "npx next start",
-    });
-    expectReleaseReporterArgs(capture, [
-      "test",
-      "e2e/portals/admin-security.spec.ts",
-      "--grep",
-      "TOTP",
+  cliIt("preserves the standard partition next-start command", () => {
+    const { capture, status } = runRunner([
+      "--isolated-server",
+      "--standard-partition",
+      "--next-start",
+      "--list",
     ]);
-    expectWrapperFlagsRemoved(capture);
-  });
-
-  cliIt("forces standard policy false while retaining the partition next-start command", () => {
-    const { capture, status } = runRunner(
-      ["--isolated-server", "--standard-partition", "--next-start", "--list"],
-      { ADMIN_REQUIRE_2FA: "true", E2E_ADMIN_REQUIRE_2FA: "true" },
-    );
 
     expect(status).toBe(0);
     expectIsolatedServer(capture);
     expect(capture.environment).toMatchObject({
-      ADMIN_REQUIRE_2FA: "false",
-      E2E_ADMIN_REQUIRE_2FA: "false",
       E2E_PARTITION: "standard",
       E2E_PLAYWRIGHT_SERVER_COMMAND: "npx next start",
     });
@@ -978,16 +938,15 @@ test.skip("controlled focused skipped test", () => {});
   });
 
   cliIt("forces storage policy and local storage without retaining hostile server commands", () => {
-    const { capture, status } = runRunner(
-      ["--isolated-server", "--storage-partition", "e2e/portals/teacher-materials.spec.ts"],
-      { ADMIN_REQUIRE_2FA: "true", E2E_ADMIN_REQUIRE_2FA: "true" },
-    );
+    const { capture, status } = runRunner([
+      "--isolated-server",
+      "--storage-partition",
+      "e2e/portals/teacher-materials.spec.ts",
+    ]);
 
     expect(status).toBe(0);
     expectIsolatedServer(capture);
     expect(capture.environment).toMatchObject({
-      ADMIN_REQUIRE_2FA: "false",
-      E2E_ADMIN_REQUIRE_2FA: "false",
       E2E_PARTITION: "storage",
       E2E_PLAYWRIGHT_SERVER_COMMAND: null,
       STORAGE_DRIVER: "local",
@@ -1009,8 +968,6 @@ test.skip("controlled focused skipped test", () => {});
       expect(status).toBe(0);
       expectIsolatedServer(capture);
       expect(capture.environment).toMatchObject({
-        ADMIN_REQUIRE_2FA: "false",
-        E2E_ADMIN_REQUIRE_2FA: "false",
         E2E_PARTITION: "signed-delivery",
         E2E_PLAYWRIGHT_SERVER_COMMAND: "npx next start",
         ...signedDeliveryEnvironment,
@@ -1019,28 +976,6 @@ test.skip("controlled focused skipped test", () => {});
       expectReleaseReporterArgs(capture, ["test", "e2e/storage/signed-file-delivery.spec.ts"]);
       expectWrapperFlagsRemoved(capture);
     },
-  );
-
-  it.each(["e2e/portals/admin-security.spec.ts", "e2e/portals/initial-admin-2fa.spec.ts"])(
-    "infers required 2FA for the focused exact path %s",
-    (specPath) => {
-      const { capture, status } = runRunner(["--isolated-server", specPath, "--reporter=line"], {
-        ADMIN_REQUIRE_2FA: "false",
-        E2E_ADMIN_REQUIRE_2FA: "false",
-      });
-
-      expect(status).toBe(0);
-      expectIsolatedServer(capture);
-      expect(capture.environment).toMatchObject({
-        ADMIN_REQUIRE_2FA: "true",
-        E2E_ADMIN_REQUIRE_2FA: "true",
-        E2E_PARTITION: "focused",
-        E2E_PLAYWRIGHT_SERVER_COMMAND: null,
-      });
-      expect(capture.args).toEqual(["test", specPath, "--reporter=line"]);
-      expectWrapperFlagsRemoved(capture);
-    },
-    SUBPROCESS_TEST_TIMEOUT_MS,
   );
 
   cliIt("propagates the Playwright child numeric exit code", () => {

@@ -247,7 +247,6 @@ describe("production environment startup contract", () => {
     "DATABASE_URL",
     "DIRECT_URL",
     "AUTH_SESSION_SECRET",
-    "ADMIN_REQUIRE_2FA",
     "GOOGLE_TIMEZONE",
     "NEXT_PUBLIC_SITE_URL",
     "TURNSTILE_ENFORCE",

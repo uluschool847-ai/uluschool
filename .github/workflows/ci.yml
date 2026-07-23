@@ -33,7 +33,6 @@ jobs:
       DIRECT_URL: postgresql://postgres:postgres@localhost:5432/ulu_school_test?schema=public
       AUTH_SESSION_SECRET: ci-only-session-secret-with-at-least-32-characters
       SEED_PORTAL_PASSWORD: CiOnlyPortalPassword123!
-      ADMIN_REQUIRE_2FA: "true"
       GOOGLE_TIMEZONE: Africa/Nairobi
       TURNSTILE_ENFORCE: "false"
       CRON_SECRET: ci-only-cron-secret

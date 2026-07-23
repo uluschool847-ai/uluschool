@@ -114,7 +114,6 @@ const productionEnvironmentSchema = z
     DATABASE_URL: z.string().optional(),
     DIRECT_URL: z.string().optional(),
     AUTH_SESSION_SECRET: z.string().optional(),
-    ADMIN_REQUIRE_2FA: z.string().optional(),
     ADMIN_SSO_ENABLED: z.string().optional(),
     ADMIN_SSO_LOGIN_URL: z.string().optional(),
     ADMIN_SSO_SHARED_SECRET: z.string().optional(),
@@ -160,7 +159,6 @@ const productionEnvironmentSchema = z
     requireDatabaseUrl(context, env.DATABASE_URL, "DATABASE_URL");
     requireDatabaseUrl(context, env.DIRECT_URL, "DIRECT_URL");
     requireSecret(context, env.AUTH_SESSION_SECRET, "AUTH_SESSION_SECRET");
-    requireLiteral(context, env.ADMIN_REQUIRE_2FA, "ADMIN_REQUIRE_2FA", "true");
     requireLiteral(context, env.ADMIN_SSO_ENABLED, "ADMIN_SSO_ENABLED", "false");
     requireEmpty(context, env.ADMIN_SSO_LOGIN_URL, "ADMIN_SSO_LOGIN_URL");
     requireEmpty(context, env.ADMIN_SSO_SHARED_SECRET, "ADMIN_SSO_SHARED_SECRET");

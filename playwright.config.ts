@@ -5,11 +5,8 @@ const reuseExistingServer = /^(1|true|yes)$/i.test(
   process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER ?? "",
 );
 const partition = process.env.E2E_PARTITION ?? "focused";
-const isReleasePartition = ["standard", "admin-2fa", "signed-delivery", "storage"].includes(
-  partition,
-);
+const isReleasePartition = ["standard", "signed-delivery", "storage"].includes(partition);
 const isStoragePartition = partition === "storage";
-const adminTwoFactorRequired = (process.env.E2E_ADMIN_REQUIRE_2FA ?? "false") === "true";
 const serverCommand = isStoragePartition
   ? "npm run dev"
   : (process.env.E2E_PLAYWRIGHT_SERVER_COMMAND ??
@@ -17,12 +14,9 @@ const serverCommand = isStoragePartition
     "npm run dev");
 const storageSpecPattern =
   /(?:^|[\\/])(admin-teachers|teacher-academics|teacher-materials)\.spec\.ts$/;
-const adminTwoFactorSpecPattern = /(?:admin-security|initial-admin-2fa)\.spec\.ts$/;
 const signedDeliverySpecPattern = /(?:^|[\\/])e2e[\\/]storage[\\/]signed-file-delivery\.spec\.ts$/;
 const testIgnore =
-  partition === "standard"
-    ? [storageSpecPattern, adminTwoFactorSpecPattern, signedDeliverySpecPattern]
-    : undefined;
+  partition === "standard" ? [storageSpecPattern, signedDeliverySpecPattern] : undefined;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -56,8 +50,6 @@ export default defineConfig({
     stderr: "pipe",
     env: {
       ...process.env,
-      E2E_ADMIN_REQUIRE_2FA: adminTwoFactorRequired ? "true" : "false",
-      ADMIN_REQUIRE_2FA: adminTwoFactorRequired ? "true" : "false",
       ...(isStoragePartition ? { STORAGE_DRIVER: "local" } : {}),
     },
   },

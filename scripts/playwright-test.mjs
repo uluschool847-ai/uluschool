@@ -176,7 +176,6 @@ const testPlaywrightCliFlagPrefix = "--test-playwright-cli=";
 const partitionFlags = new Map([
   ["--standard-partition", "standard"],
   ["--storage-partition", "storage"],
-  ["--admin-2fa-partition", "admin-2fa"],
   ["--signed-delivery-partition", "signed-delivery"],
 ]);
 const rawArgs = process.argv.slice(2);
@@ -236,16 +235,6 @@ if (usesIsolatedServer) {
   console.log(`Playwright isolated server: ${process.env.PLAYWRIGHT_BASE_URL} (reuse disabled).`);
 }
 
-const adminTwoFactorSpecPaths = new Set([
-  "e2e/portals/admin-security.spec.ts",
-  "e2e/portals/initial-admin-2fa.spec.ts",
-]);
-const adminTwoFactorRequired =
-  partition === "admin-2fa" ||
-  expandedArgs.some((arg) => adminTwoFactorSpecPaths.has(arg.replaceAll("\\", "/")));
-
-process.env.E2E_ADMIN_REQUIRE_2FA = adminTwoFactorRequired ? "true" : "false";
-process.env.ADMIN_REQUIRE_2FA = process.env.E2E_ADMIN_REQUIRE_2FA;
 process.env.E2E_PARTITION = partition;
 if (partition !== "focused") Reflect.deleteProperty(process.env, "PW_TEST_REPORTER");
 if (partition === "storage") process.env.STORAGE_DRIVER = "local";
