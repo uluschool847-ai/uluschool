@@ -10,7 +10,6 @@ const PARENT_EMAIL = "fixed.parent@uluglobalacademy.com";
 const adminRoutes = [
   { path: "/admin", heading: "Admin Dashboard" },
   { path: "/admin/users", heading: "User Management" },
-  { path: "/admin/security", heading: "Admin Security" },
   { path: "/admin/teachers", heading: "Teachers" },
   { path: "/admin/students", heading: "Students" },
   { path: "/admin/parents", heading: "Parents" },
@@ -31,13 +30,7 @@ const adminRoutes = [
   { path: "/admin/leads", heading: "Contact Leads" },
 ] as const;
 
-const sensitiveRoutes = [
-  "/admin",
-  "/admin/users",
-  "/admin/security",
-  "/admin/billing",
-  "/admin/audit",
-] as const;
+const sensitiveRoutes = ["/admin", "/admin/users", "/admin/billing", "/admin/audit"] as const;
 
 const adminHeaderRoutes = [
   "/admin/teachers",

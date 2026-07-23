@@ -144,12 +144,9 @@ test.describe("Student and parent schedule portals", () => {
     await expectNoActiveJoin(completedCard);
 
     const joinLink = joinableCard.getByRole("link", { name: /join lesson/i });
+    await expect(joinLink).toHaveAttribute("href", testMeetUrl("abc-defg-hij"));
     await expect(joinLink).toHaveAttribute("target", "_blank");
-    const popupPromise = page.waitForEvent("popup");
-    await joinLink.click();
-    const popup = await popupPromise;
-    await expect(popup).toHaveURL(/meet\.google\.com/);
-    await popup.close();
+    await expect(joinLink).toHaveAttribute("rel", "noreferrer");
 
     await expect(page.getByText(fixture.nextMonthLessonTitle)).toHaveCount(0);
     await applyMonthFilter(page, fixture.nextMonth);

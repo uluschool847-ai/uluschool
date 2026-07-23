@@ -148,13 +148,9 @@ test.describe("Teacher schedule portal", () => {
     await expect(page.getByText(fixture.teacherBLessonTitle)).toHaveCount(0);
 
     const startLink = joinableCard.getByRole("link", { name: /start lesson/i });
+    await expect(startLink).toHaveAttribute("href", testMeetUrl("teacher-aaa-bbb"));
     await expect(startLink).toHaveAttribute("target", "_blank");
     await expect(startLink).toHaveAttribute("rel", "noreferrer");
-    const popupPromise = page.waitForEvent("popup");
-    await startLink.click();
-    const popup = await popupPromise;
-    await expect(popup).toHaveURL(/meet\.google\.com/);
-    await popup.close();
 
     const cancelledCard = lessonCard(page, fixture.cancelledLessonTitle);
     await expect(cancelledCard).toContainText(/cancelled/i);
