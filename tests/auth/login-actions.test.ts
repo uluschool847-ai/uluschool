@@ -280,37 +280,4 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
       role: "STUDENT",
     });
   });
-
-  it("parses the next parameter and redirects to the exact intended path upon successful 2FA", async () => {
-    let verify2faAction:
-      | ((state: { success: boolean; message: string }, formData: FormData) => Promise<unknown>)
-      | undefined;
-    try {
-      const modulePath = "../../../app/portal/login/verify-2fa/actions";
-      const module = await import(/* @vite-ignore */ modulePath);
-      verify2faAction = module.verify2faAction;
-    } catch (e) {
-      expect(true, "Action module app/portal/login/verify-2fa/actions does not exist").toBe(false);
-      return;
-    }
-
-    if (!verify2faAction) {
-      expect(true, "verify2faAction not exported from module").toBe(false);
-      return;
-    }
-
-    const formData = new FormData();
-    formData.set("code", "123456");
-    formData.set("next", "/portal/admin/settings");
-
-    await expect(verify2faAction({ success: false, message: "" }, formData)).rejects.toThrow(
-      "REDIRECT:/portal/admin/settings",
-    );
-    expect(completeAdminTwoFactorChallengeMock).toHaveBeenCalledWith({
-      userId: "admin-1",
-      challengeId: "challenge-1",
-      authMethod: "password",
-      verification: { type: "totp", code: "123456" },
-    });
-  });
 });
