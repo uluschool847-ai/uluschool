@@ -62,7 +62,6 @@ are configuration rules, not credentials.
 | `DATABASE_URL` | Matching environment's Render Internal Database URL |
 | `DIRECT_URL` | Matching environment's Render Internal Database URL |
 | `AUTH_SESSION_SECRET` | Unique high-entropy value of at least 32 characters per environment |
-| `ADMIN_REQUIRE_2FA` | `true` |
 | `GOOGLE_TIMEZONE` | `Africa/Nairobi` |
 | `NEXT_PUBLIC_SITE_URL` | Staging HTTPS origin on staging; `https://uluglobalacademy.com` on production |
 | `TURNSTILE_ENFORCE` | `true` |
@@ -100,8 +99,6 @@ Also set these operational values explicitly instead of relying on undocumented 
 
 | Variable | Launch setting or rule |
 | --- | --- |
-| `TWO_FACTOR_ISSUER` | `ULU Online School` |
-| `ADMIN_2FA_SECRET` | Empty; hosted administrators enroll TOTP interactively |
 | `ADMIN_SSO_ENABLED` | `false` for the MVP unless an approved SSO integration is separately verified |
 | `ADMIN_SSO_SHARED_SECRET` | Empty when SSO is disabled |
 | `ADMIN_SSO_LOGIN_URL` | Empty when SSO is disabled |
@@ -118,6 +115,16 @@ Also set these operational values explicitly instead of relying on undocumented 
 | `SENTRY_TRACES_SAMPLE_RATE` | Conservative environment-approved rate |
 | `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` | Conservative environment-approved rate |
 
+Administrator authentication policy:
+
+ULU Online School administrators authenticate to the application with email and password.
+Temporary passwords must be changed on first login. Login rate limiting, signed sessions,
+audit logging, and server-side role enforcement remain mandatory. Infrastructure provider
+accounts remain protected with provider-level 2FA.
+
+Before deployment, verify provider-level 2FA is enabled for the Render, GitHub, Cloudflare,
+Resend/email, and Sentry accounts used by the environment.
+
 Configure Google Calendar only when it is part of the launch: `GOOGLE_CALENDAR_ENABLED=true`
 requires an environment-specific calendar plus server-only Google credentials. Keep
 `GOOGLE_TIMEZONE` set to `Africa/Nairobi`. Set public ULU contact metadata to verified Kenyan
@@ -127,18 +134,18 @@ Render supplies `PORT` and its platform marker. Do not add a fixed `PORT`. In st
 production, leave `SEED_PORTAL_PASSWORD` and `DEFAULT_PORTAL_PASSWORD` absent or empty; validation
 rejects every non-empty value, including whitespace-only values.
 
-## Regular-session version 2 cutover
+## Regular-session version 3 cutover
 
 The administrator authentication hardening release raises only the regular `ulu_session` payload
-to security version 2. On the first staging and production deploy containing this change, every
+to security version 3. On the first staging and production deploy containing this change, every
 existing signed-in user is intentionally logged out once, including users with older password or
-SSO sessions, and must sign in again. Short-lived initial-setup, 2FA setup/handoff, and pending-2FA
-tokens are not versioned or invalidated by this cutover.
+SSO sessions, and must sign in again. The short-lived initial-setup cookie remains available only
+for mandatory first-password rotation.
 
 Notify users before the deploy and record the cutover window in the private launch record. Keep the
 configured `AUTH_SESSION_SECRET` unchanged for this version cutover and never copy its value into
 the launch record, logs, screenshots, tickets, or this repository. After deployment, verify that an
-older regular session redirects to login and that a fresh password/TOTP login creates working access.
+older regular session redirects to login and that a fresh password-only login creates working access.
 
 ## First administrator bootstrap
 
@@ -155,8 +162,8 @@ For a new database with no active administrator, set all three variables in Rend
 The bootstrap creates one active admin with a mandatory first-login password change and writes a
 security audit record. It neither seeds demo users nor prints the credential.
 
-After the first administrator signs in, rotates the bootstrap credential, enrolls TOTP, saves the
-backup codes offline, signs out, and proves a second TOTP login:
+After the first administrator signs in, rotates the bootstrap credential, signs out, and proves a
+second password-only login:
 
 1. remove all three bootstrap variables from that Render service;
 2. deploy again;

@@ -11,7 +11,13 @@ links in the private launch record. Never record credentials.
 - [ ] Verify PostgreSQL backup and point-in-time recovery status on the Recovery page.
 - [ ] Record the visible recovery window, restore-drill owner, and scheduled drill date.
 - [ ] Confirm the Cloudflare zone, registrar account, R2 account, SMTP account, Sentry project,
-      Turnstile widget, and private operations channel have named owners with 2FA.
+      Turnstile widget, and private operations channel have named owners.
+- [ ] Confirm provider-level 2FA is enabled on Render, GitHub, Cloudflare, Resend/email, and Sentry.
+
+ULU Online School administrators authenticate to the application with email and password.
+Temporary passwords must be changed on first login. Login rate limiting, signed sessions,
+audit logging, and server-side role enforcement remain mandatory. Infrastructure provider
+accounts remain protected with provider-level 2FA.
 
 ## 2. Pass staging
 
@@ -25,7 +31,8 @@ links in the private launch record. Never record credentials.
       provider ownership separately; leave `SEED_PORTAL_PASSWORD` and `DEFAULT_PORTAL_PASSWORD`
       absent or empty.
 - [ ] Run the deployment smoke and every row in `browser-verification.md`.
-- [ ] Stop here on any failed security, ownership, upload persistence, 2FA, consent, email, Nairobi
+- [ ] Stop here on any failed security, ownership, upload persistence, administrator authentication,
+      consent, email, Nairobi
       time, monitoring, responsive-layout, or indexing check.
 
 ## 3. Deploy the production origin
@@ -37,7 +44,7 @@ links in the private launch record. Never record credentials.
 - [ ] Keep `AUTH_SESSION_SECRET` unchanged for this cutover and keep its value out of all launch
       evidence, logs, screenshots, tickets, and repository files.
 - [ ] Confirm an older `ulu_session` is rejected and redirected to login, then prove a fresh
-      password/TOTP login works with the deployed release.
+      password-only administrator login works with the deployed release.
 - [ ] Complete smoke and role checks on the production `onrender.com` URL before changing DNS.
 - [ ] Confirm the previous healthy deploy and the database recovery decision are identifiable.
 
@@ -69,7 +76,7 @@ rollback verification path.
 In Cloudflare Cache Rules, create a high-priority **Bypass cache** rule for:
 
 - `/admin*`;
-- `/portal*`, including login, password-change, TOTP setup, and verification;
+- `/portal*`, including login and password-change routes;
 - `/api*`, including authentication, setup, upload, download, alerts, cron, and health routes;
 - any request carrying the `ulu_session` cookie;
 - any additional authentication or account-setup route introduced later.

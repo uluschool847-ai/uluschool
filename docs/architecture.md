@@ -21,6 +21,12 @@ Dedicated portals are built for different personas to streamline educational ope
 - **Portal Login (`/portal/login`):**
   - Single authentication entry point for portal users.
   - Preserves the intended destination with `?next=` when users arrive from a protected page.
+  - Administrator authentication policy:
+
+    > ULU Online School administrators authenticate to the application with email and password.
+    > Temporary passwords must be changed on first login. Login rate limiting, signed sessions,
+    > audit logging, and server-side role enforcement remain mandatory. Infrastructure provider
+    > accounts remain protected with provider-level 2FA.
 - **Teacher Portal (`/portal/teacher`):**
   - Manage scheduled classes and upload course materials.
   - Assign homework and review/grade student submissions.
@@ -61,4 +67,4 @@ Data-driven decision making is facilitated by an internal analytics dashboard bu
 - **ORM:** Prisma Client
 - **Styling:** Tailwind CSS + Radix UI components
 - **Monitoring:** Sentry
-- **Authentication:** Custom signed cookie sessions with mandatory hosted-admin TOTP support
+- **Authentication:** Custom signed cookie sessions with password-only administrator access

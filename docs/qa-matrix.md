@@ -57,9 +57,14 @@ Use `fixed.parent@uluglobalacademy.com` for linked-child checks and `onboardingp
 
 Use `fixed.admin@uluglobalacademy.com` or `admin@uluglobalacademy.com`.
 
+ULU Online School administrators authenticate to the application with email and password.
+Temporary passwords must be changed on first login. Login rate limiting, signed sessions,
+audit logging, and server-side role enforcement remain mandatory. Infrastructure provider
+accounts remain protected with provider-level 2FA.
+
 | # | Flow | Happy Path | Empty State | Validation Error | Access Denied |
 |---|------|------------|-------------|------------------|---------------|
-| 1 | Login | Sign in as `fixed.admin@uluglobalacademy.com` or `admin@uluglobalacademy.com`. With `ADMIN_REQUIRE_2FA=true` in local development, verify redirect to `/admin/security?setup2fa=required` or the 2FA verification flow before normal admin work. | — | Enter the wrong password and verify the login form shows an error. | — |
+| 1 | Login | Sign in as `fixed.admin@uluglobalacademy.com` or `admin@uluglobalacademy.com` with email and password. When a temporary password is used, rotate it before access to `/admin`; no authenticator prompt appears. | — | Enter the wrong password and verify the login form shows an error. | — |
 | 2 | Dashboard | Open `/admin` and verify analytics, CRM summaries, enquiries, leads, reminder controls, and recent audit logs render. | Use a reset/minimal local DB state and verify empty CRM/dashboard regions show readable empty states instead of crashing. | — | — |
 | 3 | Global search | From `/admin`, search for a known `referenceId` and verify the matching enquiry or lead is shown. | Search for a nonexistent reference ID and verify `No matching records found.` | — | — |
 | 4 | Users | Open `/admin/users`, review the seeded list, and change a user role/status through the UI. | — | Submit an invalid update and verify the UI shows an error state instead of silent failure. | — |

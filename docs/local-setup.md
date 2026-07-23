@@ -97,17 +97,16 @@ There is no SQLite fallback in this project.
 | --- | --- | --- |
 | `AUTH_SESSION_SECRET` | `change-this-session-secret` | Signs the custom `ulu_session` cookie |
 | `SEED_PORTAL_PASSWORD` | local fixture value | Password assigned only to disposable seeded accounts |
-| `ADMIN_REQUIRE_2FA` | `true` | Enables the admin 2FA gate. Set to `false` only for local/demo password-only admin access. |
-| `ADMIN_2FA_SECRET` | empty or TOTP secret | Preloads TOTP for the main admin account during seeding |
-| `TWO_FACTOR_ISSUER` | `ULU Online School` | Issuer label for authenticator apps |
 | `ADMIN_SSO_ENABLED` | `false` | Enables optional admin SSO callback logic |
 | `ADMIN_SSO_SHARED_SECRET` | empty | Secret used by `/api/auth/sso/callback` |
 | `ADMIN_SSO_LOGIN_URL` | empty | Optional upstream SSO login URL |
 
-Important local behavior:
-- In development, when `ADMIN_REQUIRE_2FA=true`, admin login uses a controlled dev bypass and redirects to `/admin/security?setup2fa=required`.
-- This is expected local behavior, not a broken redirect. The security page explains that 2FA setup is required and points to the setup panel.
-- For demos where setup should be optional, set `ADMIN_REQUIRE_2FA=false` and restart the dev server. Admins can continue to the dashboard, and `/admin/security` remains available for optional setup.
+Administrator authentication policy:
+
+ULU Online School administrators authenticate to the application with email and password.
+Temporary passwords must be changed on first login. Login rate limiting, signed sessions,
+audit logging, and server-side role enforcement remain mandatory. Infrastructure provider
+accounts remain protected with provider-level 2FA.
 
 ### Email
 | Variable | Example | Why it matters |
@@ -245,7 +244,7 @@ Check the following:
 - `AUTH_SESSION_SECRET` is present in `.env.local`
 - you are staying on the same origin (`http://localhost:3000` by default)
 - your browser is not blocking cookies
-- for admins, the redirect to `/admin/security?setup2fa=required` is expected in development when `ADMIN_REQUIRE_2FA=true`; set `ADMIN_REQUIRE_2FA=false` and restart the dev server for demo/password-only dashboard access
+- an administrator with a valid password reaches the normal admin flow without an authenticator prompt
 
 ### Login succeeds but the dashboard is empty
 Use the fixed fixture accounts for data-rich dashboards:

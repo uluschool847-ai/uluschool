@@ -2,7 +2,7 @@
 
 Run this matrix on isolated staging first and then on the production Render origin before DNS
 promotion. Repeat the required production subset after Cloudflare proxying. Use disposable records
-and never place credentials, backup codes, student personal data, or webhook payloads in this file.
+and never place credentials, student personal data, or webhook payloads in this file.
 
 ## Run record
 
@@ -20,12 +20,17 @@ and never place credentials, backup codes, student personal data, or webhook pay
 For every row record: role, starting route, actions, expected visible result, actual result, created
 test record IDs, cleanup result, and issue reference. Do not record the one-time credential itself.
 
+ULU Online School administrators authenticate to the application with email and password.
+Temporary passwords must be changed on first login. Login rate limiting, signed sessions,
+audit logging, and server-side role enforcement remain mandatory. Infrastructure provider
+accounts remain protected with provider-level 2FA.
+
 ## Required workflows
 
 | ID | Role and start | Actions | Required visible result and evidence |
 | --- | --- | --- | --- |
 | B01 | Guest, `/enrol` | Complete all steps, read the privacy link, provide the required minor-data consent, submit once, and retain the reference ID. Then submit `/contact` and retain its reference ID. | Both forms show success once. Admin search finds both exact records and their consent/contact data. No private field appears in logs or alerts. |
-| B02 | Bootstrap admin, `/portal/login` | Sign in with the bootstrap credential, rotate it, enroll TOTP, store backup codes offline, sign out, and sign in again. | The credential change is mandatory, setup cannot be skipped, and the second login requires a current TOTP before `/admin` is available. Record only that backup codes were stored, never the codes. |
+| B02 | Bootstrap admin, `/portal/login` | Sign in with the bootstrap credential, rotate it, sign out, and sign in again with the new password. | Password rotation cannot be skipped, no authenticator prompt appears, and the second login reaches `/admin`. |
 | B03 | Admin, `/admin/users` | Manually create one student, one linked parent, and one teacher. Observe each generated one-time credential, close the success state, and verify it cannot be displayed again. | Each credential is unique, appears once to the authorized admin, and is absent from audit metadata, browser history, and later user views. Record user IDs only. |
 | B04 | Student, parent, teacher; `/portal/login` | Sign in separately with each temporary credential, rotate it, sign out, and sign in with the new credential. Try another role's dashboard URL in each session. | Each role reaches only its own portal. Password rotation is mandatory; another role's data and dashboard are denied. |
 | B05 | Teacher, `/portal/teacher/materials` | Create and upload a disposable material for an assigned class. As its student and linked parent, open and download it. As an unrelated student, unrelated parent, and unassigned teacher, attempt the stable application URL. | Authorized roles download the material. Every unrelated user is denied without revealing object keys or signed storage details. Record material/file IDs and denial evidence. |
@@ -39,7 +44,7 @@ test record IDs, cleanup result, and issue reference. Do not record the one-time
 
 ## Production subset after DNS and proxy
 
-Repeat B01 with clearly marked disposable records, B02 second-factor login only, B04 route denial,
+Repeat B01 with clearly marked disposable records, B02 password-only administrator login, B04 route denial,
 B05 authorized and unrelated downloads, B08, B09, B10, B11, and B12 on
 `https://uluglobalacademy.com`. Also verify the `www` redirect, HTTPS, canonical metadata, and
 Cloudflare cache status described in `launch-checklist.md`.

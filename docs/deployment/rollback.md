@@ -3,6 +3,11 @@
 Rollback is an incident action, not a substitute for the staging gate. Assign an incident owner,
 preserve non-sensitive evidence, and announce each decision in the private operations channel.
 
+ULU Online School administrators authenticate to the application with email and password.
+Temporary passwords must be changed on first login. Login rate limiting, signed sessions,
+audit logging, and server-side role enforcement remain mandatory. Infrastructure provider
+accounts remain protected with provider-level 2FA.
+
 ## Immediate containment
 
 1. Stop DNS promotion on any staging failure. Do not merge to `main` or attach production domains.
@@ -24,6 +29,10 @@ without evidence.
 
 ## Application rollback
 
+For the application 2FA-removal release, Deployment 1 is code-rollback-safe because the legacy
+2FA database schema remains present. Deployment 2 requires both the verified pre-migration database
+backup and compatible code; a code rollback alone cannot restore the removed 2FA database objects.
+
 A Render application rollback is allowed only when the target build is compatible with the schema
 already applied to the database and with current storage records. Before clicking Rollback:
 
@@ -32,7 +41,7 @@ already applied to the database and with current storage records. Before clickin
 - confirm current environment variables and R2 behavior remain compatible;
 - record the target deploy ID, commit, owner, reason, and verification plan.
 
-After rollback, run `/api/health`, deployment smoke, admin TOTP login, role/ownership checks, file
+After rollback, run `/api/health`, deployment smoke, password-only administrator login, role/ownership checks, file
 download checks, and the affected business workflow. Render rollback does not undo database data,
 DNS, third-party state, or operator actions.
 

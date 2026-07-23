@@ -6,6 +6,10 @@
 
 **Repository:** `uluschool847-ai/uluschool`
 
+> **Superseded for application 2FA:** The administrator TOTP requirements in this document were
+> replaced by `2026-07-23-remove-two-factor-authentication-design.md`. Other launch requirements
+> remain active.
+
 ## 1. Summary
 
 This design defines the work required to launch the existing ULU Online School application as a controlled production MVP for Kenya. The launch includes the public site, enrolment and contact forms, manual account creation by an administrator, mandatory administrator 2FA, and the existing student, parent, and teacher portals.

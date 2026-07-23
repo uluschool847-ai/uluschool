@@ -20,7 +20,12 @@ live under `docs/deployment/`.
 
 ## 2. Access control
 
-- Production provider access follows least privilege and requires individual accounts with 2FA.
+- Production provider access follows least privilege and requires individual accounts with
+  provider-level 2FA on Render, GitHub, Cloudflare, Resend/email, and Sentry.
+- ULU Online School administrators authenticate to the application with email and password.
+  Temporary passwords must be changed on first login. Login rate limiting, signed sessions,
+  audit logging, and server-side role enforcement remain mandatory. Infrastructure provider
+  accounts remain protected with provider-level 2FA.
 - `ADMIN` has authorized administration scope; `TEACHER`, `STUDENT`, and `PARENT` remain constrained
   by server-enforced assignment, enrollment, and parent-child ownership.
 - Database and provider credentials are entered only in the relevant environment dashboard. They
@@ -44,7 +49,8 @@ live under `docs/deployment/`.
 
 ## 4. Privacy and school operations
 
-- Admin 2FA is mandatory in staging and production.
+- Application-managed administrator 2FA is not used in staging or production; provider-level 2FA
+  remains mandatory for provider accounts.
 - Enrolment records retain the required consent evidence and link to the current privacy notice.
 - Staff access only the student and parent information needed for their assigned work.
 - Audit and monitoring metadata exclude credentials and unnecessary personal data.

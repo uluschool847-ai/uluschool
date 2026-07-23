@@ -46,8 +46,13 @@ Use `fixed.parent@uluglobalacademy.com` for the linked-child flow and `onboardin
 ## Admin
 Use `fixed.admin@uluglobalacademy.com` or `admin@uluglobalacademy.com`.
 
-- [ ] Admin login works
-- [ ] In local development with `ADMIN_REQUIRE_2FA=true`, post-login redirect to `/admin/security?setup2fa=required` is handled as expected
+ULU Online School administrators authenticate to the application with email and password.
+Temporary passwords must be changed on first login. Login rate limiting, signed sessions,
+audit logging, and server-side role enforcement remain mandatory. Infrastructure provider
+accounts remain protected with provider-level 2FA.
+
+- [ ] Admin login works with email and password and no authenticator prompt appears
+- [ ] A temporary administrator password must be changed before access to `/admin`
 - [ ] `D:\2026\mathSchool\app\(admin)\admin\page.tsx` shows analytics, enquiries, leads, and audit logs
 - [ ] CRM status filter renders human-readable labels (`In Review`, not `in_review`)
 - [ ] Global search by `referenceId` works from the admin dashboard and submission screens

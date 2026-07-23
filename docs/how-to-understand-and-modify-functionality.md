@@ -38,13 +38,20 @@
 - `D:\2026\mathSchool\lib\repositories\`
   - доступ до Prisma / DB queries
 - `D:\2026\mathSchool\lib\auth\`
-  - session, password, 2FA, SSO
+  - session, password, SSO
 - `D:\2026\mathSchool\lib\services\`
   - email, reminders
 - `D:\2026\mathSchool\lib\storage\`
   - локальне файлове сховище
 - `D:\2026\mathSchool\prisma\`
   - schema, migration, seed, verify-db
+
+Поточний контракт автентифікації адміністратора:
+
+ULU Online School administrators authenticate to the application with email and password.
+Temporary passwords must be changed on first login. Login rate limiting, signed sessions,
+audit logging, and server-side role enforcement remain mandatory. Infrastructure provider
+accounts remain protected with provider-level 2FA.
 
 ### 3. Не шукай те, чого тут немає
 
