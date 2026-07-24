@@ -13,12 +13,11 @@ const storagePostgresTest = readFileSync(
 );
 const seedIntegrationFlag = "RUN_SEED_DB_INTEGRATION";
 const storagePostgresIntegrationFlag = "RUN_S3_POSTGRES_INTEGRATION";
-const adminTwoFactorPostgresIntegrationFlag = "RUN_ADMIN_TWO_FACTOR_CHALLENGE_POSTGRES";
+const retiredAdminTwoFactorPostgresIntegrationFlag = "RUN_ADMIN_TWO_FACTOR_CHALLENGE_POSTGRES";
 const task3PostgresIntegrationFlag = "RUN_TASK3_POSTGRES_INTEGRATION";
 const integrationFlags = [
   seedIntegrationFlag,
   storagePostgresIntegrationFlag,
-  adminTwoFactorPostgresIntegrationFlag,
   task3PostgresIntegrationFlag,
 ] as const;
 const verifyJobTimeoutMinutes = 180;
@@ -165,6 +164,10 @@ function assertCiWorkflowContract(
   workflowSource: string,
   storagePostgresTestSource = storagePostgresTest,
 ) {
+  if (workflowSource.includes(retiredAdminTwoFactorPostgresIntegrationFlag)) {
+    throw new Error("CI workflow must not enable the retired application 2FA integration suite");
+  }
+
   assertSeedTestGate(seedTest);
   assertStoragePostgresTestGate(storagePostgresTestSource);
   const parsedWorkflow = asRecord(parse(workflowSource), "workflow");
@@ -294,7 +297,7 @@ describe("GitHub CI production-readiness contract", () => {
     expect(() => assertCiWorkflowContract(shortenedTimeout)).toThrow(/180 minutes/i);
   });
 
-  it.each([adminTwoFactorPostgresIntegrationFlag, task3PostgresIntegrationFlag])(
+  it.each([task3PostgresIntegrationFlag])(
     "enables %s only on the full test step",
     (integrationFlag) => {
       const parsedWorkflow = asRecord(parse(workflow), "workflow");

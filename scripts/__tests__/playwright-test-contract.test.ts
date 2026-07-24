@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
 const RUNNER = join(ROOT, "scripts", "playwright-test.mjs");
+const ADMIN_SMOKE = join(ROOT, "scripts", "admin-smoke.mjs");
 const RELEASE_REPORTER = join(ROOT, "scripts", "playwright-release-reporter.mjs");
 const HOSTILE_REPORTER_MARKER = "Hostile status reporter restored passed status.";
 const RELEASE_CONFIG_ERROR =
@@ -867,9 +868,11 @@ test.skip("controlled focused skipped test", () => {});
     expect(scripts["test:e2e:focused"]).toBe("node scripts/playwright-test.mjs --isolated-server");
 
     const source = readFileSync(RUNNER, "utf8");
+    const adminSmokeSource = readFileSync(ADMIN_SMOKE, "utf8");
     expect(source).not.toContain("admin-2fa");
     expect(source).not.toContain("E2E_ADMIN_REQUIRE_2FA");
     expect(source).not.toContain("ADMIN_REQUIRE_2FA");
+    expect(adminSmokeSource).not.toContain("ADMIN_REQUIRE_2FA");
   });
 
   cliIt("standard Playwright collection excludes only the partitioned signed-delivery path", () => {
