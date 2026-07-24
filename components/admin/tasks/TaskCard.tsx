@@ -9,6 +9,10 @@ import { normalizeActionResult } from "@/lib/action-result";
 
 type TaskStatus = "PENDING" | "IN_PROGRESS" | "COMPLETED";
 
+const taskDueDateFormatter = new Intl.DateTimeFormat("en-KE", {
+  timeZone: "Africa/Nairobi",
+});
+
 export type AdminTask = {
   id: string;
   title: string;
@@ -40,6 +44,10 @@ function resolveMetadataLink(task: AdminTask) {
   if (task.meta?.enquiryId) return `/admin/enquiries/${task.meta.enquiryId}`;
   if (task.relatedEnquiry?.id) return `/admin/enquiries/${task.relatedEnquiry.id}`;
   return null;
+}
+
+function formatTaskDueDate(dueDate: Date | string) {
+  return taskDueDateFormatter.format(new Date(dueDate));
 }
 
 export function TaskCard({
@@ -127,7 +135,7 @@ export function TaskCard({
             {task.priority ? <span>{task.priority}</span> : null}
             <span>{task.status}</span>
             <time dateTime={new Date(task.dueDate).toISOString()}>
-              Due {new Date(task.dueDate).toLocaleDateString()}
+              Due {formatTaskDueDate(task.dueDate)}
             </time>
             <span>Assigned: {currentAssignee?.fullName ?? "Unassigned"}</span>
           </div>
