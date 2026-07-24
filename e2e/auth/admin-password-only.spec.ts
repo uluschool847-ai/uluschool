@@ -15,6 +15,11 @@ const password = `Configured-Admin-${crypto.randomUUID()}!`;
 const temporaryPassword = `Bootstrap-Admin-${crypto.randomUUID()}!`;
 const rotatedPassword = `Rotated-Admin-${crypto.randomUUID()}!`;
 const studentPassword = `Student-Password-${crypto.randomUUID()}!`;
+const dormantTwoFactorState = {
+  twoFactorEnabled: true,
+  twoFactorSecret: "JBSWY3DPEHPK3PXP",
+  twoFactorBackupCodes: ["local-dormant-backup-code-a", "local-dormant-backup-code-b"],
+};
 
 function assertLocalDatabase() {
   const databaseUrl = new URL(process.env.DATABASE_URL ?? "");
@@ -26,6 +31,7 @@ async function createAdminFixture(input: {
   email: string;
   password: string;
   mustChangePassword: boolean;
+  dormantTwoFactorState?: typeof dormantTwoFactorState;
 }) {
   await prisma.appUser.create({
     data: {
@@ -36,6 +42,7 @@ async function createAdminFixture(input: {
       role: UserRole.ADMIN,
       isActive: true,
       mustChangePassword: input.mustChangePassword,
+      ...input.dormantTwoFactorState,
     },
   });
 }
@@ -115,6 +122,7 @@ test.describe("Administrator password-only login", () => {
         email: configuredAdminEmail,
         password,
         mustChangePassword: false,
+        dormantTwoFactorState,
       }),
       createAdminFixture({
         id: bootstrapAdminId,
@@ -134,11 +142,37 @@ test.describe("Administrator password-only login", () => {
     }
   });
 
-  test("an existing configured admin signs in with password only", async ({ page }) => {
+  test("an existing configured admin signs in with password only without using retired 2FA", async ({
+    page,
+  }) => {
+    const retiredTwoFactorRequests: string[] = [];
+    const recordRetiredTwoFactorRequest = (request: import("@playwright/test").Request) => {
+      const { pathname } = new URL(request.url());
+      if (pathname === "/portal/setup/2fa" || pathname === "/portal/login/verify-2fa") {
+        retiredTwoFactorRequests.push(pathname);
+      }
+    };
+    page.on("request", recordRetiredTwoFactorRequest);
+
     await login(page, configuredAdminEmail, password);
 
     await expect(page).toHaveURL(/\/admin(?:\?|$)/);
     await expect(page.getByRole("heading", { name: "Admin Dashboard", exact: true })).toBeVisible();
+    expect(retiredTwoFactorRequests).toEqual([]);
+    await expect
+      .poll(async () =>
+        prisma.appUser.findUniqueOrThrow({
+          where: { id: configuredAdminId },
+          select: {
+            twoFactorEnabled: true,
+            twoFactorSecret: true,
+            twoFactorBackupCodes: true,
+          },
+        }),
+      )
+      .toEqual(dormantTwoFactorState);
+
+    page.off("request", recordRetiredTwoFactorRequest);
   });
 
   test("a bootstrap admin changes the temporary password and reaches admin directly", async ({

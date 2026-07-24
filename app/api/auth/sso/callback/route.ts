@@ -1,7 +1,7 @@
 import { UserRole } from "@prisma/client";
 import { NextResponse } from "next/server";
 
-import { createSession } from "@/lib/auth/session";
+import { clearInitialSetupSession, createSession } from "@/lib/auth/session";
 import { isSsoEnabled, verifySsoSignature } from "@/lib/auth/sso";
 import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 import { findUserByEmail } from "@/lib/repositories/user-repository";
@@ -51,6 +51,7 @@ export async function GET(request: Request) {
     );
   }
 
+  await clearInitialSetupSession();
   await createSession({
     uid: user.id,
     role: user.role,

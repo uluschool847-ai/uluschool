@@ -4,11 +4,13 @@ import { UserRole } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createSessionMock = vi.hoisted(() => vi.fn());
+const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
 const findUserByEmailMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth/session", () => ({
   createSession: createSessionMock,
+  clearInitialSetupSession: clearInitialSetupSessionMock,
 }));
 
 vi.mock("@/lib/repositories/admin-audit-repository", () => ({
@@ -209,6 +211,10 @@ describe("admin SSO callback route", () => {
       fullName: "SSO Admin",
       authMethod: "sso",
     });
+    expect(clearInitialSetupSessionMock).toHaveBeenCalledOnce();
+    expect(clearInitialSetupSessionMock.mock.invocationCallOrder[0]).toBeLessThan(
+      createSessionMock.mock.invocationCallOrder[0],
+    );
     expect(createAdminAuditLogMock).toHaveBeenCalledWith({
       adminUserId: "admin-1",
       action: "ADMIN_SSO_LOGIN_SUCCESS",
