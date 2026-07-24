@@ -9,7 +9,6 @@ const COOKIE_DOMAIN = new URL(process.env.PLAYWRIGHT_BASE_URL ?? "http://localho
 const ADMIN_ONLY_ROUTES = [
   { path: "/admin", heading: "Admin Dashboard" },
   { path: "/admin/users", heading: "User Management" },
-  { path: "/admin/security", heading: "Admin Security" },
   { path: "/admin/billing", heading: "Billing" },
   { path: "/admin/audit", heading: "Audit Log" },
 ] as const;

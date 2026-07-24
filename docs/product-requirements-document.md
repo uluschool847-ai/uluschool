@@ -277,7 +277,6 @@ Primary routes:
 - `/admin/billing`
 - `/admin/audit`
 - `/admin/analytics`
-- `/admin/security`
 - `/admin/cms`
 - `/admin/enquiries/[id]`
 - `/admin/leads`

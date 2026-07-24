@@ -57,7 +57,6 @@ describe("admin SSO callback route", () => {
       role: UserRole.ADMIN,
       isActive: true,
       mustChangePassword: false,
-      twoFactorEnabled: true,
     });
   });
 
@@ -175,7 +174,6 @@ describe("admin SSO callback route", () => {
       role: UserRole.ADMIN,
       isActive: true,
       mustChangePassword: true,
-      twoFactorEnabled: false,
     });
     const ts = String(Date.now());
 

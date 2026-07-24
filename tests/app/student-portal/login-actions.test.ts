@@ -79,8 +79,6 @@ describe("app/student-portal/actions.ts login actions", () => {
       isActive: true,
       passwordHash: "hashed",
       mustChangePassword: false,
-      twoFactorEnabled: false,
-      twoFactorSecret: null,
     });
     verifyPasswordMock.mockResolvedValue(true);
     createSessionMock.mockResolvedValue(undefined);
@@ -88,7 +86,7 @@ describe("app/student-portal/actions.ts login actions", () => {
     logAuthEventMock.mockResolvedValue(undefined);
   });
 
-  it("creates an administrator password session without an ADMIN_REQUIRE_2FA setting", async () => {
+  it("creates an administrator password session and redirects to the dashboard", async () => {
     const { loginPortal } = await import("../../../app/student-portal/actions");
 
     await expect(loginPortal({ success: false, message: "" }, makeLoginFormData())).rejects.toThrow(

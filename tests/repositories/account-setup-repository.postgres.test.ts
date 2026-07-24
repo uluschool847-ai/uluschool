@@ -10,12 +10,12 @@ const suite = describe.skipIf(!runPostgres);
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const createdUserIds: string[] = [];
 
-async function createInitialSetupStudent() {
+async function createInitialSetupAdmin() {
   const user = await prisma.appUser.create({
     data: {
-      email: `initial-password-${runId}@example.com`,
-      fullName: "Initial Password Student",
-      role: UserRole.STUDENT,
+      email: `initial-admin-password-${runId}@example.com`,
+      fullName: "Initial Password Admin",
+      role: UserRole.ADMIN,
       passwordHash: await hashPassword("CurrentPass123!"),
       isActive: true,
       mustChangePassword: true,
@@ -25,7 +25,7 @@ async function createInitialSetupStudent() {
   return user;
 }
 
-suite("initial password PostgreSQL integration", { timeout: 60_000 }, () => {
+suite("initial administrator password PostgreSQL integration", { timeout: 60_000 }, () => {
   beforeAll(async () => {
     await prisma.$connect();
   });
@@ -41,8 +41,8 @@ suite("initial password PostgreSQL integration", { timeout: 60_000 }, () => {
     await prisma.$disconnect();
   });
 
-  it("rotates an initial password transactionally and returns only session-safe identity", async () => {
-    const user = await createInitialSetupStudent();
+  it("rotates the temporary password and rejects the old administrator password", async () => {
+    const user = await createInitialSetupAdmin();
 
     const result = await changeInitialPassword(user.id, "CurrentPass123!", "NewPassword123!");
     const current = await prisma.appUser.findUniqueOrThrow({ where: { id: user.id } });
@@ -51,9 +51,10 @@ suite("initial password PostgreSQL integration", { timeout: 60_000 }, () => {
       id: user.id,
       email: user.email,
       fullName: user.fullName,
-      role: UserRole.STUDENT,
+      role: UserRole.ADMIN,
     });
     expect(await verifyPassword("NewPassword123!", current.passwordHash)).toBe(true);
+    expect(await verifyPassword("CurrentPass123!", current.passwordHash)).toBe(false);
     expect(current.mustChangePassword).toBe(false);
     await expect(
       prisma.adminAuditLog.count({

@@ -305,6 +305,19 @@ describe("session validation and expiry handling", () => {
       );
     });
 
+    it.each(["/admin/security", "/admin/security/sessions"])(
+      "normalizes the retired admin security next path %s to the dashboard",
+      (nextPath) => {
+        expect(sessionModule.getPortalRedirectPath(UserRole.ADMIN, nextPath)).toBe("/admin");
+      },
+    );
+
+    it("does not treat a near-miss admin security sibling as retired", () => {
+      expect(sessionModule.getPortalRedirectPath(UserRole.ADMIN, "/admin/security-center")).toBe(
+        "/admin/security-center",
+      );
+    });
+
     it.each([
       ["deleted", null],
       ["inactive", makeDbUser({ isActive: false })],
@@ -467,6 +480,7 @@ describe("session validation and expiry handling", () => {
       ["malformed expiry", { purpose: "SESSION", exp: "never" }],
       ["invalid optional fullName", { purpose: "SESSION", fullName: 42 }],
       ["unknown field", { purpose: "SESSION", unexpected: true }],
+      ["version 3 session with retired mfaVerified", { purpose: "SESSION", mfaVerified: true }],
     ])("rejects a signed normal-session payload with %s", async (_case, overrides) => {
       const token = await createSignedTestPayload({
         purpose: "SESSION",

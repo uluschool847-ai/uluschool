@@ -74,7 +74,7 @@ describe("middleware signed-session expiry integration", () => {
 
   it.each([
     ["password", UserRole.TEACHER, "/portal/teacher"],
-    ["sso", UserRole.ADMIN, "/admin/security"],
+    ["sso", UserRole.ADMIN, "/admin/audit"],
   ] as const)(
     "rejects a signed legacy version 2 %s session in middleware",
     async (authMethod, role, path) => {

@@ -27,13 +27,16 @@ vi.mock("@/lib/repositories/user-repository", () => ({
   findUserByEmail: findUserByEmailMock,
 }));
 
-vi.mock("@/lib/auth/session", () => ({
-  clearSession: clearSessionMock,
-  clearInitialSetupSession: clearInitialSetupSessionMock,
-  createInitialSetupSession: createInitialSetupSessionMock,
-  createSession: createSessionMock,
-  getPortalRedirectPath: vi.fn((role: UserRole, nextPath?: string | null) => nextPath ?? "/admin"),
-}));
+vi.mock("@/lib/auth/session", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/auth/session")>();
+  return {
+    ...actual,
+    clearSession: clearSessionMock,
+    clearInitialSetupSession: clearInitialSetupSessionMock,
+    createInitialSetupSession: createInitialSetupSessionMock,
+    createSession: createSessionMock,
+  };
+});
 
 function expectAllAuthCookiesClearedBefore(issueMock: ReturnType<typeof vi.fn>) {
   expect(clearSessionMock).toHaveBeenCalledOnce();
@@ -62,7 +65,6 @@ describe("portal login administrator actions", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    Reflect.deleteProperty(process.env, "ADMIN_REQUIRE_2FA");
     process.env.NODE_ENV = "development";
     verifyPasswordMock.mockResolvedValue(true);
     createAdminAuditLogMock.mockResolvedValue(undefined);
@@ -75,16 +77,14 @@ describe("portal login administrator actions", () => {
       isActive: true,
       passwordHash: "hashed",
       mustChangePassword: false,
-      twoFactorEnabled: true,
-      twoFactorSecret: "SECRET123",
     });
   });
 
-  it("creates a normal administrator session after valid password authentication", async () => {
+  it("normalizes a retired admin security next path after valid password authentication", async () => {
     const { loginAction } = await import("@/app/portal/login/actions");
 
     await expect(loginAction({ success: false, message: "" }, makeLoginFormData())).rejects.toThrow(
-      "REDIRECT:/admin/security",
+      "REDIRECT:/admin",
     );
 
     expect(createSessionMock).toHaveBeenCalledWith({
@@ -116,8 +116,6 @@ describe("portal login administrator actions", () => {
       isActive: true,
       passwordHash: "hashed",
       mustChangePassword: true,
-      twoFactorEnabled: false,
-      twoFactorSecret: null,
     });
     const { loginAction } = await import("@/app/portal/login/actions");
 

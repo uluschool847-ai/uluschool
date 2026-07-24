@@ -123,9 +123,19 @@ describe("Google Calendar environment and dependency readiness", () => {
       "app/portal/setup/2fa",
       "app/portal/login/verify-2fa",
       "app/(admin)/admin/security",
+      "components/auth/InitialTwoFactorForm.tsx",
+      "components/auth/two-factor-form.tsx",
+      "components/auth/__tests__/InitialTwoFactorForm.test.tsx",
+      "components/admin/two-factor-settings.tsx",
+      "components/admin/__tests__/TwoFactorSettingsFeedback.test.tsx",
       "lib/auth/two-factor.ts",
+      "lib/auth/__tests__/two-factor.test.ts",
+      "lib/auth/backup-code-hash.ts",
+      "lib/validations/two-factor.ts",
       "lib/repositories/admin-two-factor-challenge-repository.ts",
-    ];
+      "lib/repositories/__tests__/admin-two-factor-challenge-repository.test.ts",
+      "tests/repositories/admin-two-factor-challenge-repository.postgres.test.ts",
+    ] as const;
     for (const relativePath of removedPaths) {
       expect(existsSync(resolve(process.cwd(), relativePath))).toBe(false);
     }

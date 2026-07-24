@@ -105,8 +105,9 @@ export default function PrivacyPolicyPage() {
           </p>
           <h2 className="text-xl font-semibold text-foreground">9. Security controls</h2>
           <p>
-            Controls include role-based access controls, authentication and administrator two-factor
-            controls where required, server-side validation, rate limiting and anti-spam checks,
+            Application administrators authenticate with email and password. Infrastructure provider
+            accounts remain protected with provider-level 2FA. Additional controls include
+            role-based access controls, server-side validation, rate limiting and anti-spam checks,
             private object storage with controlled access links, audit and security event logging,
             and service monitoring where enabled. Access is limited by role and operational need. No
             technical or organisational measure can remove every risk.

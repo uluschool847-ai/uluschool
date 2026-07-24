@@ -102,13 +102,15 @@ manual browser verification for UI flows, and a final implementation report.
 | `SEED_PORTAL_PASSWORD` | Local/test only | Password used by disposable local seed fixtures; never a production account-creation default |
 | `BOOTSTRAP_ADMIN_EMAIL` | First production deploy only | Email for the first administrator when no active admin exists |
 | `BOOTSTRAP_ADMIN_NAME` | First production deploy only | Display name for the first administrator |
-| `BOOTSTRAP_ADMIN_PASSWORD` | First production deploy only | One-time bootstrap credential entered directly in Render and removed after rotation plus 2FA enrollment |
-| `ADMIN_REQUIRE_2FA` | Yes on Render | Must be `true` in staging/production; `false` is limited to controlled local/demo tests |
-| `ADMIN_2FA_SECRET` | Local seed only | Preloads local fixture TOTP; hosted admins enroll interactively |
-| `TWO_FACTOR_ISSUER` | Optional | TOTP issuer label shown in authenticator apps |
+| `BOOTSTRAP_ADMIN_PASSWORD` | First production deploy only | One-time bootstrap credential entered directly in Render and removed after the required first-login rotation |
 | `ADMIN_SSO_ENABLED` | Optional | Enables the admin SSO callback flow |
 | `ADMIN_SSO_SHARED_SECRET` | Optional | Shared secret used by `/api/auth/sso/callback` |
 | `ADMIN_SSO_LOGIN_URL` | Optional | Upstream SSO login URL |
+
+ULU Online School administrators authenticate to the application with email and password.
+Temporary passwords must be changed on first login. Login rate limiting, signed sessions, audit
+logging, and server-side role enforcement remain mandatory. Infrastructure provider accounts
+remain protected with provider-level 2FA.
 
 #### SMTP / Email
 
@@ -186,7 +188,7 @@ never `npm run db:seed`.
 
 | Email | Password | Role | Notes |
 | --- | --- | --- | --- |
-| `admin@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Admin | Local main admin fixture; `ADMIN_2FA_SECRET` can seed TOTP |
+| `admin@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Admin | Local main administrator fixture |
 | `teacher@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Teacher | General teacher fixture |
 | `teacher2@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Teacher | Extra teacher fixture |
 | `parent@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Parent | General parent fixture |
@@ -252,8 +254,9 @@ npm run db:seed
 
 #### Admin flow
 1. Log in as `fixed.admin@uluglobalacademy.com` or `admin@uluglobalacademy.com`.
-2. In local development with `ADMIN_REQUIRE_2FA=true`, expect admin login to redirect to `/admin/security?setup2fa=required` before normal admin work. The security page explains that setup is required and links directly to the 2FA setup panel.
-3. For local demos where forced setup would interrupt the flow, set `ADMIN_REQUIRE_2FA=false` and restart the dev server. Admin login can then continue to `/admin`, while `/admin/security` still allows optional 2FA setup.
+2. Confirm a valid administrator password redirects directly to `/admin`.
+3. For an account with a temporary password, rotate it before entering `/admin`, sign out, and
+   confirm the old temporary password is rejected while the new password succeeds.
 4. Verify `/admin` for analytics, CRM summaries, enquiries, leads, and recent audit logs.
 5. Verify `/admin/users`, `/admin/tasks`, `/admin/billing`, `/admin/analytics`, `/admin/audit`, and `/admin/cms`.
 6. Under `/admin/cms`, verify pages, blog posts, and FAQ items can be listed/edited.
@@ -311,7 +314,7 @@ Windows note:
 ### Architecture Overview
 - **Frontend / Full-stack runtime:** Next.js 15 App Router with React 18 server and client components
 - **Database:** PostgreSQL via Prisma Client
-- **Auth:** custom signed cookie sessions (`ulu_session`) with optional admin TOTP and optional admin SSO callback
+- **Auth:** email/password authentication with custom signed cookie sessions (`ulu_session`) and an optional admin SSO callback
 - **UI:** Tailwind CSS, Radix primitives, and local UI components in `components/ui`
 - **Persistence layer:** repository modules under `D:\2026\mathSchool\lib\repositories`
 - **Public CMS:** Prisma-backed Pages, Blog Posts, and FAQ items surfaced through `/admin/cms`, `/pages`, `/blog`, and FAQ-driven page sections
@@ -344,7 +347,6 @@ Windows note:
 - Manager task operations
 - Billing visibility and local payment status/refund actions
 - CMS management for pages, blog posts, and FAQ items
-- Security / 2FA setup page
 - Audit log and analytics pages
 
 ### Known Limitations (Local Dev)

@@ -899,6 +899,7 @@ test.skip("controlled focused skipped test", () => {});
     expect(result.status, output).toBe(0);
     expect(output).toContain(decoyRelativePath);
     expect(output).toContain("signed delivery decoy remains in standard collection");
+    expect(output).toContain("auth/admin-password-only.spec.ts");
     expect(output).not.toContain("storage/signed-file-delivery.spec.ts");
     expect(output).not.toContain("portals/admin-teachers.spec.ts");
     expect(output).not.toContain("portals/teacher-academics.spec.ts");

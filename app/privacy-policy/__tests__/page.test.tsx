@@ -51,6 +51,8 @@ describe("Privacy Policy", () => {
     expect(content).toMatch(/purpose.*retention|retained.*necessary/i);
     expect(content).toMatch(/legal.*operational.*retention|retention.*legal.*operational/i);
     expect(content).toMatch(/role-based access|access controls/i);
+    expect(content).toMatch(/provider accounts remain protected with provider-level 2FA/i);
+    expect(content).not.toMatch(/administrator two-factor|admin(?:istrator)? (?:2FA|TOTP)/i);
     expect(content).toMatch(/private object storage/i);
     expect(screen.getByRole("link", { name: "privacy@uluglobalacademy.com" })).toHaveAttribute(
       "href",

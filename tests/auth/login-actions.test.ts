@@ -74,7 +74,6 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
       isActive: true,
       passwordHash: "hashed",
       mustChangePassword: false,
-      twoFactorEnabled: false,
     });
   });
 
@@ -106,7 +105,6 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
       isActive: true,
       passwordHash: "hashed",
       mustChangePassword: true,
-      twoFactorEnabled: false,
     });
     const { loginAction } = await import("@/app/portal/login/actions");
     const formData = new FormData();
@@ -216,7 +214,6 @@ describe("Auth Server Actions - Next Parameter Resolution", () => {
       isActive: true,
       passwordHash: "hashed",
       mustChangePassword: true,
-      twoFactorEnabled: false,
     });
     const { loginAction } = await import("@/app/portal/login/actions");
     const formData = new FormData();

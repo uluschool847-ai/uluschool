@@ -11,6 +11,7 @@ const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
 const SESSION_SECURITY_VERSION = 3 as const;
 const INITIAL_SETUP_DURATION_MS = 1000 * 60 * 15;
 const MAX_INITIAL_SETUP_NEXT_PATH_LENGTH = 2048;
+const RETIRED_ADMIN_SECURITY_PATH = "/admin/security";
 
 export type AuthMethod = "password" | "sso";
 
@@ -184,6 +185,14 @@ function isSafePortalNextPath(nextPath: string, role: UserRole) {
   );
 }
 
+function isRetiredAdminSecurityPath(nextPath: string) {
+  const pathname = nextPath.split(/[?#]/, 1)[0];
+  return (
+    pathname === RETIRED_ADMIN_SECURITY_PATH ||
+    pathname.startsWith(`${RETIRED_ADMIN_SECURITY_PATH}/`)
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -286,6 +295,10 @@ export function getPortalLoginPath(nextPath?: string | null) {
 
 export function getPortalRedirectPath(role: UserRole, nextPath?: string | null) {
   const normalized = nextPath?.trim();
+  if (role === UserRole.ADMIN && normalized && isRetiredAdminSecurityPath(normalized)) {
+    return getPortalDashboardPath(role);
+  }
+
   if (normalized && isSafePortalNextPath(normalized, role)) {
     return normalized;
   }

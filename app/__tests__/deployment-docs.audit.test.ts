@@ -159,6 +159,12 @@ describe("active operations documentation", () => {
     "docs/qa-checklist.md",
     "docs/qa-matrix.md",
   ] as const;
+  const passwordOnlyContractDocs = [
+    "README.md",
+    "app/privacy-policy/page.tsx",
+    "docs/product-requirements-document.md",
+    "docs/admin-portal-test-plan.md",
+  ] as const;
 
   it("does not advertise the removed shared portal password", () => {
     const offenders = currentDocs.filter((relativePath) =>
@@ -188,5 +194,39 @@ describe("active operations documentation", () => {
     expect(activeUploadDocs).toContain("private Cloudflare R2");
     expect(activeUploadDocs).toContain("server-side session");
     expect(activeUploadDocs).not.toMatch(/simple role gate|request roles|no S3\/GCS\/Azure/i);
+  });
+
+  it("describes password-only application admin access without retired 2FA instructions", () => {
+    const forbiddenPatterns = [
+      /\bADMIN_REQUIRE_2FA\b/,
+      /\bADMIN_2FA_SECRET\b/,
+      /\bTWO_FACTOR_ISSUER\b/,
+      /\bE2E_ADMIN_REQUIRE_2FA\b/,
+      /\/admin\/security\b/,
+      /\/portal\/setup\/2fa\b/,
+      /\/portal\/login\/verify-2fa\b/,
+      /\bTOTP\b/i,
+      /\botpauth\b/i,
+      /\bauthenticator (?:app|prompt)\b/i,
+      /\bbackup codes?\b/i,
+      /\badministrator two-factor\b/i,
+      /\badmin(?:istrator)? (?:2FA|TOTP)\b/i,
+    ] as const;
+    const offenders = passwordOnlyContractDocs.flatMap((relativePath) => {
+      const source = read(relativePath);
+      return forbiddenPatterns
+        .filter((pattern) => pattern.test(source))
+        .map((pattern) => `${relativePath}: ${pattern.source}`);
+    });
+
+    expect(offenders, offenders.join("\n")).toEqual([]);
+
+    const activeContract = passwordOnlyContractDocs
+      .map((relativePath) => read(relativePath))
+      .join("\n");
+    expect(activeContract).toContain(
+      "administrators authenticate to the application with email and password",
+    );
+    expect(activeContract).toContain("provider-level 2FA");
   });
 });

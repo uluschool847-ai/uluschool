@@ -117,13 +117,26 @@ describe("Middleware Routing and Access Control", () => {
   });
 
   describe("Restricted Initial Setup", () => {
-    it.each(["/portal/setup/2fa", "/portal/login/verify-2fa"])(
-      "redirects retired route %s to portal login",
-      async (path) => {
-        await middleware(createMockRequest(path));
+    it.each([
+      "/portal/setup/2fa",
+      "/portal/setup/2fa/confirm",
+      "/portal/login/verify-2fa",
+      "/portal/login/verify-2fa/recovery",
+    ])("redirects retired route %s to portal login", async (path) => {
+      await middleware(createMockRequest(path));
 
-        expect(redirectMock).toHaveBeenCalledWith(new URL("http://localhost/portal/login"));
-        expect(responseCookieDeleteMock).toHaveBeenCalledWith("ulu_admin_2fa_pending");
+      expect(redirectMock).toHaveBeenCalledWith(new URL("http://localhost/portal/login"));
+      expect(responseCookieDeleteMock).toHaveBeenCalledWith("ulu_admin_2fa_pending");
+    });
+
+    it.each(["/portal/setup/2fa-backup", "/portal/login/verify-2fa-old"])(
+      "does not treat near-miss retired route sibling %s as retired",
+      async (path) => {
+        const response = await middleware(createMockRequest(path));
+
+        expect(response).toEqual(expect.objectContaining({ cookies: expect.any(Object) }));
+        expect(redirectMock).not.toHaveBeenCalled();
+        expect(verifySessionToken).not.toHaveBeenCalled();
       },
     );
 
@@ -137,6 +150,28 @@ describe("Middleware Routing and Access Control", () => {
         expect(redirectMock).not.toHaveBeenCalled();
       },
     );
+  });
+
+  describe("Retired Admin Security Compatibility", () => {
+    it.each(["/admin/security", "/admin/security/sessions"])(
+      "redirects %s to the admin dashboard and clears the pending cookie",
+      async (path) => {
+        await middleware(createMockRequest(path, undefined, undefined, "legacy-pending-token"));
+
+        expect(redirectMock).toHaveBeenCalledWith(new URL("http://localhost/admin"));
+        expect(responseCookieDeleteMock).toHaveBeenCalledWith("ulu_admin_2fa_pending");
+        expect(verifySessionToken).not.toHaveBeenCalled();
+      },
+    );
+
+    it("keeps a near-miss sibling under normal admin protection", async () => {
+      await middleware(createMockRequest("/admin/security-center"));
+
+      const redirectUrl = redirectMock.mock.lastCall?.[0]?.toString() ?? "";
+      expect(redirectUrl).toContain("/portal/login");
+      expect(redirectUrl).toContain("callbackUrl=%2Fadmin%2Fsecurity-center");
+      expect(redirectUrl).not.toBe("http://localhost/admin");
+    });
   });
 
   describe("Authorized Access", () => {
