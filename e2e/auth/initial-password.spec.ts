@@ -137,7 +137,6 @@ test.describe("Initial password setup", () => {
     await fillPasswordForm(page, INITIAL_ADMIN_PASSWORD, rotatedAdminCredential);
 
     await expect(page).toHaveURL(/\/admin$/);
-    await expect(page).not.toHaveURL(/\/(portal\/login\/verify-2fa|portal\/setup\/2fa)/);
     await expect(page.getByRole("heading", { name: "Admin Dashboard", exact: true })).toBeVisible();
   });
 });

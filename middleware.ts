@@ -4,10 +4,7 @@ import { NextResponse } from "next/server";
 import { verifySessionToken } from "./lib/auth/session";
 
 const SESSION_COOKIE = "ulu_session";
-const LEGACY_ADMIN_PENDING_2FA_COOKIE = "ulu_admin_2fa_pending";
 const ATTRIBUTION_MAX_AGE = 60 * 60 * 24 * 30;
-const RETIRED_TWO_FACTOR_PATHS = ["/portal/setup/2fa", "/portal/login/verify-2fa"] as const;
-const RETIRED_ADMIN_SECURITY_PATH = "/admin/security";
 
 const TOKEN_AUTH_API_PREFIXES = [
   "/api/alerts/test",
@@ -89,21 +86,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (matchesAnyPrefix(pathname, RETIRED_TWO_FACTOR_PATHS)) {
-    const redirectResponse = NextResponse.redirect(new URL("/portal/login", request.url));
-    redirectResponse.cookies.delete(LEGACY_ADMIN_PENDING_2FA_COOKIE);
-    return redirectResponse;
-  }
-
-  if (matchesPrefix(pathname, RETIRED_ADMIN_SECURITY_PATH)) {
-    const redirectResponse = NextResponse.redirect(new URL("/admin", request.url));
-    redirectResponse.cookies.delete(LEGACY_ADMIN_PENDING_2FA_COOKIE);
-    return redirectResponse;
-  }
-
   const response = NextResponse.next();
   setAttributionCookies(request, response);
-  response.cookies.delete(LEGACY_ADMIN_PENDING_2FA_COOKIE);
 
   // Define active route policies
   const isPortalLoginPath = matchesPrefix(pathname, "/portal/login");

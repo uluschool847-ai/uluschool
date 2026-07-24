@@ -149,7 +149,6 @@ describe("Parent profile page", () => {
       profile({
         passwordHash: "hashed-password",
         sessionToken: "secret-session-token",
-        twoFactorSecret: "secret-2fa",
       }),
     );
     const page = await loadPage();
@@ -158,7 +157,6 @@ describe("Parent profile page", () => {
 
     expect(container.textContent).not.toContain("hashed-password");
     expect(container.textContent).not.toContain("secret-session-token");
-    expect(container.textContent).not.toContain("secret-2fa");
   });
 
   it("rejects non-parent roles before loading profile data", async () => {
