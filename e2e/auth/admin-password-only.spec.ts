@@ -15,9 +15,18 @@ const password = `Configured-Admin-${crypto.randomUUID()}!`;
 const temporaryPassword = `Bootstrap-Admin-${crypto.randomUUID()}!`;
 const rotatedPassword = `Rotated-Admin-${crypto.randomUUID()}!`;
 const studentPassword = `Student-Password-${crypto.randomUUID()}!`;
+const base32Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+function generateDormantTotpSecret() {
+  return Array.from(
+    crypto.getRandomValues(new Uint8Array(32)),
+    (value) => base32Alphabet[value % base32Alphabet.length],
+  ).join("");
+}
+
 const dormantTwoFactorState = {
   twoFactorEnabled: true,
-  twoFactorSecret: "JBSWY3DPEHPK3PXP",
+  twoFactorSecret: generateDormantTotpSecret(),
   twoFactorBackupCodes: ["local-dormant-backup-code-a", "local-dormant-backup-code-b"],
 };
 
