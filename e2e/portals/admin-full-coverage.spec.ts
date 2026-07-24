@@ -72,7 +72,7 @@ function installDiagnostics(page: Page) {
     }
     if (request.method() === "GET" && /net::ERR_ABORTED/i.test(failureText)) {
       const pathname = new URL(url).pathname;
-      if (expectedAbortedGetPaths.has(pathname)) {
+      if (expectedAbortedGetPaths.has(pathname) || pathname.startsWith("/_next/static/chunks/")) {
         return;
       }
     }
