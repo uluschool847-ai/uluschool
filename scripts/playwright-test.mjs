@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 function escapeRegExp(value) {
   return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
@@ -44,6 +45,77 @@ function expandArg(arg) {
     .sort();
 
   return matches.length > 0 ? matches : [arg];
+}
+
+const playwrightOptionsWithRequiredValues = new Set([
+  "--browser",
+  "--global-timeout",
+  "--grep",
+  "--grep-invert",
+  "--max-failures",
+  "--output",
+  "--project",
+  "--repeat-each",
+  "--retries",
+  "--run-agents",
+  "--shard",
+  "--test-list",
+  "--test-list-invert",
+  "--timeout",
+  "--trace",
+  "--tsconfig",
+  "--ui-host",
+  "--ui-port",
+  "--update-source-method",
+  "--workers",
+  "-g",
+  "-j",
+]);
+
+function isPlaywrightConfigOption(arg) {
+  return (
+    arg === "--config" ||
+    arg.startsWith("--config=") ||
+    arg === "-c" ||
+    arg.startsWith("-c=") ||
+    (arg.startsWith("-c") && arg.length > 2)
+  );
+}
+
+function withReleaseReporter(args, reporterPath) {
+  const forwardedArgs = [];
+  const releaseReporterArg = `--reporter=${reporterPath}`;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--") {
+      return [...forwardedArgs, releaseReporterArg, ...args.slice(index)];
+    }
+    if (isPlaywrightConfigOption(arg)) {
+      throw new Error("Release Playwright partitions do not accept caller --config/-c overrides.");
+    }
+    if (arg === "--reporter") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new Error("--reporter requires a reporter value.");
+      }
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--reporter=")) {
+      if (!arg.slice("--reporter=".length)) {
+        throw new Error("--reporter requires a reporter value.");
+      }
+      continue;
+    }
+    forwardedArgs.push(arg);
+    if (playwrightOptionsWithRequiredValues.has(arg) && args[index + 1] !== undefined) {
+      forwardedArgs.push(args[index + 1]);
+      index += 1;
+    }
+  }
+
+  return [...forwardedArgs, releaseReporterArg];
 }
 
 function portFromBaseUrl(baseUrl) {
@@ -98,13 +170,99 @@ async function ensureBaseUrl() {
   process.env.PLAYWRIGHT_BASE_URL = `http://localhost:${port}`;
 }
 
+const isolatedServerFlag = "--isolated-server";
+const nextStartFlag = "--next-start";
+const testPlaywrightCliFlagPrefix = "--test-playwright-cli=";
+const partitionFlags = new Map([
+  ["--standard-partition", "standard"],
+  ["--storage-partition", "storage"],
+  ["--signed-delivery-partition", "signed-delivery"],
+]);
+const rawArgs = process.argv.slice(2);
+const testPlaywrightCliFlags = rawArgs.filter((arg) => arg.startsWith(testPlaywrightCliFlagPrefix));
+
+if (testPlaywrightCliFlags.length > 1) {
+  throw new Error("Only one --test-playwright-cli flag can be selected at a time.");
+}
+
+const testPlaywrightCliFlag = testPlaywrightCliFlags[0];
+const testPlaywrightCli = testPlaywrightCliFlag?.slice(testPlaywrightCliFlagPrefix.length);
+
+if (testPlaywrightCliFlag && process.env.NODE_ENV !== "test") {
+  throw new Error("--test-playwright-cli is only available when NODE_ENV=test.");
+}
+
+if (testPlaywrightCliFlag && (!testPlaywrightCli || !path.isAbsolute(testPlaywrightCli))) {
+  throw new Error("--test-playwright-cli requires an absolute CLI path.");
+}
+
+const selectedPartitions = rawArgs
+  .filter((arg) => partitionFlags.has(arg))
+  .map((arg) => partitionFlags.get(arg));
+
+if (selectedPartitions.length > 1) {
+  throw new Error("Only one Playwright E2E partition can be selected at a time.");
+}
+
+const partition = selectedPartitions[0] ?? "focused";
+const releaseReporterPath = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "playwright-release-reporter.mjs",
+);
+const usesIsolatedServer = rawArgs.includes(isolatedServerFlag) || partition !== "focused";
+const usesNextStart = rawArgs.includes(nextStartFlag);
+const expandedArgs = rawArgs
+  .filter(
+    (arg) =>
+      arg !== isolatedServerFlag &&
+      arg !== nextStartFlag &&
+      !partitionFlags.has(arg) &&
+      !arg.startsWith(testPlaywrightCliFlagPrefix),
+  )
+  .flatMap(expandArg);
+
+if (usesIsolatedServer) {
+  Reflect.deleteProperty(process.env, "PLAYWRIGHT_BASE_URL");
+  Reflect.deleteProperty(process.env, "PORT");
+  Reflect.deleteProperty(process.env, "PLAYWRIGHT_SERVER_COMMAND");
+  Reflect.deleteProperty(process.env, "E2E_PLAYWRIGHT_SERVER_COMMAND");
+  process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER = "false";
+}
+
 await ensureBaseUrl();
 
-const expandedArgs = process.argv.slice(2).flatMap(expandArg);
-const executable = process.platform === "win32" ? "playwright.cmd" : "playwright";
-const child = spawn(executable, ["test", ...expandedArgs], {
-  shell: true,
+if (usesIsolatedServer) {
+  console.log(`Playwright isolated server: ${process.env.PLAYWRIGHT_BASE_URL} (reuse disabled).`);
+}
+
+process.env.E2E_PARTITION = partition;
+if (partition !== "focused") Reflect.deleteProperty(process.env, "PW_TEST_REPORTER");
+if (partition === "storage") process.env.STORAGE_DRIVER = "local";
+if (partition === "signed-delivery") {
+  Object.assign(process.env, {
+    RUN_S4_SIGNED_DELIVERY_E2E: "1",
+    STORAGE_DRIVER: "r2",
+    R2_ENDPOINT: "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com",
+    R2_ACCESS_KEY_ID: "r2-access-key-value",
+    R2_SECRET_ACCESS_KEY: "r2-secret-key-value",
+    R2_BUCKET_NAME: "s4-private-files",
+  });
+}
+if (usesNextStart) process.env.E2E_PLAYWRIGHT_SERVER_COMMAND = "npx next start";
+
+const playwrightCli = testPlaywrightCli
+  ? path.resolve(testPlaywrightCli)
+  : path.resolve("node_modules", "@playwright", "test", "cli.js");
+const playwrightArgs =
+  partition === "focused" ? expandedArgs : withReleaseReporter(expandedArgs, releaseReporterPath);
+const child = spawn(process.execPath, [playwrightCli, "test", ...playwrightArgs], {
+  shell: false,
   stdio: "inherit",
+});
+
+child.on("error", (error) => {
+  console.error(`Unable to start Playwright: ${error.message}`);
+  process.exit(1);
 });
 
 child.on("exit", (code, signal) => {

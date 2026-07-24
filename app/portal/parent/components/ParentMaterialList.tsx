@@ -1,3 +1,5 @@
+import { safeStoredFileHref } from "@/lib/security/storage-links";
+
 type ParentMaterialAttachment = {
   filename: string;
   href?: string | null;
@@ -26,16 +28,7 @@ type ParentMaterialListProps = {
 };
 
 function safeHref(value: string | null | undefined) {
-  const trimmed = value?.trim() ?? "";
-  if (!trimmed) return null;
-  if (trimmed.startsWith("/uploads/")) return trimmed;
-
-  try {
-    const url = new URL(trimmed);
-    return url.protocol === "https:" ? trimmed : null;
-  } catch {
-    return null;
-  }
+  return safeStoredFileHref(value);
 }
 
 function materialHref(material: ParentMaterial) {

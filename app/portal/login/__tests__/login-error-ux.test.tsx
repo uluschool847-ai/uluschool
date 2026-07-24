@@ -5,8 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const useActionStateMock = vi.hoisted(() => vi.fn());
 const useFormStatusMock = vi.hoisted(() => vi.fn());
 const getSessionMock = vi.hoisted(() => vi.fn());
-const getAdminPendingTwoFactorMock = vi.hoisted(() => vi.fn());
 const createSessionMock = vi.hoisted(() => vi.fn());
+const clearSessionMock = vi.hoisted(() => vi.fn());
+const clearInitialSetupSessionMock = vi.hoisted(() => vi.fn());
 const verifyPasswordMock = vi.hoisted(() => vi.fn());
 const findUserByEmailMock = vi.hoisted(() => vi.fn());
 const checkLoginRateLimitMock = vi.hoisted(() => vi.fn());
@@ -34,9 +35,10 @@ vi.mock("@/lib/auth/session", async () => {
   const actual = await vi.importActual<typeof import("@/lib/auth/session")>("@/lib/auth/session");
   return {
     ...actual,
+    clearInitialSetupSession: clearInitialSetupSessionMock,
+    clearSession: clearSessionMock,
     createSession: createSessionMock,
     getSession: getSessionMock,
-    getAdminPendingTwoFactor: getAdminPendingTwoFactorMock,
   };
 });
 
@@ -73,7 +75,6 @@ type LoginUser = {
   role: UserRole;
   isActive: boolean;
   passwordHash: string;
-  twoFactorEnabled?: boolean;
 };
 
 async function renderServerComponent(Component: () => Promise<JSX.Element>) {
@@ -119,8 +120,9 @@ describe("Portal login error UX", () => {
     useActionStateMock.mockReset();
     useFormStatusMock.mockReset();
     getSessionMock.mockReset();
-    getAdminPendingTwoFactorMock.mockReset();
     createSessionMock.mockReset();
+    clearSessionMock.mockReset();
+    clearInitialSetupSessionMock.mockReset();
     verifyPasswordMock.mockReset();
     findUserByEmailMock.mockReset();
     checkLoginRateLimitMock.mockReset();
@@ -132,7 +134,6 @@ describe("Portal login error UX", () => {
     useFormStatusMock.mockReturnValue({ pending: false });
     useActionStateMock.mockReturnValue([{ success: false, message: "" }, vi.fn()]);
     getSessionMock.mockResolvedValue(null);
-    getAdminPendingTwoFactorMock.mockResolvedValue(null);
     createSessionMock.mockResolvedValue(undefined);
     verifyPasswordMock.mockResolvedValue(true);
     findUserByEmailMock.mockResolvedValue(makeTeacher());

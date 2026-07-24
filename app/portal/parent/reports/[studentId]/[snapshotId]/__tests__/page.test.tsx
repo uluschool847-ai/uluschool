@@ -4,6 +4,8 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
 const requireRoleMock = vi.hoisted(() => vi.fn());
 const getReportSnapshotForParentMock = vi.hoisted(() => vi.fn());
 const notFoundMock = vi.hoisted(() =>
@@ -141,29 +143,44 @@ describe("Parent child report snapshot page", () => {
     expect(screen.getByText(/keep practicing transformations/i)).toBeDefined();
   });
 
-  it("exposes only safe uploaded PDF links", async () => {
+  it("exposes current, canonical, legacy, and external PDF links without rewriting them", async () => {
     const page = await loadParentReportPage();
-    const element = await page.default({
-      params: { snapshotId: "snapshot-1", studentId: "student-1" },
-    });
-    render(element);
+    const key = "private/teachers/teacher-1/reports/snapshot-1.pdf";
+    const cases = [
+      [key, storageUrlForKey(key)],
+      [storageUrlForKey(key), storageUrlForKey(key)],
+      ["/uploads/reports/snapshot-1.pdf", "/uploads/reports/snapshot-1.pdf"],
+      ["https://reports.example.com/report%201.pdf", "https://reports.example.com/report%201.pdf"],
+    ];
 
-    expect(screen.getByRole("link", { name: /download pdf|open pdf/i })).toHaveAttribute(
-      "href",
-      "/uploads/reports/snapshot-1.pdf",
-    );
+    for (const [value, expected] of cases) {
+      cleanup();
+      getReportSnapshotForParentMock.mockResolvedValueOnce(snapshot({ pdfStorageKey: value }));
+      render(
+        await page.default({
+          params: { snapshotId: "snapshot-1", studentId: "student-1" },
+        }),
+      );
+      expect(screen.getByRole("link", { name: /download pdf|open pdf/i })).toHaveAttribute(
+        "href",
+        expected,
+      );
+    }
+  });
 
-    cleanup();
-    getReportSnapshotForParentMock.mockResolvedValueOnce(
-      snapshot({ pdfStorageKey: "https://evil.test/report.pdf" }),
-    );
-    const unsafeElement = await page.default({
-      params: { snapshotId: "snapshot-unsafe", studentId: "student-1" },
-    });
-    render(unsafeElement);
+  it.each([
+    "javascript:alert(1)",
+    "data:application/pdf;base64,AAAA",
+    "file:///secret.pdf",
+    "//evil.example/report.pdf",
+    "http://reports.example.com/report.pdf",
+    "/api/files/not-canonical+token",
+  ])("rejects unsafe PDF value %s", async (value) => {
+    getReportSnapshotForParentMock.mockResolvedValueOnce(snapshot({ pdfStorageKey: value }));
+    const page = await loadParentReportPage();
+    render(await page.default({ params: { snapshotId: "snapshot-1", studentId: "student-1" } }));
 
     expect(screen.queryByRole("link", { name: /download pdf|open pdf/i })).toBeNull();
-    expect(screen.queryByText(/https:\/\/evil\.test/i)).toBeNull();
   });
 
   it("renders no export regenerate or delete controls", async () => {

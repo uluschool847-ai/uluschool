@@ -14,6 +14,11 @@ import type {
   TeacherScheduleFilterOptions,
   TeacherScheduleLesson,
 } from "@/lib/repositories/teacher-schedule-repository";
+import {
+  DEFAULT_AVAILABILITY_TIMEZONE,
+  localDateTimeToUtc,
+  utcToLocalDateTime,
+} from "@/lib/scheduling/availability";
 
 export const TEACHER_LESSON_STATUSES = [
   "SCHEDULED",
@@ -24,54 +29,78 @@ export const TEACHER_LESSON_STATUSES = [
 ] as const;
 
 export function getDateRange(fromValue?: string, toValue?: string) {
-  const now = new Date();
-  const defaultFrom = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
-  const defaultTo = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999),
-  );
-
-  const from = parseDateStart(fromValue) ?? defaultFrom;
-  const to = parseDateEnd(toValue) ?? defaultTo;
+  const defaults = getDefaultDateRange();
+  const selectedFromValue = getValidDateInput(fromValue) ?? defaults.fromValue;
+  const selectedToValue = getValidDateInput(toValue) ?? defaults.toValue;
+  const from = parseDateStart(selectedFromValue);
+  const to = parseDateEnd(selectedToValue);
+  if (!from || !to) throw new Error("Validated schedule date range could not be parsed.");
   const messages: string[] = [];
 
   if (from.getTime() > to.getTime()) {
     messages.push("Date range was reset to the current month.");
     return {
-      from: defaultFrom,
-      to: defaultTo,
-      fromValue: formatDateInput(defaultFrom),
-      toValue: formatDateInput(defaultTo),
+      from: defaults.from,
+      to: defaults.to,
+      fromValue: defaults.fromValue,
+      toValue: defaults.toValue,
       messages,
     };
   }
 
-  const maxTo = new Date(
-    Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 6, from.getUTCDate(), 23, 59, 59, 999),
-  );
+  const maxToValue = addCalendarMonths(selectedFromValue, 6);
+  const maxTo = parseDateEnd(maxToValue);
+  if (!maxTo) throw new Error("Validated schedule maximum date could not be parsed.");
   const boundedTo = to.getTime() > maxTo.getTime() ? maxTo : to;
-  if (boundedTo !== to) {
+  const boundedToValue = to.getTime() > maxTo.getTime() ? maxToValue : selectedToValue;
+  if (boundedToValue !== selectedToValue) {
     messages.push("Date range was limited. Maximum range is 6 months.");
   }
 
   return {
     from,
     to: boundedTo,
-    fromValue: formatDateInput(from),
-    toValue: formatDateInput(boundedTo),
+    fromValue: selectedFromValue,
+    toValue: boundedToValue,
     messages,
+  };
+}
+
+function getDefaultDateRange() {
+  const todayValue = getNairobiDateInput();
+  const today = getDateParts(todayValue);
+  const fromValue = formatCalendarDate(new Date(Date.UTC(today.year, today.monthIndex, 1)));
+  const toValue = formatCalendarDate(new Date(Date.UTC(today.year, today.monthIndex + 1, 0)));
+  const from = parseDateStart(fromValue);
+  const to = parseDateEnd(toValue);
+  if (!from || !to) throw new Error("Default schedule date range could not be parsed.");
+
+  return {
+    from,
+    to,
+    fromValue,
+    toValue,
   };
 }
 
 function parseDateStart(value?: string) {
   const parts = parseDateParts(value);
-  return parts ? new Date(Date.UTC(parts.year, parts.monthIndex, parts.day, 0, 0, 0, 0)) : null;
+  return parts
+    ? localDateTimeToUtc({
+        value: `${value}T00:00:00`,
+        timezone: DEFAULT_AVAILABILITY_TIMEZONE,
+      })
+    : null;
 }
 
 function parseDateEnd(value?: string) {
   const parts = parseDateParts(value);
-  return parts
-    ? new Date(Date.UTC(parts.year, parts.monthIndex, parts.day, 23, 59, 59, 999))
-    : null;
+  if (!parts) return null;
+  const end = localDateTimeToUtc({
+    value: `${value}T23:59:59`,
+    timezone: DEFAULT_AVAILABILITY_TIMEZONE,
+  });
+  return new Date(end.getTime() + 999);
 }
 
 function parseDateParts(value?: string) {
@@ -90,7 +119,39 @@ function parseDateParts(value?: string) {
     : null;
 }
 
-function formatDateInput(date: Date) {
+function getValidDateInput(value?: string) {
+  return parseDateParts(value) ? (value ?? null) : null;
+}
+
+function getDateParts(value: string) {
+  const parts = parseDateParts(value);
+  if (!parts) throw new Error("Validated schedule date could not be parsed.");
+  return parts;
+}
+
+function getNairobiDateInput(date = new Date()) {
+  return utcToLocalDateTime({
+    date,
+    timezone: DEFAULT_AVAILABILITY_TIMEZONE,
+  }).slice(0, 10);
+}
+
+function addCalendarMonths(value: string, months: number) {
+  const parts = getDateParts(value);
+  const targetMonthEnd = new Date(Date.UTC(parts.year, parts.monthIndex + months + 1, 0));
+  const targetDay = Math.min(parts.day, targetMonthEnd.getUTCDate());
+  return formatCalendarDate(
+    new Date(Date.UTC(targetMonthEnd.getUTCFullYear(), targetMonthEnd.getUTCMonth(), targetDay)),
+  );
+}
+
+function addCalendarDays(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return formatCalendarDate(date);
+}
+
+function formatCalendarDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
@@ -100,16 +161,17 @@ function lessonStatusLabel(value: string) {
 }
 
 function formatDateTimeRange(lesson: Pick<TeacherScheduleLesson, "startAt" | "endAt">) {
-  return `${formatDate(lesson.startAt)} ${formatTime(lesson.startAt)} - ${formatTime(
+  return `${formatNairobiDate(lesson.startAt)} ${formatTime(lesson.startAt)} - ${formatTime(
     lesson.endAt,
   )}`;
 }
 
-function formatDate(date: Date) {
+export function formatNairobiDate(date: Date) {
   return new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: DEFAULT_AVAILABILITY_TIMEZONE,
   }).format(date);
 }
 
@@ -117,6 +179,7 @@ function formatTime(date: Date) {
   return new Intl.DateTimeFormat("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: DEFAULT_AVAILABILITY_TIMEZONE,
   }).format(date);
 }
 
@@ -260,31 +323,25 @@ export function ActiveFilterSummary(props: {
 }
 
 function getQuickRanges() {
-  const now = new Date();
-  const today = utcDateOnly(now);
-  const weekStart = new Date(today);
-  weekStart.setUTCDate(today.getUTCDate() - ((today.getUTCDay() + 6) % 7));
-  const weekEnd = new Date(weekStart);
-  weekEnd.setUTCDate(weekStart.getUTCDate() + 6);
-  const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-  const monthEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0));
-  const nextSevenEnd = new Date(today);
-  nextSevenEnd.setUTCDate(today.getUTCDate() + 6);
+  const todayValue = getNairobiDateInput();
+  const today = getDateParts(todayValue);
+  const dayOfWeek = new Date(Date.UTC(today.year, today.monthIndex, today.day)).getUTCDay();
+  const weekStartValue = addCalendarDays(todayValue, -((dayOfWeek + 6) % 7));
+  const weekEndValue = addCalendarDays(weekStartValue, 6);
+  const monthStartValue = formatCalendarDate(new Date(Date.UTC(today.year, today.monthIndex, 1)));
+  const monthEndValue = formatCalendarDate(new Date(Date.UTC(today.year, today.monthIndex + 1, 0)));
+  const nextSevenEndValue = addCalendarDays(todayValue, 6);
 
   return [
-    { label: "Today", href: quickRangeHref(today, today) },
-    { label: "This Week", href: quickRangeHref(weekStart, weekEnd) },
-    { label: "This Month", href: quickRangeHref(monthStart, monthEnd) },
-    { label: "Next 7 Days", href: quickRangeHref(today, nextSevenEnd) },
+    { label: "Today", href: quickRangeHref(todayValue, todayValue) },
+    { label: "This Week", href: quickRangeHref(weekStartValue, weekEndValue) },
+    { label: "This Month", href: quickRangeHref(monthStartValue, monthEndValue) },
+    { label: "Next 7 Days", href: quickRangeHref(todayValue, nextSevenEndValue) },
   ];
 }
 
-function utcDateOnly(date: Date) {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-}
-
-function quickRangeHref(from: Date, to: Date) {
-  return `/portal/teacher/schedule?from=${formatDateInput(from)}&to=${formatDateInput(to)}`;
+function quickRangeHref(from: string, to: string) {
+  return `/portal/teacher/schedule?from=${from}&to=${to}`;
 }
 
 export function TeacherLessonCard(props: {
@@ -388,7 +445,7 @@ export function TeacherLessonDetail(props: {
             {lesson.assignments.map((assignment) => (
               <li key={assignment.id} className="rounded-md border p-3">
                 <p className="font-medium">{assignment.title}</p>
-                <p>Due: {formatDate(assignment.dueDate)}</p>
+                <p>Due: {formatNairobiDate(assignment.dueDate)}</p>
                 <p>Submissions: {assignment.submissionCount}</p>
                 <p>Pending submissions: {assignment.pendingSubmissionCount}</p>
               </li>

@@ -2,6 +2,8 @@ import { LessonStatus, type MeetingProvider, type Prisma } from "@prisma/client"
 
 import { canStartLesson } from "@/lib/lessons/lesson-status";
 import { prisma } from "@/lib/prisma";
+import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
+import { preferredStoredFileHref } from "@/lib/security/storage-links";
 
 const DEFAULT_TIMEZONE = "Africa/Nairobi";
 
@@ -47,6 +49,7 @@ type AssignmentRecord = {
 type MaterialRecord = {
   id: string;
   title: string;
+  attachments?: Array<{ storageKey: string }>;
   description?: string | null;
   fileUrl?: string | null;
   createdAt?: Date;
@@ -253,6 +256,11 @@ function lessonInclude(teacherId: string) {
         description: true,
         fileUrl: true,
         createdAt: true,
+        attachments: {
+          select: { storageKey: true },
+          orderBy: newestAttachmentOrderBy(),
+          take: 1,
+        },
       },
       orderBy: { createdAt: "desc" as const },
     },
@@ -306,9 +314,8 @@ function safeStartState(lesson: LessonRecord) {
   return canStartLesson(lesson, new Date());
 }
 
-function safeFileLink(material: MaterialRecord): LinkAction {
-  const href = material.fileUrl?.trim() ?? null;
-  if (!href || /^(javascript|data|file):/i.test(href)) {
+function safeFileLink(material: MaterialRecord, href: string | null): LinkAction {
+  if (!href) {
     return disabled("Material file link is not available");
   }
 
@@ -488,14 +495,20 @@ function mapWorkspace(lesson: LessonRecord): TeacherLessonWorkspace {
           }
         : null,
     })),
-    materials: (lesson.courseMaterials ?? []).map((material) => ({
-      id: material.id,
-      title: material.title,
-      description: material.description ?? null,
-      fileUrl: material.fileUrl ?? null,
-      createdAt: material.createdAt ?? null,
-      fileLink: safeFileLink(material),
-    })),
+    materials: (lesson.courseMaterials ?? []).map((material) => {
+      const fileHref = preferredStoredFileHref(
+        material.attachments?.[0]?.storageKey,
+        material.fileUrl,
+      );
+      return {
+        id: material.id,
+        title: material.title,
+        description: material.description ?? null,
+        fileUrl: fileHref,
+        createdAt: material.createdAt ?? null,
+        fileLink: safeFileLink(material, fileHref),
+      };
+    }),
     assignments: assignments.map((assignment) => {
       const assignmentSubmissions = assignment.submissions ?? [];
       return {

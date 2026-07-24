@@ -158,19 +158,32 @@ describe("teacher report actions", () => {
     expect(revalidatePathMock).toHaveBeenCalledWith("/portal/parent");
   });
 
-  it("exports PDF from snapshot and audits export", async () => {
+  it("delegates the audited export lifecycle to the repository and revalidates after commit", async () => {
     const { exportReportSnapshotPdfAction } = await loadReportActions();
     await exportReportSnapshotPdfAction("snapshot-1");
 
     expect(exportReportSnapshotPdfMock).toHaveBeenCalledWith("teacher-1", "snapshot-1");
-    expect(createAdminAuditLogMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: "REPORT_PDF_EXPORTED",
-        targetId: "snapshot-1",
-        targetType: "reportSnapshot",
-      }),
-      expect.anything(),
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).toHaveBeenCalledWith("/portal/teacher/reports/snapshot-1");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/portal/student/reports/snapshot-1");
+  });
+
+  it("returns a fixed public error without key, path, or configuration details", async () => {
+    exportReportSnapshotPdfMock.mockRejectedValueOnce(
+      new Error(
+        "R2_SECRET_ACCESS_KEY=storage-secret failed for D:\\uploads\\private\\teachers\\teacher-1\\reports\\report.pdf",
+      ),
     );
+    const { exportReportSnapshotPdfAction } = await loadReportActions();
+
+    const result = await exportReportSnapshotPdfAction("snapshot-1");
+
+    expect(result).toEqual({ success: false, error: "Unable to export report PDF." });
+    expect(JSON.stringify(result)).not.toMatch(
+      /storage-secret|R2_SECRET_ACCESS_KEY|private\/teachers|uploads/i,
+    );
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
   it("does not audit failed validation or ownership errors", async () => {

@@ -3,7 +3,7 @@
 mathSchool is a Next.js 15 application for **ULU Online School**. It combines the public marketing site with portal dashboards for admins, teachers, students, and parents, plus a Prisma-backed CRM/CMS and basic billing/analytics tooling.
 
 ### Prerequisites
-- Node.js 18+ (the repo does not declare an `engines` field)
+- Node.js 22 (the supported range is pinned in `package.json` and `.nvmrc`)
 - npm (all project scripts use npm)
 - PostgreSQL (the Prisma datasource provider is `postgresql`)
 - A local or remote database URL for both `DATABASE_URL` and `DIRECT_URL`
@@ -60,6 +60,8 @@ Open [http://localhost:3000](http://localhost:3000).
 | --- | --- |
 | `npm run dev` | Start the Next.js development server |
 | `npm run build` | Build the production bundle |
+| `npm run env:check` | Validate the staging/production environment contract without printing values |
+| `npm run smoke:deployment` | Run the route-level deployment smoke against an explicit base URL |
 | `npm run start` | Run the production server locally |
 | `npm run test` | Run the full Vitest suite once |
 | `npm run test:watch` | Run Vitest in watch mode |
@@ -68,6 +70,7 @@ Open [http://localhost:3000](http://localhost:3000).
 | `npm run db:generate` | Generate the Prisma client |
 | `npm run db:migrate` | Run `prisma migrate dev` |
 | `npm run db:seed` | Seed the database with local demo/test data |
+| `npm run bootstrap:production` | Idempotently create the first production admin without demo data |
 | `npm run db:reset` | Destructively reset the database and rerun the seed |
 | `npm run db:verify` | Verify that required seed data exists |
 | `npm run db:setup` | Generate Prisma client, reset the DB, and verify seed state |
@@ -87,6 +90,7 @@ manual browser verification for UI flows, and a final implementation report.
 | --- | --- | --- |
 | `DATABASE_URL` | Yes | Primary Prisma connection string |
 | `DIRECT_URL` | Yes | Direct DB connection string for Prisma operations |
+| `APP_ENV` | On Render | `staging` or `production`; controls the production environment gate and indexing |
 | `NODE_ENV` | No | Normally set by Next.js/hosting; `.env.example` defaults to `development` |
 | `NEXT_RUNTIME` | No | Normally set by Next.js runtime |
 
@@ -95,25 +99,30 @@ manual browser verification for UI flows, and a final implementation report.
 | Variable | Required? | Description |
 | --- | --- | --- |
 | `AUTH_SESSION_SECRET` | Yes | HMAC secret for the custom signed session cookie (`ulu_session`) |
-| `DEFAULT_PORTAL_PASSWORD` | Yes | Password used for all seeded portal accounts |
-| `ADMIN_REQUIRE_2FA` | Yes for secure local parity | Controls whether admin login requires 2FA flow. Use `true` to verify production-like admin hardening; use `false` for local/demo password-only admin access. |
-| `ADMIN_2FA_SECRET` | Optional | Seeds TOTP for the main admin account if provided |
-| `TWO_FACTOR_ISSUER` | Optional | TOTP issuer label shown in authenticator apps |
+| `SEED_PORTAL_PASSWORD` | Local/test only | Password used by disposable local seed fixtures; never a production account-creation default |
+| `BOOTSTRAP_ADMIN_EMAIL` | First production deploy only | Email for the first administrator when no active admin exists |
+| `BOOTSTRAP_ADMIN_NAME` | First production deploy only | Display name for the first administrator |
+| `BOOTSTRAP_ADMIN_PASSWORD` | First production deploy only | One-time bootstrap credential entered directly in Render and removed after the required first-login rotation |
 | `ADMIN_SSO_ENABLED` | Optional | Enables the admin SSO callback flow |
 | `ADMIN_SSO_SHARED_SECRET` | Optional | Shared secret used by `/api/auth/sso/callback` |
 | `ADMIN_SSO_LOGIN_URL` | Optional | Upstream SSO login URL |
+
+ULU Online School administrators authenticate to the application with email and password.
+Temporary passwords must be changed on first login. Login rate limiting, signed sessions, audit
+logging, and server-side role enforcement remain mandatory. Infrastructure provider accounts
+remain protected with provider-level 2FA.
 
 #### SMTP / Email
 
 | Variable | Required? | Description |
 | --- | --- | --- |
-| `SMTP_HOST` | Optional | Primary SMTP host for Nodemailer |
-| `SMTP_PORT` | Optional | SMTP port |
-| `SMTP_USER` | Optional | SMTP username |
-| `SMTP_PASS` | Optional | SMTP password |
+| `SMTP_HOST` | Yes on Render | Primary SMTP host for Nodemailer |
+| `SMTP_PORT` | Yes on Render | SMTP port |
+| `SMTP_USER` | Yes on Render | SMTP username |
+| `SMTP_PASS` | Yes on Render | SMTP password |
 | `SMTP_SECURE` | Optional | `true`/`false` secure transport flag |
-| `SMTP_FROM` | Optional | From address used by outbound mail |
-| `SCHOOL_INBOX_EMAIL` | Optional | Inbox that receives contact/enrolment notifications |
+| `SMTP_FROM` | Yes on Render | From address used by outbound mail |
+| `SCHOOL_INBOX_EMAIL` | Yes on Render | Inbox that receives contact/enrolment notifications |
 | `SMTP_MAX_RETRIES` | Optional | Retry count for outbound email sending |
 | `EMAIL_USER` | Optional | Gmail fallback username |
 | `EMAIL_PASS` | Optional | Gmail fallback password |
@@ -122,9 +131,9 @@ manual browser verification for UI flows, and a final implementation report.
 
 | Variable | Required? | Description |
 | --- | --- | --- |
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Optional | Client-side Turnstile site key |
-| `TURNSTILE_SECRET_KEY` | Optional | Server-side Turnstile secret |
-| `TURNSTILE_ENFORCE` | Optional | If `true`, missing Turnstile config becomes an error |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Yes on Render | Client-side Turnstile site key |
+| `TURNSTILE_SECRET_KEY` | Yes on Render | Server-side Turnstile secret |
+| `TURNSTILE_ENFORCE` | Yes on Render | Must be `true` in staging/production |
 | `MIN_FORM_FILL_MS` | Optional | Minimum submission time for spam protection |
 | `ENROL_FORM_MAX_REQUESTS` | Optional | In-memory enrol form rate limit quota |
 | `ENROL_FORM_WINDOW_MS` | Optional | Enrol form rate-limit window |
@@ -135,22 +144,34 @@ manual browser verification for UI flows, and a final implementation report.
 
 | Variable | Required? | Description |
 | --- | --- | --- |
-| `CRON_SECRET` | Yes if using `/api/cron/automation` | Bearer token for automation cron route |
-| `REMINDER_CRON_TOKEN` | Yes if using `/api/reminders/send-due` | Bearer token for manual/cron reminder dispatch |
+| `CRON_SECRET` | Yes on Render | Bearer token for automation cron route |
+| `REMINDER_CRON_TOKEN` | Yes on Render | Bearer token for manual/cron reminder dispatch |
 | `WHATSAPP_WEBHOOK_URL` | Optional | WhatsApp reminder webhook; if empty, WhatsApp is skipped |
 | `SENTRY_DSN` | Optional | Server-side Sentry DSN |
 | `NEXT_PUBLIC_SENTRY_DSN` | Optional | Client-side Sentry DSN |
 | `SENTRY_TRACES_SAMPLE_RATE` | Optional | Server-side Sentry traces sample rate |
 | `NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE` | Optional | Client-side traces sample rate |
-| `ALERT_WEBHOOK_URL` | Optional | Alert destination webhook |
-| `ALERT_TEST_TOKEN` | Yes if testing `/api/alerts/test` | Bearer token for alert test endpoint |
+| `SENTRY_ENABLED` | Yes on Render | Enables Sentry only when both environment-specific DSNs are configured |
+| `ALERT_WEBHOOK_URL` | Yes on Render | HTTPS alert destination in the private operations channel |
+| `ALERT_TEST_TOKEN` | Yes on Render | Bearer token for alert test endpoint |
+
+#### Private Storage and Privacy
+
+| Variable | Required? | Description |
+| --- | --- | --- |
+| `STORAGE_DRIVER` | Yes on Render | Must be `r2` in staging/production |
+| `R2_ENDPOINT` | Yes on Render | Environment-specific Cloudflare R2 account endpoint |
+| `R2_ACCESS_KEY_ID` | Yes on Render | Server-only credential scoped to the private bucket |
+| `R2_SECRET_ACCESS_KEY` | Yes on Render | Matching server-only R2 credential |
+| `R2_BUCKET_NAME` | Yes on Render | Private, environment-isolated bucket |
+| `PRIVACY_CONTACT_EMAIL` | Yes on Render | Monitored privacy mailbox |
+| `PRIVACY_EMAIL_PROCESSOR_NAME` | Yes on Render | Actual outbound-email processor display name |
 
 #### Public App Metadata & Seed Defaults
 
 | Variable | Required? | Description |
 | --- | --- | --- |
 | `NEXT_PUBLIC_SITE_URL` | Yes | Public site URL used in metadata/config |
-| `NEXT_PUBLIC_APP_URL` | Yes | Public app URL |
 | `NEXT_PUBLIC_CONTACT_EMAIL` | Optional | Marketing site contact email |
 | `NEXT_PUBLIC_CONTACT_PHONE` | Optional | Marketing site contact phone |
 | `NEXT_PUBLIC_CONTACT_WHATSAPP` | Optional | Marketing site contact WhatsApp |
@@ -159,32 +180,34 @@ manual browser verification for UI flows, and a final implementation report.
 | `SEED_MATERIAL_FILE_URL` | Optional | Default course material URL used by seed data |
 
 ### Test Accounts
-All seeded accounts use `DEFAULT_PORTAL_PASSWORD`. If you do not override it, the password is `ChangeMe123!`.
+The local seed uses `SEED_PORTAL_PASSWORD`; its fallback exists only for disposable local and CI
+fixtures. Staging and production use `npm run bootstrap:production` and manual account creation,
+never `npm run db:seed`.
 
 #### Primary portal accounts
 
 | Email | Password | Role | Notes |
 | --- | --- | --- | --- |
-| `admin@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Admin | Main admin account; `ADMIN_2FA_SECRET` can seed TOTP |
-| `teacher@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Teacher | General teacher account |
-| `teacher2@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Teacher | Extra teacher account |
-| `parent@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Parent | General parent account |
-| `student@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Student | General student account |
-| `student2@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Student | Extra student account |
-| `freshstudent@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Student | Sparse/empty-state student fixture |
-| `newteacher@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Teacher | Sparse/empty-state teacher fixture |
-| `onboardingparent@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Parent | Sparse/empty-state parent fixture |
+| `admin@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Admin | Local main administrator fixture |
+| `teacher@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Teacher | General teacher fixture |
+| `teacher2@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Teacher | Extra teacher fixture |
+| `parent@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Parent | General parent fixture |
+| `student@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Student | General student fixture |
+| `student2@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Student | Extra student fixture |
+| `freshstudent@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Student | Sparse/empty-state student fixture |
+| `newteacher@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Teacher | Sparse/empty-state teacher fixture |
+| `onboardingparent@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Parent | Sparse/empty-state parent fixture |
 
 #### Fixed-ID fixtures used by dashboards/tests
 
 | Email | Password | Role | Notes |
 | --- | --- | --- | --- |
-| `fixed.admin@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Admin | Deterministic admin fixture |
-| `fixed.teacher@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Teacher | Seeded with classes, assignments, and submissions |
-| `fixed.teacher2@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Teacher | Secondary teacher fixture |
-| `fixed.parent@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Parent | Linked to `fixed.student@...` |
-| `fixed.student@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Student | Seeded with assignments, submission history, progress, schedule |
-| `fixed.student2@uluglobalacademy.com` | `DEFAULT_PORTAL_PASSWORD` | Student | Additional seeded student in classes |
+| `fixed.admin@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Admin | Deterministic admin fixture |
+| `fixed.teacher@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Teacher | Seeded with classes, assignments, and submissions |
+| `fixed.teacher2@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Teacher | Secondary teacher fixture |
+| `fixed.parent@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Parent | Linked to `fixed.student@...` |
+| `fixed.student@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Student | Seeded with assignments, submission history, progress, schedule |
+| `fixed.student2@uluglobalacademy.com` | `SEED_PORTAL_PASSWORD` | Student | Additional seeded student in classes |
 
 ### Local QA Manual Flows
 
@@ -197,7 +220,7 @@ npm run qa:admin-smoke
 
 The command allocates a free `localhost` port, sets `PORT` and `PLAYWRIGHT_BASE_URL` for that run,
 and uses the seeded admin fixture `fixed.admin@uluglobalacademy.com` with
-`E2E_PORTAL_PASSWORD`, `DEFAULT_PORTAL_PASSWORD`, or `ChangeMe123!` in that order. It runs
+`E2E_PORTAL_PASSWORD`, `SEED_PORTAL_PASSWORD`, or the local fixture fallback in that order. It runs
 `e2e/portals/admin-full-coverage.spec.ts`, which checks primary admin routes, browser console
 errors, page errors, failed network requests, 5xx responses, dashboard CRM search, reminder dry run,
 authenticated header actions, and sensitive-route RBAC.
@@ -231,8 +254,9 @@ npm run db:seed
 
 #### Admin flow
 1. Log in as `fixed.admin@uluglobalacademy.com` or `admin@uluglobalacademy.com`.
-2. In local development with `ADMIN_REQUIRE_2FA=true`, expect admin login to redirect to `/admin/security?setup2fa=required` before normal admin work. The security page explains that setup is required and links directly to the 2FA setup panel.
-3. For local demos where forced setup would interrupt the flow, set `ADMIN_REQUIRE_2FA=false` and restart the dev server. Admin login can then continue to `/admin`, while `/admin/security` still allows optional 2FA setup.
+2. Confirm a valid administrator password redirects directly to `/admin`.
+3. For an account with a temporary password, rotate it before entering `/admin`, sign out, and
+   confirm the old temporary password is rejected while the new password succeeds.
 4. Verify `/admin` for analytics, CRM summaries, enquiries, leads, and recent audit logs.
 5. Verify `/admin/users`, `/admin/tasks`, `/admin/billing`, `/admin/analytics`, `/admin/audit`, and `/admin/cms`.
 6. Under `/admin/cms`, verify pages, blog posts, and FAQ items can be listed/edited.
@@ -290,7 +314,7 @@ Windows note:
 ### Architecture Overview
 - **Frontend / Full-stack runtime:** Next.js 15 App Router with React 18 server and client components
 - **Database:** PostgreSQL via Prisma Client
-- **Auth:** custom signed cookie sessions (`ulu_session`) with optional admin TOTP and optional admin SSO callback
+- **Auth:** email/password authentication with custom signed cookie sessions (`ulu_session`) and an optional admin SSO callback
 - **UI:** Tailwind CSS, Radix primitives, and local UI components in `components/ui`
 - **Persistence layer:** repository modules under `D:\2026\mathSchool\lib\repositories`
 - **Public CMS:** Prisma-backed Pages, Blog Posts, and FAQ items surfaced through `/admin/cms`, `/pages`, `/blog`, and FAQ-driven page sections
@@ -323,15 +347,14 @@ Windows note:
 - Manager task operations
 - Billing visibility and local payment status/refund actions
 - CMS management for pages, blog posts, and FAQ items
-- Security / 2FA setup page
 - Audit log and analytics pages
 
 ### Known Limitations (Local Dev)
-See `D:\2026\mathSchool\docs\known-limitations.md` for the full list. The main local constraints are:
+See [Known Limitations](./docs/known-limitations.md) for the full list. The main local constraints are:
 - email is skipped unless SMTP is configured
 - billing is local-data only; there is no live Stripe/PayPal integration
 - WhatsApp reminders are skipped unless `WHATSAPP_WEBHOOK_URL` is configured
-- uploads use local filesystem storage under `public/uploads`
+- local development uses filesystem storage; staging and production require private Cloudflare R2
 - seeded CMS pages, testimonials, and public teacher profiles are not created by default
 
 ### Project Structure
@@ -345,9 +368,13 @@ mathSchool/
 ```
 
 ### Additional Documentation
-- `D:\2026\mathSchool\docs\local-setup.md`
-- `D:\2026\mathSchool\docs\qa-checklist.md`
-- `D:\2026\mathSchool\docs\qa-matrix.md` — Role-based QA matrix (happy path, empty, error, access denied)
-- `D:\2026\mathSchool\docs\known-limitations.md`
-- `D:\2026\mathSchool\docs\architecture.md`
-- `D:\2026\mathSchool\docs\database.md`
+- [Render Staging and Production](./docs/deployment/render-production.md)
+- [Production Launch Checklist](./docs/deployment/launch-checklist.md)
+- [Launch Browser Verification](./docs/deployment/browser-verification.md)
+- [Rollback and Database Recovery](./docs/deployment/rollback.md)
+- [Local Setup](./docs/local-setup.md)
+- [Manual QA Checklist](./docs/qa-checklist.md)
+- [Role-Based QA Matrix](./docs/qa-matrix.md)
+- [Known Limitations](./docs/known-limitations.md)
+- [Architecture](./docs/architecture.md)
+- [Database](./docs/database.md)

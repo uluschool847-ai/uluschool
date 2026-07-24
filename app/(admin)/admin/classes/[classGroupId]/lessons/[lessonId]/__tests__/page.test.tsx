@@ -50,8 +50,8 @@ describe("Admin lesson detail page", () => {
       classGroupId: "group-1",
       title: "Quadratic functions",
       description: "Live problem-solving session",
-      startAt: new Date("2026-06-01T10:00:00.000Z"),
-      endAt: new Date("2026-06-01T11:00:00.000Z"),
+      startAt: new Date("2026-01-15T10:00:00.000Z"),
+      endAt: new Date("2026-01-15T11:00:00.000Z"),
       status: "SCHEDULED",
       liveLessonUrl: "https://meet.google.com/abc-defg-hij",
       classGroup: {
@@ -84,6 +84,7 @@ describe("Admin lesson detail page", () => {
     expect(screen.getByText(/igcse mathematics group a/i)).toBeDefined();
     expect(screen.getByText(/jane teacher/i)).toBeDefined();
     expect(screen.getByText(/mathematics/i)).toBeDefined();
+    expect(screen.getByText(/13:00.*14:00/)).toBeDefined();
     expect(screen.getByText(/scheduled/i)).toBeDefined();
     expect(screen.getByText("https://meet.google.com/abc-defg-hij")).toBeDefined();
     expect(screen.getByText(/sofia shevchenko/i)).toBeDefined();

@@ -1,7 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const prismaMock = vi.hoisted(() => ({
+  level: {
+    findFirst: vi.fn(),
+  },
   enquiry: {
+    create: vi.fn(),
     count: vi.fn(),
     findMany: vi.fn(),
     findUnique: vi.fn(),
@@ -92,6 +96,37 @@ describe("enquiry-repository CRM-lite contract", () => {
         return callback(prismaMock);
       }
       return callback;
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stores the fixed consent version and server time for a new enquiry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-13T09:30:00.000Z"));
+    prismaMock.level.findFirst.mockResolvedValue({ id: "level-1" });
+    prismaMock.enquiry.create.mockResolvedValue({ id: "enq-1" });
+
+    await enquiryRepository.createEnquiry({
+      studentName: "Daniel Student",
+      ageYearLevel: "Grade 6",
+      subjects: ["Biology"],
+      curriculumLevel: "grade-6",
+      parentGuardianName: "Grace Parent",
+      email: "grace@example.com",
+      phoneWhatsapp: "+254711111111",
+      preferredSchedule: "Weekdays after 4pm",
+      additionalNotes: "",
+      consentAccepted: true,
+    });
+
+    expect(prismaMock.enquiry.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        consentVersion: "enrolment-consent-v1",
+        consentGivenAt: new Date("2026-07-13T09:30:00.000Z"),
+      }),
     });
   });
 

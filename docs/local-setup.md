@@ -1,13 +1,13 @@
 # Local Development Setup
 
 ## System Requirements
-- Node.js 18+
+- Node.js 22 (the supported range is pinned in `package.json` and `.nvmrc`)
 - npm
 - PostgreSQL database reachable through both `DATABASE_URL` and `DIRECT_URL`
 - A writable filesystem for local uploads (`D:\2026\mathSchool\public\uploads`)
 
 Notes:
-- The repo does not pin a Node.js version via `package.json.engines`.
+- Use the pinned Node.js major so local, CI, and Render builds resolve the same runtime contract.
 - Prisma is configured for **PostgreSQL only**. There is no SQLite or MySQL option in `D:\2026\mathSchool\prisma\schema.prisma`.
 
 ## Step-by-Step Installation
@@ -75,8 +75,8 @@ Recommended when:
 - you are debugging Prisma or seed behavior
 - you do not want to connect to a shared hosted database
 
-### Option B: Hosted PostgreSQL / Neon
-The repo docs recommend Neon for hosted environments. If you use Neon locally:
+### Option B: Hosted PostgreSQL
+If you use a disposable hosted PostgreSQL database for local development:
 - set both `DATABASE_URL` and `DIRECT_URL`
 - keep the `?schema=public` suffix if your connection string expects it
 - use SSL parameters if your hosted DB requires them
@@ -91,24 +91,22 @@ There is no SQLite fallback in this project.
 | `DATABASE_URL` | `postgresql://...` | Used by Prisma for normal database access |
 | `DIRECT_URL` | `postgresql://...` | Used for direct Prisma operations/migrations |
 | `NEXT_PUBLIC_SITE_URL` | `http://localhost:3000` | Public origin used in site config/metadata |
-| `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | Public app URL |
 
 ### Auth and portal
 | Variable | Example | Why it matters |
 | --- | --- | --- |
 | `AUTH_SESSION_SECRET` | `change-this-session-secret` | Signs the custom `ulu_session` cookie |
-| `DEFAULT_PORTAL_PASSWORD` | `ChangeMe123!` | Password assigned to all seeded accounts |
-| `ADMIN_REQUIRE_2FA` | `true` | Enables the admin 2FA gate. Set to `false` only for local/demo password-only admin access. |
-| `ADMIN_2FA_SECRET` | empty or TOTP secret | Preloads TOTP for the main admin account during seeding |
-| `TWO_FACTOR_ISSUER` | `ULU Online School` | Issuer label for authenticator apps |
+| `SEED_PORTAL_PASSWORD` | local fixture value | Password assigned only to disposable seeded accounts |
 | `ADMIN_SSO_ENABLED` | `false` | Enables optional admin SSO callback logic |
 | `ADMIN_SSO_SHARED_SECRET` | empty | Secret used by `/api/auth/sso/callback` |
 | `ADMIN_SSO_LOGIN_URL` | empty | Optional upstream SSO login URL |
 
-Important local behavior:
-- In development, when `ADMIN_REQUIRE_2FA=true`, admin login uses a controlled dev bypass and redirects to `/admin/security?setup2fa=required`.
-- This is expected local behavior, not a broken redirect. The security page explains that 2FA setup is required and points to the setup panel.
-- For demos where setup should be optional, set `ADMIN_REQUIRE_2FA=false` and restart the dev server. Admins can continue to the dashboard, and `/admin/security` remains available for optional setup.
+Administrator authentication policy:
+
+ULU Online School administrators authenticate to the application with email and password.
+Temporary passwords must be changed on first login. Login rate limiting, signed sessions,
+audit logging, and server-side role enforcement remain mandatory. Infrastructure provider
+accounts remain protected with provider-level 2FA.
 
 ### Email
 | Variable | Example | Why it matters |
@@ -199,8 +197,12 @@ File uploads use `LocalStorageService` and write to:
 Current local upload constraints:
 - max 5 MB per file
 - MIME whitelist for PDFs, images, zip files, and plain text
-- route policy allows `DEVELOPER` and `TEACHER` request roles
+- upload authorization uses the authenticated server-side session; teacher-owned records are
+  scoped again in repository and action code
 - readable stream uploads are not implemented in local mode
+
+Hosted staging and production use private Cloudflare R2. They do not use this local filesystem or
+trust client-supplied role headers.
 
 ### Payments
 There is no Stripe or PayPal integration in this repo.
@@ -242,7 +244,7 @@ Check the following:
 - `AUTH_SESSION_SECRET` is present in `.env.local`
 - you are staying on the same origin (`http://localhost:3000` by default)
 - your browser is not blocking cookies
-- for admins, the redirect to `/admin/security?setup2fa=required` is expected in development when `ADMIN_REQUIRE_2FA=true`; set `ADMIN_REQUIRE_2FA=false` and restart the dev server for demo/password-only dashboard access
+- an administrator with a valid password reaches the normal admin flow without an authenticator prompt
 
 ### Login succeeds but the dashboard is empty
 Use the fixed fixture accounts for data-rich dashboards:

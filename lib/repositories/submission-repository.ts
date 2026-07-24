@@ -1,6 +1,12 @@
 import type { Prisma, ReminderChannel, ReminderDeliveryStatus } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
+import {
+  preferredStoredFileHref,
+  safeStoredFileHref,
+  storageHrefForKey,
+} from "@/lib/security/storage-links";
 
 type SubmissionDatabase = typeof prisma | Prisma.TransactionClient;
 
@@ -114,7 +120,7 @@ const submissionInclude = {
   student: { select: { id: true, fullName: true, email: true } },
   attachments: {
     select: { id: true, filename: true, storageKey: true },
-    orderBy: { createdAt: "desc" as const },
+    orderBy: newestAttachmentOrderBy(),
   },
   assignment: {
     include: {
@@ -276,7 +282,7 @@ function studentAssignmentInclude(studentId: string) {
             fileUrl: true,
             attachments: {
               select: { id: true, filename: true, storageKey: true },
-              orderBy: { createdAt: "desc" as const },
+              orderBy: newestAttachmentOrderBy(),
             },
           },
           orderBy: { createdAt: "desc" as const },
@@ -288,7 +294,7 @@ function studentAssignmentInclude(studentId: string) {
       include: {
         attachments: {
           select: { id: true, filename: true, storageKey: true },
-          orderBy: { createdAt: "desc" as const },
+          orderBy: newestAttachmentOrderBy(),
         },
       },
       orderBy: { submittedAt: "desc" as const },
@@ -449,9 +455,8 @@ function mapSubmissionRow(
     ? { id: scheduledClass.classGroup.id, name: scheduledClass.classGroup.name }
     : null;
   const firstAttachment = submission.attachments?.[0] ?? null;
-  const contentUrl = firstAttachment
-    ? `/uploads/${firstAttachment.storageKey}`
-    : submission.contentUrl;
+  const attachmentUrl = storageHrefForKey(firstAttachment?.storageKey);
+  const contentUrl = attachmentUrl ?? safeStoredFileHref(submission.contentUrl);
 
   return {
     id: submission.id,
@@ -492,31 +497,24 @@ function mapSubmissionRow(
     feedback: submission.feedback,
     feedbackPreview: feedbackPreview(submission.feedback),
     contentUrl,
-    attachmentLink: firstAttachment
-      ? {
-          filename: firstAttachment.filename,
-          href: contentUrl,
-        }
-      : null,
+    attachmentLink:
+      firstAttachment && attachmentUrl
+        ? {
+            filename: firstAttachment.filename,
+            href: attachmentUrl,
+          }
+        : null,
     reviewHref: `/portal/teacher/submissions/${submission.id}`,
     reviewDisabled: false,
   };
 }
 
 function safeSubmissionHref(url: string | null | undefined) {
-  if (!url) return null;
-  if (url.startsWith("/uploads/")) return url;
-
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "https:" ? parsed.toString() : null;
-  } catch {
-    return null;
-  }
+  return safeStoredFileHref(url);
 }
 
 function attachmentHref(storageKey: string) {
-  return storageKey.startsWith("/uploads/") ? storageKey : `/uploads/${storageKey}`;
+  return storageHrefForKey(storageKey);
 }
 
 function safeUploadHref(url: string | null | undefined) {
@@ -535,12 +533,15 @@ function submissionStatus(
 }
 
 function mapStudentSubmission(submission: StudentAssignmentRecord["submissions"][number]) {
-  const submittedWorkHref = safeSubmissionHref(submission.contentUrl);
+  const submittedWorkHref = preferredStoredFileHref(
+    submission.attachments?.[0]?.storageKey,
+    submission.contentUrl,
+  );
   return {
     id: submission.id,
     studentId: submission.studentId,
     assignmentId: submission.assignmentId,
-    contentUrl: submission.contentUrl,
+    contentUrl: submittedWorkHref,
     submittedWorkHref,
     submittedAt: submission.submittedAt,
     updatedAt: submission.updatedAt,
@@ -559,9 +560,7 @@ function mapMaterial(
   material: NonNullable<StudentAssignmentRecord["scheduledClass"]["courseMaterials"]>[number],
 ) {
   const attachment = material.attachments?.[0] ?? null;
-  const href = safeUploadHref(
-    attachment ? attachmentHref(attachment.storageKey) : material.fileUrl,
-  );
+  const href = preferredStoredFileHref(attachment?.storageKey, material.fileUrl);
   return {
     id: material.id,
     title: material.title,
@@ -654,6 +653,10 @@ function mapSubmissionDetail(
     filename: attachment.filename,
     href: attachmentHref(attachment.storageKey),
   }));
+  const submittedWorkHref = preferredStoredFileHref(
+    submission.attachments?.[0]?.storageKey,
+    submission.contentUrl,
+  );
 
   return {
     id: submission.id,
@@ -683,8 +686,8 @@ function mapSubmissionDetail(
           slug: scheduledClass.subject.slug,
         }
       : null,
-    contentUrl: submission.contentUrl,
-    submittedWorkHref: safeSubmissionHref(submission.contentUrl),
+    contentUrl: submittedWorkHref,
+    submittedWorkHref,
     attachments,
     submittedAt: submission.submittedAt,
     updatedAt: submission.updatedAt,

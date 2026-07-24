@@ -1,7 +1,11 @@
 import { z } from "zod";
 
+import { mailboxSchema } from "@/lib/validations/mailbox";
+
+export { MAX_MAILBOX_ADDRESS_LENGTH } from "@/lib/validations/mailbox";
+
 export const loginSchema = z.object({
-  email: z.string().email("Enter a valid email address."),
+  email: mailboxSchema,
   password: z.string().min(8, "Password is required."),
 });
 

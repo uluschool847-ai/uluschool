@@ -17,6 +17,7 @@ import { requireRole } from "@/lib/auth/session";
 import { LESSON_STATUS_LABELS, parseLessonStatus } from "@/lib/lessons/lesson-status";
 import { countUnreadNotificationsForUser } from "@/lib/repositories/notification-repository";
 import { getTeacherDashboardData } from "@/lib/repositories/portal-repository";
+import { safeStoredFileHref } from "@/lib/security/storage-links";
 
 export const metadata: Metadata = {
   title: "Teacher Portal - mathSchool",
@@ -48,17 +49,6 @@ function formatTime(date: Date) {
     hour12: true,
     timeZone: "Africa/Nairobi",
   }).format(date);
-}
-
-function safeReviewHref(url: string | null | undefined) {
-  if (!url) return null;
-
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "https:" ? parsed.toString() : null;
-  } catch {
-    return null;
-  }
 }
 
 function displayLessonStatus(status?: string | null) {
@@ -567,7 +557,7 @@ export default async function TeacherPortalDashboard() {
                   id: submission.id,
                   title: legacySubmission.assignmentTitle ?? "Assignment",
                 };
-                const reviewHref = safeReviewHref(submission.contentUrl);
+                const reviewHref = safeStoredFileHref(submission.contentUrl);
 
                 return (
                   <article key={submission.id} className="rounded-lg border border-secondary p-4">

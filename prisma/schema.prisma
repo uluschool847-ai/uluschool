@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum EnquiryStatus {
@@ -175,6 +176,8 @@ model Enquiry {
   utmMedium          String?
   utmCampaign        String?
   referrer           String?
+  consentVersion     String?
+  consentGivenAt     DateTime?
   convertedAt        DateTime?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
@@ -271,6 +274,7 @@ model AppUser {
   passwordHash         String
   phoneWhatsapp        String?
   isActive             Boolean  @default(true)
+  mustChangePassword   Boolean  @default(false)
   learningStatus       StudentLearningStatus?
   twoFactorEnabled     Boolean  @default(false)
   twoFactorSecret      String?
@@ -283,6 +287,7 @@ model AppUser {
   availabilityRules TeacherAvailabilityRule[]
   unavailablePeriods TeacherUnavailablePeriod[]
   adminAuditLogs     AdminAuditLog[]
+  adminTwoFactorChallenges AdminTwoFactorChallenge[]
   attendanceRecords  AttendanceRecord[] @relation("StudentAttendanceRecords")
   markedAttendanceRecords AttendanceRecord[] @relation("AttendanceMarkedBy")
   inAppNotifications InAppNotification[] @relation("UserInAppNotifications")
@@ -306,6 +311,8 @@ model AppUser {
   reportSnapshotsAsStudent ReportSnapshot[] @relation("ReportSnapshotStudent")
   reportSnapshotsAsTeacher ReportSnapshot[] @relation("ReportSnapshotTeacher")
   courseMaterials      CourseMaterial[]
+  pendingUploads       PendingUpload[]
+  activeStorageObjects ActiveStorageObject[]
   cabinetTeacher       Teacher?         @relation("TeacherCabinetAccess")
   aiDraftsCreated      AiDraft[]        @relation("AiDraftCreatedBy")
   aiDraftsReviewed     AiDraft[]        @relation("AiDraftReviewedBy")
@@ -320,6 +327,21 @@ model AppUser {
   paidPayments      PaymentTransaction[]  @relation("PayerPayments")
   billingInvoices   BillingInvoice[]      @relation("StudentBillingInvoices")
   payerInvoices     BillingInvoice[]      @relation("PayerBillingInvoices")
+}
+
+model AdminTwoFactorChallenge {
+  id             String   @id @default(cuid())
+  userId         String
+  user           AppUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  authMethod     String
+  failedAttempts Int      @default(0)
+  expiresAt      DateTime
+  consumedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt, consumedAt])
 }
 
 model InAppNotification {
@@ -733,6 +755,40 @@ model Attachment {
   @@index([submissionId])
   @@index([courseMaterialId])
   @@index([storageKey])
+}
+
+model PendingUpload {
+  id         String    @id @default(cuid())
+  ownerId    String
+  owner      AppUser   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  purpose    String
+  storageKey String    @unique
+  filename   String
+  mimeType   String
+  byteSize   Int
+  expiresAt  DateTime
+  claimToken String?
+  claimedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([ownerId, purpose, expiresAt])
+  @@index([expiresAt])
+  @@index([expiresAt, claimedAt])
+}
+
+model ActiveStorageObject {
+  id         String   @id @default(cuid())
+  ownerId    String
+  owner      AppUser  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  purpose    String
+  storageKey String   @unique
+  filename   String
+  mimeType   String
+  byteSize   Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([ownerId, purpose])
 }
 
 model StudentProgress {

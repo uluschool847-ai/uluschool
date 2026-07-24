@@ -1,6 +1,6 @@
 "use server";
 
-import { UserRole } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -14,7 +14,19 @@ import {
   setTeacherActive,
   updateTeacher,
 } from "@/lib/repositories/cms-repository";
-import { createStorageService } from "@/lib/storage";
+import {
+  CONSERVATIVE_UNLEDGERED_STORAGE_BYTES,
+  type PendingUploadMetadata,
+  finalizePendingUploads,
+  queueStorageObjectForDeletion,
+  releasePendingUpload,
+  reservePendingUpload,
+} from "@/lib/repositories/pending-upload-repository";
+import {
+  createStorageService,
+  normalizePersistedStorageReference,
+  publicTeacherPhotoNamespace,
+} from "@/lib/storage";
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpg", "image/jpeg", "image/png", "image/webp"]);
@@ -108,7 +120,13 @@ function validatePhoto(photo: File | null) {
 
 async function resolvePhotoUrl(
   formData: FormData,
-): Promise<{ photoUrl?: string | null; errors?: string[] }> {
+  adminId: string,
+): Promise<{
+  photoUrl?: string | null;
+  upload?: PendingUploadMetadata;
+  uploadedStorageKey?: string;
+  errors?: string[];
+}> {
   const photo = extractPhoto(formData);
   const photoErrors = validatePhoto(photo);
   if (photoErrors) {
@@ -116,9 +134,54 @@ async function resolvePhotoUrl(
   }
 
   if (photo) {
-    const storage = createStorageService({ runtimeRole: "ADMIN" });
-    const storageKey = await storage.upload(photo, photo.name);
-    return { photoUrl: storage.getURL(storageKey) };
+    const storage = createStorageService();
+    let storageKey: string;
+    try {
+      storageKey = await storage.upload(photo, {
+        filename: photo.name,
+        namespace: publicTeacherPhotoNamespace(adminId),
+        contentType: photo.type,
+      });
+    } catch {
+      return { errors: ["Failed to store teacher photo."] };
+    }
+
+    const upload = {
+      storageKey,
+      filename: photo.name,
+      mimeType: photo.type,
+      byteSize: photo.size,
+    };
+    try {
+      await reservePendingUpload({
+        ownerId: adminId,
+        purpose: "teacher-photo",
+        storage,
+        ...upload,
+      });
+    } catch {
+      try {
+        await storage.delete(storageKey);
+      } catch {
+        // The upload has no durable reservation or live reference yet.
+      }
+      return { errors: ["Failed to store teacher photo."] };
+    }
+
+    try {
+      return {
+        photoUrl: storage.getURL(storageKey),
+        upload,
+        uploadedStorageKey: storageKey,
+      };
+    } catch {
+      try {
+        await releasePendingUpload({ ownerId: adminId, storageKey, storage });
+      } catch {
+        // The durable reservation remains available to cron.
+      }
+      return { errors: ["Failed to store teacher photo."] };
+    }
   }
 
   if (formData.get("clearPhoto")?.toString() === "true") {
@@ -155,6 +218,74 @@ function readTeacherLinks(formData: FormData) {
 function teacherAuditSnapshot(value: Record<string, unknown>) {
   const { role: _role, ...rest } = value;
   return rest;
+}
+
+function persistedTeacherPhotoStorageReference(photoUrl: unknown) {
+  const reference = normalizePersistedStorageReference(photoUrl);
+  if (!reference) return null;
+  if (reference.kind === "legacy") {
+    return { storageKey: reference.storageKey, ownerId: null };
+  }
+
+  const segments = reference.storageKey.split("/");
+  if (
+    segments.length !== 4 ||
+    segments[0] !== "public" ||
+    segments[1] !== "teachers" ||
+    !segments[2] ||
+    !segments[3]
+  ) {
+    return null;
+  }
+  try {
+    if (publicTeacherPhotoNamespace(segments[2]) !== segments.slice(0, 3).join("/")) return null;
+    return { storageKey: reference.storageKey, ownerId: segments[2] };
+  } catch {
+    return null;
+  }
+}
+
+async function releaseTeacherPhotoBestEffort(
+  cleanup:
+    | {
+        ownerId: string;
+        storageKey: string;
+      }
+    | null
+    | undefined,
+) {
+  if (!cleanup) return;
+  try {
+    await releasePendingUpload({ ...cleanup, storage: createStorageService() });
+  } catch {
+    // The durable cleanup row remains available to cron.
+  }
+}
+
+async function queueTeacherPhotoForDeletion(
+  input: {
+    persistedValue: unknown;
+    replacementValue?: unknown;
+    fallbackOwnerId: string;
+  },
+  transaction: Prisma.TransactionClient,
+) {
+  const previousReference = persistedTeacherPhotoStorageReference(input.persistedValue);
+  if (!previousReference) return null;
+  const replacementReference = normalizePersistedStorageReference(input.replacementValue);
+  if (replacementReference?.storageKey === previousReference.storageKey) return null;
+
+  return queueStorageObjectForDeletion(
+    {
+      ownerId: previousReference.ownerId ?? input.fallbackOwnerId,
+      purpose: "teacher-photo",
+      storageKey: previousReference.storageKey,
+      filename: previousReference.storageKey.split("/").at(-1) ?? "teacher-photo.bin",
+      mimeType: "application/octet-stream",
+      byteSize: CONSERVATIVE_UNLEDGERED_STORAGE_BYTES,
+    },
+    transaction,
+  );
 }
 
 function extractFormData(firstArg: TeacherActionState | FormData, secondArg?: FormData): FormData {
@@ -209,7 +340,7 @@ export async function createTeacherAction(
     return { success: false, errors };
   }
 
-  const photoResult = await resolvePhotoUrl(formData);
+  const photoResult = await resolvePhotoUrl(formData, session.uid);
   if (photoResult.errors) {
     if (flashMode && errorRedirect) {
       redirect(buildRedirectUrl(errorRedirect, "teacherError", photoResult.errors.join(" ")));
@@ -223,42 +354,66 @@ export async function createTeacherAction(
     if (!session) {
       throw new Error("Failed to create teacher profile.");
     }
-    await prisma.$transaction(async (tx) => {
-      const createdTeacher = await createTeacher(
-        {
-          ...parsed.data,
-          subjects,
-          cabinetUserId,
-          ...(photoResult.photoUrl !== undefined ? { photoUrl: photoResult.photoUrl } : {}),
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          const createdTeacher = await createTeacher(
+            {
+              ...parsed.data,
+              subjects,
+              cabinetUserId,
+              ...(photoResult.photoUrl !== undefined ? { photoUrl: photoResult.photoUrl } : {}),
+            },
+            tx,
+          );
+          const teacherId = createdTeacher?.id;
+          if (!teacherId) {
+            throw new Error("Failed to create teacher profile.");
+          }
+          if (photoResult.upload) {
+            await finalizePendingUploads(
+              {
+                ownerId: session.uid,
+                purpose: "teacher-photo",
+                uploads: [photoResult.upload],
+              },
+              tx,
+            );
+          }
+          await createAdminAuditLog(
+            {
+              adminUserId: session.uid,
+              action: "TEACHER_PROFILE_CREATED",
+              targetType: "teacher",
+              targetId: teacherId,
+              before: null,
+              after: teacherAuditSnapshot({
+                id: teacherId,
+                ...parsed.data,
+                subjects,
+                cabinetUserId,
+                ...(photoResult.photoUrl !== undefined ? { photoUrl: photoResult.photoUrl } : {}),
+              }),
+              meta: {
+                actorRole: UserRole.ADMIN,
+                teacherProfileId: teacherId,
+              },
+            },
+            tx,
+          );
         },
-        tx,
-      );
-      const teacherId = createdTeacher?.id;
-      if (!teacherId) {
-        throw new Error("Failed to create teacher profile.");
-      }
-      await createAdminAuditLog(
         {
-          adminUserId: session.uid,
-          action: "TEACHER_PROFILE_CREATED",
-          targetType: "teacher",
-          targetId: teacherId,
-          before: null,
-          after: teacherAuditSnapshot({
-            id: teacherId,
-            ...parsed.data,
-            subjects,
-            cabinetUserId,
-            ...(photoResult.photoUrl !== undefined ? { photoUrl: photoResult.photoUrl } : {}),
-          }),
-          meta: {
-            actorRole: UserRole.ADMIN,
-            teacherProfileId: teacherId,
-          },
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
         },
-        tx,
       );
-    });
+    } catch (error) {
+      await releaseTeacherPhotoBestEffort(
+        photoResult.uploadedStorageKey
+          ? { ownerId: session.uid, storageKey: photoResult.uploadedStorageKey }
+          : null,
+      );
+      throw error;
+    }
     revalidateTeacherPages();
   } catch (error) {
     if (flashMode && errorRedirect) {
@@ -335,7 +490,7 @@ export async function updateTeacherAction(
     return { success: false, errors };
   }
 
-  const photoResult = await resolvePhotoUrl(formData);
+  const photoResult = await resolvePhotoUrl(formData, session.uid);
   if (photoResult.errors) {
     if (flashMode && errorRedirect) {
       redirect(buildRedirectUrl(errorRedirect, "teacherError", photoResult.errors.join(" ")));
@@ -350,66 +505,97 @@ export async function updateTeacherAction(
     if (!session) {
       throw new Error("Failed to update teacher profile.");
     }
-    await prisma.$transaction(async (tx) => {
-      const updatedTeacher = await updateTeacher(
-        parsed.data.id,
-        {
-          fullName: parsed.data.fullName,
-          title: parsed.data.title,
-          bio: parsed.data.bio,
-          displayOrder: parsed.data.displayOrder,
-          isActive: parsed.data.isActive,
-          subjects,
-          cabinetUserId,
-          ...(photoResult.photoUrl !== undefined ? { photoUrl: photoResult.photoUrl } : {}),
-        },
-        tx,
-      );
-      const resultWithAudit = updatedTeacher as {
-        before?: Record<string, unknown> | null;
-        after?: Record<string, unknown> | null;
-      } | null;
-      await createAdminAuditLog(
-        {
-          adminUserId: session.uid,
-          action: "TEACHER_PROFILE_UPDATED",
-          targetType: "teacher",
-          targetId: parsed.data.id,
-          before: teacherAuditSnapshot(
-            resultWithAudit?.before ?? {
-              id: parsed.data.id,
-              photoUrl: currentPhotoUrl,
-            },
-          ),
-          after: teacherAuditSnapshot(
-            resultWithAudit?.after ?? {
-              ...parsed.data,
+    let updatedTeacher: {
+      cleanup: Awaited<ReturnType<typeof queueTeacherPhotoForDeletion>>;
+      teacher: unknown;
+    };
+    try {
+      updatedTeacher = await prisma.$transaction(
+        async (tx) => {
+          const teacherUpdateResult = await updateTeacher(
+            parsed.data.id,
+            {
+              fullName: parsed.data.fullName,
+              title: parsed.data.title,
+              bio: parsed.data.bio,
+              displayOrder: parsed.data.displayOrder,
+              isActive: parsed.data.isActive,
               subjects,
               cabinetUserId,
               ...(photoResult.photoUrl !== undefined ? { photoUrl: photoResult.photoUrl } : {}),
             },
-          ),
-          meta: {
-            actorRole: UserRole.ADMIN,
-            teacherProfileId: parsed.data.id,
-          },
+            tx,
+          );
+          const resultWithAudit = teacherUpdateResult as {
+            before?: Record<string, unknown> | null;
+            after?: Record<string, unknown> | null;
+          } | null;
+          if (photoResult.upload) {
+            await finalizePendingUploads(
+              {
+                ownerId: session.uid,
+                purpose: "teacher-photo",
+                uploads: [photoResult.upload],
+              },
+              tx,
+            );
+          }
+          await createAdminAuditLog(
+            {
+              adminUserId: session.uid,
+              action: "TEACHER_PROFILE_UPDATED",
+              targetType: "teacher",
+              targetId: parsed.data.id,
+              before: teacherAuditSnapshot(
+                resultWithAudit?.before ?? {
+                  id: parsed.data.id,
+                  photoUrl: currentPhotoUrl,
+                },
+              ),
+              after: teacherAuditSnapshot(
+                resultWithAudit?.after ?? {
+                  ...parsed.data,
+                  subjects,
+                  cabinetUserId,
+                  ...(photoResult.photoUrl !== undefined ? { photoUrl: photoResult.photoUrl } : {}),
+                },
+              ),
+              meta: {
+                actorRole: UserRole.ADMIN,
+                teacherProfileId: parsed.data.id,
+              },
+            },
+            tx,
+          );
+          const beforePhotoUrl = resultWithAudit?.before?.photoUrl;
+          const afterPhotoUrl = resultWithAudit?.after?.photoUrl;
+          const cleanup =
+            resultWithAudit?.before && resultWithAudit?.after && beforePhotoUrl !== afterPhotoUrl
+              ? await queueTeacherPhotoForDeletion(
+                  {
+                    persistedValue: beforePhotoUrl,
+                    replacementValue: afterPhotoUrl,
+                    fallbackOwnerId: session.uid,
+                  },
+                  tx,
+                )
+              : null;
+          return { teacher: teacherUpdateResult, cleanup };
         },
-        tx,
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        },
       );
-    });
-
-    if (
-      currentPhotoUrl &&
-      currentPhotoUrl !== photoResult.photoUrl &&
-      currentPhotoUrl.startsWith("/uploads/")
-    ) {
-      const storage = createStorageService({ runtimeRole: "ADMIN" });
-      try {
-        await storage.delete(currentPhotoUrl);
-      } catch {
-        // Ignore local cleanup failures.
-      }
+    } catch (error) {
+      await releaseTeacherPhotoBestEffort(
+        photoResult.uploadedStorageKey
+          ? { ownerId: session.uid, storageKey: photoResult.uploadedStorageKey }
+          : null,
+      );
+      throw error;
     }
+
+    await releaseTeacherPhotoBestEffort(updatedTeacher.cleanup);
 
     revalidateTeacherPages();
   } catch (error) {
@@ -583,24 +769,40 @@ export async function deleteTeacherAction(
     if (!session) {
       throw new Error("Failed to delete teacher profile.");
     }
-    await prisma.$transaction(async (tx) => {
-      const deletedTeacher = await deleteTeacher(id, tx);
-      await createAdminAuditLog(
-        {
-          adminUserId: session.uid,
-          action: "TEACHER_PROFILE_DELETED",
-          targetType: "teacher",
-          targetId: id,
-          before: deletedTeacher ?? { id },
-          after: { deleted: true },
-          meta: {
-            actorRole: UserRole.ADMIN,
-            teacherProfileId: id,
+    const deletedTeacher = await prisma.$transaction(
+      async (tx) => {
+        const deletedTeacher = await deleteTeacher(id, tx);
+        await createAdminAuditLog(
+          {
+            adminUserId: session.uid,
+            action: "TEACHER_PROFILE_DELETED",
+            targetType: "teacher",
+            targetId: id,
+            before: deletedTeacher ?? { id },
+            after: { deleted: true },
+            meta: {
+              actorRole: UserRole.ADMIN,
+              teacherProfileId: id,
+            },
           },
-        },
-        tx,
-      );
-    });
+          tx,
+        );
+        const cleanup = await queueTeacherPhotoForDeletion(
+          {
+            persistedValue: (deletedTeacher as { photoUrl?: unknown } | null)?.photoUrl,
+            replacementValue: null,
+            fallbackOwnerId: session.uid,
+          },
+          tx,
+        );
+        return { cleanup, teacher: deletedTeacher };
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      },
+    );
+
+    await releaseTeacherPhotoBestEffort(deletedTeacher.cleanup);
     revalidateTeacherPages();
   } catch (error) {
     if (flashMode && errorRedirect) {

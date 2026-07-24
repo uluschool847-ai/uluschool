@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/session";
 import { getTeacherClassGroupDetail } from "@/lib/repositories/teacher-classes-repository";
+import { safeStoredFileHref } from "@/lib/security/storage-links";
 
 export const metadata: Metadata = {
   title: "Teacher Class - mathSchool",
@@ -241,18 +242,21 @@ export default async function TeacherClassGroupPage({
               <EmptyState>No materials</EmptyState>
             ) : (
               <ul className="space-y-3">
-                {classGroup.materials.map((material) => (
-                  <li key={material.id} className="rounded-lg border border-secondary p-4">
-                    <p className="font-medium">{material.title}</p>
-                    {material.fileHref ? (
-                      <Button asChild variant="secondary" size="sm" className="mt-3">
-                        <a href={material.fileHref} aria-label={`Open Material ${material.title}`}>
-                          Open Material - {material.title}
-                        </a>
-                      </Button>
-                    ) : null}
-                  </li>
-                ))}
+                {classGroup.materials.map((material) => {
+                  const fileHref = safeStoredFileHref(material.fileHref);
+                  return (
+                    <li key={material.id} className="rounded-lg border border-secondary p-4">
+                      <p className="font-medium">{material.title}</p>
+                      {fileHref ? (
+                        <Button asChild variant="secondary" size="sm" className="mt-3">
+                          <a href={fileHref} aria-label={`Open Material ${material.title}`}>
+                            Open Material - {material.title}
+                          </a>
+                        </Button>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </CardContent>

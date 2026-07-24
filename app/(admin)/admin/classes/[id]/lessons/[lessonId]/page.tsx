@@ -6,6 +6,7 @@ import { LessonRowActions } from "@/components/admin/classes/LessonRowActions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/session";
 import { getLessonById } from "@/lib/repositories/lesson-repository";
+import { DEFAULT_AVAILABILITY_TIMEZONE } from "@/lib/scheduling/availability";
 
 export const metadata: Metadata = {
   title: "Lesson Details",
@@ -24,6 +25,7 @@ function formatDateTime(value: Date) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: DEFAULT_AVAILABILITY_TIMEZONE,
   }).format(value);
 }
 

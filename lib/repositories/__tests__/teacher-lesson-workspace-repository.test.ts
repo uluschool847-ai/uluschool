@@ -1,6 +1,8 @@
 import { LessonStatus } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { encodeStorageKey, storageUrlForKey } from "@/lib/storage/storage-url";
+
 const prismaMock = vi.hoisted(() => ({
   scheduledClass: {
     findFirst: vi.fn(),
@@ -33,6 +35,7 @@ async function loadTeacherLessonWorkspaceRepository() {
 const now = new Date("2026-07-10T09:45:00.000Z");
 const startAt = new Date("2026-07-10T10:00:00.000Z");
 const endAt = new Date("2026-07-10T11:00:00.000Z");
+const materialStorageKey = "private/teachers/teacher-1/materials/algebra.pdf";
 
 function lessonRecord(overrides: Record<string, unknown> = {}) {
   return {
@@ -91,7 +94,19 @@ function lessonRecord(overrides: Record<string, unknown> = {}) {
         id: "material-1",
         title: "Algebra worksheet",
         description: "Practice file",
-        fileUrl: "/uploads/algebra.pdf",
+        fileUrl: "https://cdn.example.com/stale-algebra.pdf",
+        attachments: [
+          {
+            id: "attachment-z",
+            storageKey: materialStorageKey,
+            createdAt: new Date("2026-07-01T07:00:00.000Z"),
+          },
+          {
+            id: "attachment-a",
+            storageKey: "private/teachers/teacher-1/materials/old-algebra.pdf",
+            createdAt: new Date("2026-07-01T07:00:00.000Z"),
+          },
+        ],
         createdAt: new Date("2026-07-01T08:00:00.000Z"),
       },
     ],
@@ -216,6 +231,15 @@ describe("teacher lesson workspace repository", () => {
     const { getTeacherLessonWorkspace } = await loadTeacherLessonWorkspaceRepository();
     const result = await getTeacherLessonWorkspace("teacher-1", "lesson-1");
 
+    expect(
+      prismaMock.scheduledClass.findFirst.mock.calls[0]?.[0]?.include?.courseMaterials?.select
+        ?.attachments,
+    ).toEqual({
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { storageKey: true },
+      take: 1,
+    });
+
     expect(result).toEqual(
       expect.objectContaining({
         lesson: expect.objectContaining({
@@ -293,10 +317,10 @@ describe("teacher lesson workspace repository", () => {
             id: "material-1",
             title: "Algebra worksheet",
             description: "Practice file",
-            fileUrl: "/uploads/algebra.pdf",
+            fileUrl: storageUrlForKey(materialStorageKey),
             createdAt: new Date("2026-07-01T08:00:00.000Z"),
             fileLink: {
-              href: "/uploads/algebra.pdf",
+              href: storageUrlForKey(materialStorageKey),
               label: "Open Algebra worksheet",
               disabled: false,
             },
@@ -362,6 +386,66 @@ describe("teacher lesson workspace repository", () => {
         },
       }),
     );
+  });
+
+  it("preserves safe external and legacy material hrefs and disables malformed values", async () => {
+    const externalHref =
+      "https://cdn.example.com/Files/Extension%20Work.pdf?download=1#teacher-copy";
+    const crossPurposeHref = `/api/public-files/${encodeStorageKey(materialStorageKey)}`;
+    prismaMock.scheduledClass.findFirst.mockResolvedValueOnce(
+      lessonRecord({
+        courseMaterials: [
+          {
+            id: "external",
+            title: "External material",
+            fileUrl: externalHref,
+            attachments: [],
+          },
+          {
+            id: "legacy",
+            title: "Legacy material",
+            fileUrl: "/uploads/legacy/file.pdf",
+            attachments: [],
+          },
+          {
+            id: "malformed",
+            title: "Malformed material",
+            fileUrl: "private/teachers/teacher-1/materials/file name.pdf",
+            attachments: [],
+          },
+          {
+            id: "cross-purpose",
+            title: "Cross purpose material",
+            fileUrl: crossPurposeHref,
+            attachments: [],
+          },
+        ],
+      }),
+    );
+
+    const { getTeacherLessonWorkspace } = await loadTeacherLessonWorkspaceRepository();
+    const result = (await getTeacherLessonWorkspace("teacher-1", "lesson-1")) as {
+      materials: Array<Record<string, unknown>>;
+    };
+
+    expect(result.materials).toEqual([
+      expect.objectContaining({
+        fileLink: expect.objectContaining({ disabled: false, href: externalHref }),
+        fileUrl: externalHref,
+      }),
+      expect.objectContaining({
+        fileLink: expect.objectContaining({ disabled: false, href: "/uploads/legacy/file.pdf" }),
+        fileUrl: "/uploads/legacy/file.pdf",
+      }),
+      expect.objectContaining({
+        fileLink: expect.objectContaining({ disabled: true, href: null }),
+        fileUrl: null,
+      }),
+      expect.objectContaining({
+        fileLink: expect.objectContaining({ disabled: true, href: null }),
+        fileUrl: null,
+      }),
+    ]);
   });
 
   it("returns null for another teacher's lesson", async () => {

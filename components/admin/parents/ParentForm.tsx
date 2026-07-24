@@ -1,6 +1,14 @@
-import Link from "next/link";
+"use client";
 
-import { createParentAction, updateParentAction } from "@/app/(admin)/admin/parents/actions";
+import Link from "next/link";
+import { useActionState } from "react";
+
+import {
+  type ParentActionState,
+  createParentAction,
+  updateParentAction,
+} from "@/app/(admin)/admin/parents/actions";
+import { TemporaryCredentialsPanel } from "@/components/admin/users/TemporaryCredentialsPanel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,6 +28,19 @@ type ParentFormProps = {
   successRedirect: string;
   errorRedirect: string;
 };
+
+const initialParentActionState: ParentActionState = { success: false };
+
+function getParentActionError(state: ParentActionState) {
+  if (state.success) return undefined;
+  if (state.message) return state.message;
+
+  const message = Object.values(state.errors ?? {})
+    .flat()
+    .filter((value): value is string => Boolean(value))
+    .join(" ");
+  return message || undefined;
+}
 
 function ParentFlash({ message, error }: { message?: string; error?: string }) {
   if (error) {
@@ -53,7 +74,15 @@ export function ParentForm({
   errorRedirect,
 }: ParentFormProps) {
   const isNew = mode === "create";
-  const formAction = isNew ? createParentAction : updateParentAction;
+  const [createState, createFormAction, isCreatePending] = useActionState(
+    createParentAction,
+    initialParentActionState,
+  );
+  const formAction = isNew ? createFormAction : updateParentAction;
+  const createError = getParentActionError(createState);
+  const hasTemporaryCredentials = Boolean(
+    isNew && createState.accountEmail && createState.temporaryPassword,
+  );
 
   return (
     <Card>
@@ -61,16 +90,30 @@ export function ParentForm({
         <CardTitle>{isNew ? "Create Parent" : "Edit Parent"}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <ParentFlash message={flashMessage} error={flashError} />
+        <ParentFlash
+          message={isNew && createState.success ? createState.message : flashMessage}
+          error={isNew && createState.success ? undefined : (createError ?? flashError)}
+        />
+
+        {isNew && createState.accountEmail && createState.temporaryPassword ? (
+          <TemporaryCredentialsPanel
+            email={createState.accountEmail}
+            temporaryPassword={createState.temporaryPassword}
+          />
+        ) : null}
 
         <form
           action={formAction as unknown as (formData: FormData) => void}
           className="space-y-6"
           noValidate
         >
-          <input type="hidden" name="flash" value="true" />
-          <input type="hidden" name="successRedirect" value={successRedirect} />
-          <input type="hidden" name="errorRedirect" value={errorRedirect} />
+          {!isNew ? (
+            <>
+              <input type="hidden" name="flash" value="true" />
+              <input type="hidden" name="successRedirect" value={successRedirect} />
+              <input type="hidden" name="errorRedirect" value={errorRedirect} />
+            </>
+          ) : null}
           {!isNew && parent ? <input type="hidden" name="id" value={parent.id} /> : null}
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -121,7 +164,9 @@ export function ParentForm({
             <Button asChild variant="outline">
               <Link href="/admin/parents">Cancel</Link>
             </Button>
-            <Button type="submit">{isNew ? "Create Parent" : "Save Changes"}</Button>
+            <Button type="submit" disabled={isNew && (isCreatePending || hasTemporaryCredentials)}>
+              {isNew ? "Create Parent" : "Save Changes"}
+            </Button>
           </div>
         </form>
       </CardContent>

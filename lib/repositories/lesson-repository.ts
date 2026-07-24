@@ -581,6 +581,7 @@ export async function rescheduleLesson(
   input: {
     startAt: Date;
     endAt: Date;
+    timezone: string;
     teacherId?: string | null;
     liveLessonUrl?: string | null;
     googleCalendarEventId?: string | null;
@@ -606,6 +607,7 @@ export async function rescheduleLesson(
     data: {
       startAt: input.startAt,
       endAt: input.endAt,
+      timezone: input.timezone,
       status: LessonStatus.RESCHEDULED,
       rescheduledFromId: before.rescheduledFromId ?? before.id,
       ...(meeting

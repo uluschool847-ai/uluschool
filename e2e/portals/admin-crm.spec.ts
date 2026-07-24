@@ -6,7 +6,7 @@ const ADMIN_EMAIL = "fixed.admin@uluglobalacademy.com";
 const TEACHER_EMAIL = "fixed.teacher@uluglobalacademy.com";
 const PARENT_EMAIL = "fixed.parent@uluglobalacademy.com";
 const PASSWORD =
-  process.env.E2E_PORTAL_PASSWORD ?? process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 
 const RUN_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const ENQUIRY_EMAIL = `qa.crm.enrol.${RUN_ID}@example.com`;
@@ -181,6 +181,7 @@ async function submitPublicEnrolment(page: Page): Promise<CrmRecord> {
   await page.getByRole("button", { name: "Next Step" }).click();
   await page.locator("#preferredSchedule").fill("Weekday evenings");
   await page.locator("#additionalNotes").fill("QA CRM enrolment notes");
+  await page.getByRole("checkbox", { name: /i am the parent or guardian/i }).check();
   await page.waitForTimeout(1400);
   await page.getByRole("button", { name: /submit enrolment/i }).click();
   await expect(page.getByText(/reference id/i)).toBeVisible({ timeout: 15000 });
@@ -222,6 +223,7 @@ async function verifyEnquiryDetailWorkflow(page: Page, enquiry: CrmRecord) {
   const note = `QA CRM enquiry note ${RUN_ID}`;
 
   await page.goto(`/admin/enquiries/${enquiry.id}`);
+  const noteForm = page.getByLabel(/^note$/i).locator("xpath=ancestor::form");
   await expect(page.getByRole("heading", { name: `QA CRM Student ${RUN_ID}` })).toBeVisible();
   await expect(page.getByText(enquiry.referenceId)).toBeVisible();
   await page.getByRole("button", { name: /add note/i }).click();
@@ -235,7 +237,7 @@ async function verifyEnquiryDetailWorkflow(page: Page, enquiry: CrmRecord) {
 
   await page.getByLabel(/^note$/i).fill(note);
   await page.getByRole("button", { name: /add note/i }).click();
-  await expect(page.getByText(/note added/i)).toBeVisible({ timeout: 15000 });
+  await expect(noteForm.getByText(/^note added$/i)).toBeVisible({ timeout: 15000 });
   await page.reload();
   await expect(page.getByText(note)).toBeVisible();
   await expect(page.getByText(/status changed to rejected/i)).toBeVisible();
@@ -245,6 +247,7 @@ async function verifyLeadDetailWorkflow(page: Page, lead: CrmRecord) {
   const note = `QA CRM lead note ${RUN_ID}`;
 
   await page.goto(`/admin/leads/${lead.id}`);
+  const noteForm = page.getByLabel(/^note$/i).locator("xpath=ancestor::form");
   await expect(page.getByRole("heading", { name: `QA CRM Lead ${RUN_ID}` })).toBeVisible();
   await expect(page.getByText(lead.referenceId)).toBeVisible();
   await page.getByRole("button", { name: /add note/i }).click();
@@ -258,7 +261,7 @@ async function verifyLeadDetailWorkflow(page: Page, lead: CrmRecord) {
 
   await page.getByLabel(/^note$/i).fill(note);
   await page.getByRole("button", { name: /add note/i }).click();
-  await expect(page.getByText(/note added/i)).toBeVisible({ timeout: 15000 });
+  await expect(noteForm.getByText(/^note added$/i)).toBeVisible({ timeout: 15000 });
   await page.reload();
   await expect(page.getByText(note)).toBeVisible();
 }

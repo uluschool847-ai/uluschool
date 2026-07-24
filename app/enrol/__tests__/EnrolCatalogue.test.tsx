@@ -44,6 +44,7 @@ vi.mock("@/components/enrol/enrol-form", () => ({
 }));
 
 type EnrolPageModule = {
+  dynamic?: string;
   default: () => Promise<JSX.Element> | JSX.Element;
 };
 
@@ -59,6 +60,12 @@ describe("Enrolment page catalogue data wiring", () => {
 
   afterEach(() => {
     cleanup();
+  });
+
+  it("renders dynamically so post-build production bootstrap data is visible", async () => {
+    const page = await loadEnrolPage();
+
+    expect(page.dynamic).toBe("force-dynamic");
   });
 
   it("populates the Subject dropdown from catalogue repository data", async () => {

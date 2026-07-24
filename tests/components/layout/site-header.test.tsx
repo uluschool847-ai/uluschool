@@ -2,8 +2,18 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SiteHeader } from "../../../components/layout/site-header";
 
-type LinkMockProps = { href: string; children: React.ReactNode } & Record<string, unknown>;
+type LinkMockProps = {
+  href: string;
+  children: React.ReactNode;
+  prefetch?: boolean;
+} & Record<string, unknown>;
 type ImageMockProps = { alt?: string; priority?: boolean } & Record<string, unknown>;
+
+const authenticatedPortalCases = [
+  { role: "TEACHER", label: "Teacher Portal", href: "/portal/teacher" },
+  { role: "STUDENT", label: "Student Portal", href: "/portal/student" },
+  { role: "PARENT", label: "My Portal", href: "/portal" },
+] as const;
 
 // Mock next/navigation
 vi.mock("next/navigation", () => ({
@@ -19,8 +29,8 @@ vi.mock("next/image", () => ({
 
 // Mock next/link to render standard <a> tags for testing hrefs
 vi.mock("next/link", () => ({
-  default: ({ href, children, ...props }: LinkMockProps) => (
-    <a href={href} {...props}>
+  default: ({ href, children, prefetch, ...props }: LinkMockProps) => (
+    <a href={href} {...props} data-prefetch={prefetch === false ? "false" : "default"}>
       {children}
     </a>
   ),
@@ -97,4 +107,31 @@ describe("SiteHeader Navigation", () => {
       expect(href).not.toBe("#");
     }
   });
+
+  it.each(authenticatedPortalCases)(
+    "disables prefetching for the authenticated $role portal link",
+    async ({ role, label, href }) => {
+      global.fetch = vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              authenticated: true,
+              user: {
+                uid: `${role.toLowerCase()}-1`,
+                email: `${role.toLowerCase()}@example.com`,
+                fullName: `Test ${role}`,
+                role,
+              },
+            }),
+        }),
+      ) as typeof fetch;
+
+      render(<SiteHeader />);
+
+      const portalLink = await screen.findByRole("link", { name: label });
+      expect(portalLink).toHaveAttribute("href", href);
+      expect(portalLink).toHaveAttribute("data-prefetch", "false");
+    },
+  );
 });

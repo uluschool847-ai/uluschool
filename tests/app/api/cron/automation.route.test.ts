@@ -1,9 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const generateRuleBasedAutomationTasksMock = vi.hoisted(() => vi.fn());
+const sweepExpiredPendingUploadsMock = vi.hoisted(() => vi.fn());
+const storageServiceMock = vi.hoisted(() => ({ delete: vi.fn() }));
 
 vi.mock("@/lib/repositories/automation-repository", () => ({
   generateRuleBasedAutomationTasks: generateRuleBasedAutomationTasksMock,
+}));
+
+vi.mock("@/lib/repositories/pending-upload-repository", () => ({
+  sweepExpiredPendingUploads: sweepExpiredPendingUploadsMock,
+}));
+
+vi.mock("@/lib/storage", () => ({
+  createStorageService: () => storageServiceMock,
 }));
 
 vi.mock("next/server", () => ({
@@ -22,6 +32,7 @@ describe("app/api/cron/automation/route.ts env enforcement", () => {
     vi.clearAllMocks();
     (process.env as Record<string, string | undefined>).NODE_ENV = "production";
     Reflect.deleteProperty(process.env, "CRON_SECRET");
+    sweepExpiredPendingUploadsMock.mockResolvedValue({ claimed: 0, deleted: 0 });
   });
 
   it("returns 401 when CRON_SECRET is missing", async () => {
@@ -78,6 +89,30 @@ describe("app/api/cron/automation/route.ts env enforcement", () => {
       success: true,
       tasksCreated: 2,
       message: "Generated 2 manager tasks from rule-based automation.",
+    });
+    expect(sweepExpiredPendingUploadsMock).toHaveBeenCalledWith({ storage: storageServiceMock });
+  });
+
+  it("returns non-success when cleanup cannot durably release its claim", async () => {
+    process.env.CRON_SECRET = "expected-secret";
+    generateRuleBasedAutomationTasksMock.mockResolvedValueOnce([]);
+    sweepExpiredPendingUploadsMock.mockResolvedValueOnce({
+      claimed: 1,
+      deleted: 0,
+      durabilityFailures: 1,
+    });
+    const { GET } = await import("../../../../app/api/cron/automation/route");
+
+    const response = await GET(
+      new Request("http://localhost/api/cron/automation", {
+        headers: { authorization: "Bearer expected-secret" },
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: "Storage cleanup could not preserve retry state.",
     });
   });
 });

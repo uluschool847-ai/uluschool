@@ -16,7 +16,7 @@
 ## Student
 Use `fixed.student@uluglobalacademy.com` for data-rich checks.
 
-- [ ] Login works with the seeded password from `DEFAULT_PORTAL_PASSWORD`
+- [ ] Login works with the local seeded password from `SEED_PORTAL_PASSWORD`
 - [ ] `D:\2026\mathSchool\app\portal\student\page.tsx` shows assignments
 - [ ] Existing grade/feedback is visible on the student dashboard
 - [ ] Progress notes render on the dashboard
@@ -27,7 +27,7 @@ Use `fixed.student@uluglobalacademy.com` for data-rich checks.
 ## Teacher
 Use `fixed.teacher@uluglobalacademy.com` for data-rich checks.
 
-- [ ] Login works with the seeded password from `DEFAULT_PORTAL_PASSWORD`
+- [ ] Login works with the local seeded password from `SEED_PORTAL_PASSWORD`
 - [ ] `D:\2026\mathSchool\app\portal\teacher\page.tsx` shows metrics
 - [ ] Classes and upcoming lessons render consistent local times
 - [ ] Assignment due dates render in the same `DD Month YYYY` format used elsewhere
@@ -38,7 +38,7 @@ Use `fixed.teacher@uluglobalacademy.com` for data-rich checks.
 ## Parent
 Use `fixed.parent@uluglobalacademy.com` for the linked-child flow and `onboardingparent@uluglobalacademy.com` for the empty-state flow.
 
-- [ ] Login works with the seeded password from `DEFAULT_PORTAL_PASSWORD`
+- [ ] Login works with the local seeded password from `SEED_PORTAL_PASSWORD`
 - [ ] Parent dashboard shows one linked child with classes, homework status, grades, and progress cards
 - [ ] Empty state appears for the onboarding parent with no linked student
 - [ ] Child sections are readable and stack correctly on mobile
@@ -46,8 +46,13 @@ Use `fixed.parent@uluglobalacademy.com` for the linked-child flow and `onboardin
 ## Admin
 Use `fixed.admin@uluglobalacademy.com` or `admin@uluglobalacademy.com`.
 
-- [ ] Admin login works
-- [ ] In local development with `ADMIN_REQUIRE_2FA=true`, post-login redirect to `/admin/security?setup2fa=required` is handled as expected
+ULU Online School administrators authenticate to the application with email and password.
+Temporary passwords must be changed on first login. Login rate limiting, signed sessions,
+audit logging, and server-side role enforcement remain mandatory. Infrastructure provider
+accounts remain protected with provider-level 2FA.
+
+- [ ] Admin login works with email and password and no authenticator prompt appears
+- [ ] A temporary administrator password must be changed before access to `/admin`
 - [ ] `D:\2026\mathSchool\app\(admin)\admin\page.tsx` shows analytics, enquiries, leads, and audit logs
 - [ ] CRM status filter renders human-readable labels (`In Review`, not `in_review`)
 - [ ] Global search by `referenceId` works from the admin dashboard and submission screens

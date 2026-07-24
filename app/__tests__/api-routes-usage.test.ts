@@ -1,11 +1,31 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
 const APP_DIR = join(ROOT, "app");
 const API_DIR = join(APP_DIR, "api");
 const SEARCH_DIRS = [join(ROOT, "app"), join(ROOT, "components")];
+
+type ApplicationHrefGenerator = {
+  exportName: string;
+  filePath: string;
+  routePath: string;
+};
+
+const AUTHORIZED_APPLICATION_HREF_GENERATORS: readonly ApplicationHrefGenerator[] = [
+  {
+    exportName: "storageUrlForKey",
+    filePath: join(ROOT, "lib", "storage", "storage-url.ts"),
+    routePath: "/api/files/[token]",
+  },
+  {
+    exportName: "storageUrlForKey",
+    filePath: join(ROOT, "lib", "storage", "storage-url.ts"),
+    routePath: "/api/public-files/[token]",
+  },
+];
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
@@ -40,19 +60,86 @@ const productionFiles = SEARCH_DIRS.flatMap((dir) => walk(dir)).filter(
   (filePath) => isCodeFile(filePath) && !isTestFile(filePath),
 );
 
+function exportedFunctionGeneratesRoute(registration: ApplicationHrefGenerator) {
+  const sourceText = readFileSync(registration.filePath, "utf8");
+  const source = ts.createSourceFile(
+    registration.filePath,
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const declaration = source.statements.find(
+    (statement): statement is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(statement) &&
+      statement.name?.text === registration.exportName &&
+      Boolean(
+        statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword),
+      ),
+  );
+  if (!declaration?.body) return false;
+
+  const routePrefix = registration.routePath.replace(/\/\[[^/]+\]$/, "");
+  let hasRegisteredRoutePrefix = false;
+  let hasDynamicRouteReturn = false;
+  const visit = (node: ts.Node) => {
+    if (ts.isStringLiteral(node) && node.text === routePrefix) {
+      hasRegisteredRoutePrefix = true;
+    }
+    if (ts.isReturnStatement(node) && node.expression && ts.isTemplateExpression(node.expression)) {
+      const literalParts = [
+        node.expression.head.text,
+        ...node.expression.templateSpans.map((span) => span.literal.text),
+      ];
+      if (
+        node.expression.templateSpans.length >= 2 &&
+        literalParts.some((part) => part.includes("/"))
+      ) {
+        hasDynamicRouteReturn = true;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(declaration.body);
+  return hasRegisteredRoutePrefix && hasDynamicRouteReturn;
+}
+
+function hasAuthorizedApplicationHrefGenerator(
+  routePath: string,
+  registrations: readonly ApplicationHrefGenerator[] = AUTHORIZED_APPLICATION_HREF_GENERATORS,
+) {
+  return registrations
+    .filter((registration) => registration.routePath === routePath)
+    .some(exportedFunctionGeneratesRoute);
+}
+
 describe("API routes connectivity", () => {
+  it("does not authorize dynamic routes from unrelated constructs in one file", () => {
+    expect(
+      hasAuthorizedApplicationHrefGenerator("/api/files/[token]", [
+        {
+          exportName: "unrelatedUrl",
+          filePath: join(ROOT, "app", "__tests__", "fixtures", "dynamic-href-decoy.fixture.ts"),
+          routePath: "/api/files/[token]",
+        },
+      ]),
+    ).toBe(false);
+  });
+
   it("every route under app/api/ has at least one client-side caller", () => {
     const orphaned: string[] = [];
 
     for (const routeFile of apiRouteFiles) {
       const routePath = routePathFromFile(routeFile);
-      const hasCaller = productionFiles.some((filePath) => {
-        const content = readFileSync(filePath, "utf8");
-        return new RegExp(
-          `fetch\\([^)]*["']${routePath}|axios\\.[a-z]+\\([^)]*["']${routePath}|new URL\\(["']${routePath}`,
-          "m",
-        ).test(content);
-      });
+      const hasCaller =
+        hasAuthorizedApplicationHrefGenerator(routePath) ||
+        productionFiles.some((filePath) => {
+          const content = readFileSync(filePath, "utf8");
+          return new RegExp(
+            `fetch\\([^)]*["']${routePath}|axios\\.[a-z]+\\([^)]*["']${routePath}|new URL\\(["']${routePath}`,
+            "m",
+          ).test(content);
+        });
 
       if (!hasCaller) {
         orphaned.push(`API route has no caller: ${routePath} (${relative(ROOT, routeFile)})`);

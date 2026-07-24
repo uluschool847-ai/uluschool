@@ -1,7 +1,7 @@
 import { UserRole } from "@prisma/client";
 import { NextResponse } from "next/server";
 
-import { createSession } from "@/lib/auth/session";
+import { clearInitialSetupSession, createSession } from "@/lib/auth/session";
 import { isSsoEnabled, verifySsoSignature } from "@/lib/auth/sso";
 import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 import { findUserByEmail } from "@/lib/repositories/user-repository";
@@ -44,20 +44,27 @@ export async function GET(request: Request) {
     );
   }
 
+  if (user.mustChangePassword) {
+    return NextResponse.json(
+      { ok: false, error: "Admin user must complete local password setup" },
+      { status: 403 },
+    );
+  }
+
+  await clearInitialSetupSession();
   await createSession({
     uid: user.id,
     role: user.role,
     email: user.email,
     fullName: user.fullName,
-    mfaVerified: true,
     authMethod: "sso",
   });
-
   await createAdminAuditLog({
     adminUserId: user.id,
-    action: "ADMIN_SSO_LOGIN",
+    action: "ADMIN_SSO_LOGIN_SUCCESS",
     targetType: "Auth",
     targetId: user.id,
+    meta: { authenticationStage: "final", authMethod: "sso" },
   });
 
   return NextResponse.redirect(new URL("/admin", request.url));

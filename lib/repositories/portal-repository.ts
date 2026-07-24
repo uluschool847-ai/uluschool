@@ -1,15 +1,13 @@
-import {
-  ClassGroupStatus,
-  EnquiryStatus,
-  LessonStatus,
-  type Prisma,
-  UserRole,
-} from "@prisma/client";
+import { ClassGroupStatus, LessonStatus, type Prisma, UserRole } from "@prisma/client";
 
 import { hashPassword } from "@/lib/auth/password";
+import { generateTemporaryPassword } from "@/lib/auth/temporary-password";
 import { canStartLesson as getLessonStartState } from "@/lib/lessons/lesson-status";
 import { validateLiveLessonUrl } from "@/lib/lessons/live-lesson-url";
 import { prisma } from "@/lib/prisma";
+import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
+import { preferredStoredFileHref } from "@/lib/security/storage-links";
+import { normalizeMailboxAddress } from "@/lib/validations/mailbox";
 
 type PortalDatabase = typeof prisma | Prisma.TransactionClient;
 
@@ -93,7 +91,7 @@ export async function createUser(
   },
   database: PortalDatabase = prisma,
 ) {
-  const email = data.email.trim().toLowerCase();
+  const email = normalizeMailboxAddress(data.email);
   const existingUser = await database.appUser.findUnique({
     where: { email },
     select: { id: true, email: true },
@@ -103,8 +101,8 @@ export async function createUser(
     throw new Error("A user with this email already exists.");
   }
 
-  const defaultPassword = process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
-  const passwordHash = await hashPassword(defaultPassword);
+  const temporaryPassword = generateTemporaryPassword();
+  const passwordHash = await hashPassword(temporaryPassword);
   const user = await database.appUser.create({
     data: {
       email,
@@ -112,6 +110,7 @@ export async function createUser(
       role: data.role,
       phoneWhatsapp: data.phoneWhatsapp,
       passwordHash,
+      mustChangePassword: true,
       isActive: true,
       ...(data.role === UserRole.STUDENT ? { learningStatus: "ACTIVE" as const } : {}),
     },
@@ -119,8 +118,8 @@ export async function createUser(
 
   return {
     user,
-    defaultPassword,
-    mustResetPassword: true,
+    temporaryPassword,
+    mustChangePassword: true as const,
   };
 }
 
@@ -145,7 +144,7 @@ export async function updateUserProfile(
     throw new Error("User not found");
   }
 
-  const normalizedEmail = input.email.trim().toLowerCase();
+  const normalizedEmail = normalizeMailboxAddress(input.email);
   const existingUserByEmail = await database.appUser.findUnique({
     where: { email: normalizedEmail },
     select: {
@@ -947,7 +946,7 @@ type TeacherDashboardAssignment = {
 
 type TeacherDashboardSubmission = {
   id: string;
-  contentUrl: string;
+  contentUrl: string | null;
   submittedAt: Date;
   student: { id: string; fullName: string; email: string };
   studentName: string;
@@ -1538,6 +1537,11 @@ export async function getTeacherDashboardData(teacherId: string): Promise<Teache
         contentUrl: true,
         submittedAt: true,
         grade: true,
+        attachments: {
+          select: { storageKey: true },
+          orderBy: newestAttachmentOrderBy(),
+          take: 1,
+        },
         student: {
           select: {
             id: true,
@@ -1660,7 +1664,10 @@ export async function getTeacherDashboardData(teacherId: string): Promise<Teache
 
     return {
       id: submission.id,
-      contentUrl: submission.contentUrl,
+      contentUrl: preferredStoredFileHref(
+        submission.attachments?.[0]?.storageKey,
+        submission.contentUrl,
+      ),
       submittedAt: submission.submittedAt,
       student: {
         id: submission.student.id,
@@ -2160,77 +2167,6 @@ export async function unlinkStudentClass(
   });
 
   return { studentId, classId };
-}
-
-export async function convertEnquiryToStudent(enquiryId: string) {
-  const portalPassword = process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
-  const passwordHash = await hashPassword(portalPassword);
-
-  return prisma.$transaction(async (tx) => {
-    const enquiry = await tx.enquiry.findUnique({
-      where: { id: enquiryId },
-    });
-
-    if (!enquiry) {
-      throw new Error("Enquiry not found");
-    }
-
-    const existingByEmail = await tx.appUser.findUnique({
-      where: { email: enquiry.email },
-      select: {
-        id: true,
-        role: true,
-        fullName: true,
-      },
-    });
-
-    let parentId: string;
-    if (existingByEmail) {
-      if (existingByEmail.role !== UserRole.PARENT) {
-        throw new Error("Unauthorized: enquiry email is already used by a non-parent account");
-      }
-      parentId = existingByEmail.id;
-    } else {
-      const parent = await tx.appUser.create({
-        data: {
-          email: enquiry.email,
-          fullName: enquiry.parentGuardianName,
-          role: UserRole.PARENT,
-          passwordHash,
-        },
-      });
-      parentId = parent.id;
-    }
-
-    const normalizedName = enquiry.studentName
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, ".")
-      .replace(/^\.+|\.+$/g, "");
-    const studentEmail = `${normalizedName || "student"}.${enquiry.id}@students.local`;
-
-    const student = await tx.appUser.create({
-      data: {
-        email: studentEmail,
-        fullName: enquiry.studentName,
-        role: UserRole.STUDENT,
-        passwordHash,
-        parents: {
-          connect: { id: parentId },
-        },
-      },
-    });
-
-    await tx.enquiry.update({
-      where: { id: enquiryId },
-      data: {
-        status: EnquiryStatus.CONVERTED,
-        convertedAt: new Date(),
-      },
-    });
-
-    return student;
-  });
 }
 
 export async function getParentScopedStudentData(params: { parentId: string; childId: string }) {

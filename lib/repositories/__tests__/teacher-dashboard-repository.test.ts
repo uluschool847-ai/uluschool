@@ -1,6 +1,8 @@
 import { ClassGroupStatus, LessonStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
 const prismaMock = vi.hoisted(() => ({
   assignment: {
     count: vi.fn(),
@@ -115,6 +117,7 @@ const assignmentRecord = {
 const pendingSubmissionRecord = {
   id: "submission-pending",
   contentUrl: "/uploads/submission.pdf",
+  attachments: [],
   submittedAt: new Date("2026-06-01T11:00:00.000Z"),
   grade: null,
   student: {
@@ -498,6 +501,7 @@ describe("teacher dashboard repository view model", () => {
     expect(result.pendingSubmissions).toEqual([
       expect.objectContaining({
         id: "submission-pending",
+        contentUrl: "/uploads/submission.pdf",
         student: { id: "student-3", fullName: "Student Three", email: "student3@example.com" },
         assignment: { id: "assignment-group", title: "Geometry Homework" },
         classGroup: { id: "group-1", name: "IGCSE Geometry Group A" },
@@ -510,6 +514,30 @@ describe("teacher dashboard repository view model", () => {
         }),
       }),
     ]);
+  });
+
+  it("prefers a current attachment key over a stale legacy submission URL", async () => {
+    const storageKey = "private/teachers/teacher-1/submissions/current-work.pdf";
+    mockDashboardQueryResults({
+      submissions: [
+        {
+          ...pendingSubmissionRecord,
+          contentUrl: "/uploads/submission-stale.pdf",
+          attachments: [{ storageKey }],
+        },
+      ],
+    });
+
+    const { getTeacherDashboardData } = await loadTeacherDashboardRepository();
+    const result = await getTeacherDashboardData("teacher-1");
+
+    expect(result.pendingSubmissions).toEqual([
+      expect.objectContaining({
+        id: "submission-pending",
+        contentUrl: storageUrlForKey(storageKey),
+      }),
+    ]);
+    expect(JSON.stringify(result.pendingSubmissions)).not.toContain("submission-stale.pdf");
   });
 
   it("builds My Classes/Groups from ClassGroup.teacherId before legacy direct lesson fallbacks", async () => {

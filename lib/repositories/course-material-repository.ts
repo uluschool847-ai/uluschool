@@ -1,8 +1,21 @@
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { safeCourseMaterialHref } from "@/lib/security/course-material-links";
-import { createStorageService } from "@/lib/storage";
+import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
+import {
+  CONSERVATIVE_UNLEDGERED_STORAGE_BYTES,
+  finalizePendingUploads,
+  queueStorageObjectForDeletion,
+} from "@/lib/repositories/pending-upload-repository";
+import { preferredStoredFileHref, storageHrefForKey } from "@/lib/security/storage-links";
+import { isTeacherMaterialStorageKey, validateLegacyStorageKey } from "@/lib/storage/storage-key";
+import {
+  legacyStorageKeyFromUrl,
+  normalizePersistedStorageReference,
+  storageKeyFromUrl,
+  storageUrlForKey,
+  storageUrlMatchesKey,
+} from "@/lib/storage/storage-url";
 
 type MaterialDatabase = typeof prisma | Prisma.TransactionClient;
 
@@ -62,7 +75,9 @@ export type UpdateCourseMaterialForTeacherInput = {
 };
 
 const materialInclude = {
-  attachments: true,
+  attachments: {
+    orderBy: newestAttachmentOrderBy(),
+  },
   scheduledClass: {
     select: {
       id: true,
@@ -95,10 +110,23 @@ function hasAttachment(input: { attachments?: CourseMaterialAttachmentInput[] | 
   return Array.isArray(input.attachments) && input.attachments.length > 0;
 }
 
-export function validateCourseMaterialFileUrl(fileUrl: string | null | undefined) {
+export function validateCourseMaterialFileUrl(
+  fileUrl: string | null | undefined,
+  options: { allowTrustedLegacy?: boolean } = {},
+) {
   const value = fileUrl?.trim() ?? "";
   if (!value) return null;
-  if (value.startsWith("/uploads/")) return value;
+  if (value.startsWith("/uploads/") || value.startsWith("/public/uploads/")) {
+    if (!options.allowTrustedLegacy) {
+      throw new Error("Legacy upload URLs cannot be submitted as new material files.");
+    }
+    legacyStorageKeyFromUrl(value);
+    return value;
+  }
+  if (value.startsWith("/api/")) {
+    storageKeyFromUrl(value);
+    return value;
+  }
 
   let parsed: URL;
   try {
@@ -122,6 +150,9 @@ function assertFileUrlOrAttachment(input: {
   if (!fileUrl && !hasAttachment(input)) {
     throw new Error("File URL is required.");
   }
+  if (fileUrl?.startsWith("/api/") && !hasAttachment(input)) {
+    throw new Error("Internal upload URLs require matching attachment metadata.");
+  }
   return fileUrl;
 }
 
@@ -136,26 +167,243 @@ function attachmentCreateData(attachments: CourseMaterialAttachmentInput[] | nul
   }));
 }
 
-function storageKeyPublicUrl(storageKey: string) {
-  const normalized = storageKey.replace(/^\/+/, "").replace(/^public[\\\/]/, "");
-  return `/${normalized.startsWith("uploads/") ? normalized : `uploads/${normalized}`}`;
+function assertTeacherOwnsAttachmentInputs(
+  attachments: CourseMaterialAttachmentInput[] | null | undefined,
+  teacherId: string,
+  fileUrl: string | null,
+) {
+  if (!attachments?.length) return;
+  const storageKeys = new Set<string>();
+  for (const attachment of attachments) {
+    if (!isTeacherMaterialStorageKey(attachment.storageKey, teacherId)) {
+      throw new Error("Uploaded file is not owned by this teacher.");
+    }
+    const storageKey = attachment.storageKey.trim();
+    if (storageKeys.has(storageKey)) {
+      throw new Error("Duplicate attachment storage key.");
+    }
+    storageKeys.add(storageKey);
+  }
+  if (fileUrl && !storageUrlMatchesKey(fileUrl, attachments[0].storageKey)) {
+    throw new Error("Uploaded file URL does not match its storage key.");
+  }
+}
+
+async function assertAttachmentInputKeysAvailable(
+  attachments: CourseMaterialAttachmentInput[] | null | undefined,
+  database: MaterialDatabase,
+  excludedAttachmentIds: string[] = [],
+) {
+  if (!attachments?.length) return;
+  const storageKeys = attachments.map((attachment) => attachment.storageKey.trim());
+  const existing = await database.attachment.findMany({
+    where: {
+      storageKey: { in: storageKeys },
+      ...(excludedAttachmentIds.length > 0 ? { id: { notIn: excludedAttachmentIds } } : {}),
+    },
+    select: { storageKey: true },
+  });
+  if (existing.length > 0) {
+    throw new Error("Uploaded file is already attached to another record.");
+  }
+}
+
+function validateStoredCleanupKey(storageKey: unknown, teacherId: string) {
+  if (typeof storageKey !== "string") {
+    throw new Error("Uploaded file is not owned by this teacher.");
+  }
+  if (isTeacherMaterialStorageKey(storageKey, teacherId)) return storageKey;
+  try {
+    return validateLegacyStorageKey(storageKey);
+  } catch {
+    throw new Error("Uploaded file is not owned by this teacher.");
+  }
+}
+
+function validateStoredCleanupKeys(attachments: Array<{ storageKey: unknown }>, teacherId: string) {
+  return attachments.map((attachment) =>
+    validateStoredCleanupKey(attachment.storageKey, teacherId),
+  );
+}
+
+function assertMaterialTransactionClient(
+  database: MaterialDatabase,
+): asserts database is Prisma.TransactionClient {
+  if (
+    !database ||
+    typeof database !== "object" ||
+    "$transaction" in (database as unknown as Record<string, unknown>)
+  ) {
+    throw new Error("Material storage changes require a transaction.");
+  }
+}
+
+function validateStoredCleanupAttachments(
+  attachments: Array<{
+    filename: unknown;
+    mimeType: unknown;
+    size: unknown;
+    storageKey: unknown;
+  }>,
+  teacherId: string,
+) {
+  return attachments.map((attachment) => ({
+    storageKey: validateStoredCleanupKey(attachment.storageKey, teacherId),
+    filename: attachment.filename,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+  }));
+}
+
+function fileUrlCleanupCandidate(fileUrl: unknown, teacherId: string) {
+  const reference = normalizePersistedStorageReference(fileUrl);
+  if (!reference) return null;
+  const storageKey =
+    reference.kind === "legacy"
+      ? validateLegacyStorageKey(reference.storageKey)
+      : isTeacherMaterialStorageKey(reference.storageKey, teacherId)
+        ? reference.storageKey
+        : null;
+  if (!storageKey) return null;
+  return {
+    storageKey,
+    filename: storageKey.split("/").at(-1) ?? "material.bin",
+    mimeType: "application/octet-stream",
+    size: CONSERVATIVE_UNLEDGERED_STORAGE_BYTES,
+  };
+}
+
+function cleanupStorageKey(value: unknown) {
+  return normalizePersistedStorageReference(value)?.storageKey ?? null;
+}
+
+function materialCleanupCandidates(
+  attachments: ReturnType<typeof validateStoredCleanupAttachments>,
+  fileUrl: unknown,
+  teacherId: string,
+) {
+  const candidates = [...attachments];
+  const attachedStorageKeys = new Set(
+    attachments.map(
+      (attachment) => cleanupStorageKey(attachment.storageKey) ?? attachment.storageKey,
+    ),
+  );
+  const fileUrlCandidate = fileUrlCleanupCandidate(fileUrl, teacherId);
+  if (
+    fileUrlCandidate &&
+    !attachedStorageKeys.has(
+      cleanupStorageKey(fileUrlCandidate.storageKey) ?? fileUrlCandidate.storageKey,
+    )
+  ) {
+    candidates.push(fileUrlCandidate);
+  }
+  return candidates;
+}
+
+async function queueMaterialAttachmentsForDeletion(
+  attachments: ReturnType<typeof validateStoredCleanupAttachments>,
+  teacherId: string,
+  database: MaterialDatabase,
+) {
+  if (attachments.length === 0) return [];
+  assertMaterialTransactionClient(database);
+  const queuedStorageKeys: string[] = [];
+  const attemptedStorageKeys = new Set<string>();
+
+  for (const attachment of attachments) {
+    const normalizedKey = cleanupStorageKey(attachment.storageKey) ?? attachment.storageKey;
+    if (attemptedStorageKeys.has(normalizedKey)) continue;
+    attemptedStorageKeys.add(normalizedKey);
+    const queued = await queueStorageObjectForDeletion(
+      {
+        ownerId: teacherId,
+        purpose: "course-material",
+        storageKey: attachment.storageKey,
+        filename: String(attachment.filename),
+        mimeType: String(attachment.mimeType),
+        byteSize: Number(attachment.size),
+      },
+      database,
+    );
+    if (queued) queuedStorageKeys.push(queued.storageKey);
+  }
+
+  return queuedStorageKeys;
+}
+
+async function finalizeMaterialAttachmentReservations(
+  teacherId: string,
+  attachments: CourseMaterialAttachmentInput[] | null | undefined,
+  database: MaterialDatabase,
+) {
+  if (!attachments?.length) return;
+  assertMaterialTransactionClient(database);
+  await finalizePendingUploads(
+    {
+      ownerId: teacherId,
+      purpose: "course-material",
+      uploads: attachments.map((attachment) => ({
+        storageKey: attachment.storageKey.trim(),
+        filename: attachment.filename.trim(),
+        mimeType: attachment.mimeType.trim(),
+        byteSize: attachment.size,
+      })),
+    },
+    database,
+  );
+}
+
+function validateUpdateFileUrl(
+  fileUrl: string | null,
+  existingFileUrl: string,
+  existingPrimaryStorageKey: string | null,
+  hasReplacement: boolean,
+) {
+  const value = fileUrl?.trim() ?? "";
+  if (!value) {
+    if (hasReplacement) return null;
+    throw new Error("File URL is required.");
+  }
+  const primaryHref = storageHrefForKey(existingPrimaryStorageKey);
+  if (value.startsWith("/uploads/") || value.startsWith("/public/uploads/")) {
+    let matchesTrustedExistingUrl = false;
+    try {
+      matchesTrustedExistingUrl =
+        validateCourseMaterialFileUrl(existingFileUrl, { allowTrustedLegacy: true }) === value;
+    } catch {
+      matchesTrustedExistingUrl = false;
+    }
+    const legacyUrl = validateCourseMaterialFileUrl(value, { allowTrustedLegacy: true });
+    const matchesPrimaryAttachment = primaryHref === legacyUrl;
+    if (!hasReplacement && !matchesPrimaryAttachment && !matchesTrustedExistingUrl) {
+      throw new Error("Legacy upload URLs cannot be submitted as new material files.");
+    }
+    return matchesPrimaryAttachment ? primaryHref : legacyUrl;
+  }
+  const validatedFileUrl = validateCourseMaterialFileUrl(value);
+  if (validatedFileUrl?.startsWith("/api/") && !hasReplacement) {
+    if (
+      !existingPrimaryStorageKey ||
+      !storageUrlMatchesKey(validatedFileUrl, existingPrimaryStorageKey)
+    ) {
+      throw new Error("Internal upload URLs require matching attachment metadata.");
+    }
+    return storageUrlForKey(existingPrimaryStorageKey);
+  }
+  return validatedFileUrl;
 }
 
 function attachmentHref(storageKey: string | null | undefined) {
-  const trimmed = storageKey?.trim() ?? "";
-  if (!trimmed) return null;
-  const normalized = trimmed.replace(/^\/+/, "").replace(/^public[\\\/]/, "");
-  if (!normalized.startsWith("uploads/")) return null;
-  return safeCourseMaterialHref(storageKeyPublicUrl(normalized));
+  return storageHrefForKey(storageKey);
 }
 
 function fileUrlFromInput(
   fileUrl: string | null,
   attachments: CourseMaterialAttachmentInput[] | null | undefined,
 ) {
-  if (fileUrl) return fileUrl;
   const firstStorageKey = attachments?.[0]?.storageKey?.trim();
-  return firstStorageKey ? storageKeyPublicUrl(firstStorageKey) : "";
+  if (firstStorageKey) return storageUrlForKey(firstStorageKey);
+  return fileUrl ?? "";
 }
 
 export async function assertTeacherOwnsMaterialClass(
@@ -213,12 +461,15 @@ export async function createCourseMaterialForTeacher(
   const scheduledClassId = input.scheduledClassId?.trim() ?? "";
   if (!scheduledClassId) throw new Error("Scheduled class is required.");
   const fileUrl = assertFileUrlOrAttachment(input);
+  assertTeacherOwnsAttachmentInputs(input.attachments, input.teacherId, fileUrl);
   const attachments = attachmentCreateData(input.attachments);
   const scheduledClass = await assertTeacherOwnsMaterialClass(
     input.teacherId,
     scheduledClassId,
     database,
   );
+  await assertAttachmentInputKeysAvailable(input.attachments, database);
+  await finalizeMaterialAttachmentReservations(input.teacherId, input.attachments, database);
 
   return database.courseMaterial.create({
     data: {
@@ -241,10 +492,27 @@ export async function updateCourseMaterialForTeacher(
 ) {
   const existing = await assertTeacherOwnsMaterial(teacherId, id, database);
   const data: Prisma.CourseMaterialUpdateInput = {};
-  const isReplacingFile = hasAttachment(input);
-  const oldStorageKeys = isReplacingFile
-    ? existing.attachments.map((attachment) => attachment.storageKey).filter(Boolean)
-    : [];
+  const hasReplacementAttachment = hasAttachment(input);
+  const storedCleanupAttachments = validateStoredCleanupAttachments(
+    existing.attachments,
+    teacherId,
+  );
+  const validatedStoredKeys = storedCleanupAttachments.map((attachment) => attachment.storageKey);
+  const existingPrimaryStorageKey = validatedStoredKeys[0] ?? null;
+  const existingPrimaryHref = storageHrefForKey(existingPrimaryStorageKey);
+  const validatedFileUrl =
+    input.fileUrl === undefined
+      ? existingPrimaryHref
+      : validateUpdateFileUrl(
+          input.fileUrl,
+          existing.fileUrl,
+          existingPrimaryStorageKey,
+          hasReplacementAttachment,
+        );
+
+  if (hasReplacementAttachment) {
+    assertTeacherOwnsAttachmentInputs(input.attachments, teacherId, validatedFileUrl);
+  }
 
   if (input.title !== undefined) {
     assertTitle(input.title);
@@ -253,18 +521,14 @@ export async function updateCourseMaterialForTeacher(
   if (input.description !== undefined) {
     data.description = input.description?.trim() ?? null;
   }
-  if (input.fileUrl !== undefined) {
-    const fileUrl = assertFileUrlOrAttachment(input);
-    if (fileUrl) data.fileUrl = fileUrl;
+  if (input.fileUrl !== undefined || existingPrimaryHref) {
+    if (validatedFileUrl) data.fileUrl = validatedFileUrl;
   }
-  if (isReplacingFile) {
+  if (hasReplacementAttachment) {
     const attachments = attachmentCreateData(input.attachments);
     if (attachments) {
       data.attachments = { create: attachments };
-      data.fileUrl = fileUrlFromInput(
-        input.fileUrl !== undefined ? validateCourseMaterialFileUrl(input.fileUrl) : null,
-        input.attachments,
-      );
+      data.fileUrl = fileUrlFromInput(validatedFileUrl, input.attachments);
     }
   }
   if (input.scheduledClassId !== undefined) {
@@ -278,13 +542,22 @@ export async function updateCourseMaterialForTeacher(
     data.scheduledClass = { connect: { id: scheduledClass.id } };
   }
 
+  if (hasReplacementAttachment) {
+    await assertAttachmentInputKeysAvailable(
+      input.attachments,
+      database,
+      existing.attachments.map((attachment) => attachment.id),
+    );
+    await finalizeMaterialAttachmentReservations(teacherId, input.attachments, database);
+  }
+
   const updated = await database.courseMaterial.update({
     where: { id: existing.id },
     data,
     include: materialInclude,
   });
 
-  if (isReplacingFile && existing.attachments.length > 0) {
+  if (hasReplacementAttachment && existing.attachments.length > 0) {
     await database.attachment.deleteMany({
       where: {
         id: { in: existing.attachments.map((attachment) => attachment.id) },
@@ -293,16 +566,31 @@ export async function updateCourseMaterialForTeacher(
     });
   }
 
-  return isReplacingFile
-    ? {
-        ...updated,
-        cleanup: {
-          queued: oldStorageKeys.length > 0,
-          deleted: 0,
-          storageKeys: oldStorageKeys,
-        },
-      }
-    : updated;
+  const existingStorageKey = cleanupStorageKey(existing.fileUrl);
+  const updatedStorageKey = cleanupStorageKey(updated.fileUrl);
+  const isReplacingFileUrl =
+    input.fileUrl !== undefined &&
+    (existingStorageKey !== updatedStorageKey || existing.fileUrl !== updated.fileUrl);
+  if (!hasReplacementAttachment && !isReplacingFileUrl) return updated;
+
+  const finalMaterial = await database.courseMaterial.findUnique({
+    where: { id: existing.id },
+    include: materialInclude,
+  });
+  if (!finalMaterial) throw new Error("Material not found after update.");
+  const orphanStorageKeys = await queueMaterialAttachmentsForDeletion(
+    materialCleanupCandidates(storedCleanupAttachments, existing.fileUrl, teacherId),
+    teacherId,
+    database,
+  );
+  return {
+    ...finalMaterial,
+    cleanup: {
+      queued: orphanStorageKeys.length > 0,
+      deleted: 0,
+      storageKeys: orphanStorageKeys,
+    },
+  };
 }
 
 export async function getCourseMaterialForTeacher(
@@ -375,36 +663,34 @@ export async function deleteCourseMaterialForTeacher(
       id,
       OR: teacherMaterialScope(teacherId),
     },
-    include: {
-      ...materialInclude,
-      attachments: true,
-    },
+    include: materialInclude,
   });
 
   if (!existing) {
     throw new Error("Material not found or not owned by teacher.");
   }
 
-  const storageKeys = existing.attachments
-    .map((attachment) => attachment.storageKey)
-    .filter(Boolean);
+  const cleanupAttachments = materialCleanupCandidates(
+    validateStoredCleanupAttachments(existing.attachments, teacherId),
+    existing.fileUrl,
+    teacherId,
+  );
 
+  if (cleanupAttachments.length > 0) assertMaterialTransactionClient(database);
   await database.courseMaterial.delete({ where: { id: existing.id } });
-
-  const storage = createStorageService({ runtimeRole: "DEVELOPER" });
-  let deleted = 0;
-  for (const storageKey of storageKeys) {
-    await storage.delete(storageKey);
-    deleted += 1;
-  }
+  const orphanStorageKeys = await queueMaterialAttachmentsForDeletion(
+    cleanupAttachments,
+    teacherId,
+    database,
+  );
 
   return {
     ...existing,
     success: true as const,
     cleanup: {
-      queued: storageKeys.length > 0,
-      deleted,
-      storageKeys,
+      queued: orphanStorageKeys.length > 0,
+      deleted: 0,
+      storageKeys: orphanStorageKeys,
     },
   };
 }
@@ -415,7 +701,8 @@ export async function unlinkCourseMaterialAttachmentForTeacher(
   attachmentId: string,
   database: MaterialDatabase = prisma,
 ) {
-  await assertTeacherOwnsMaterial(teacherId, materialId, database);
+  const material = await assertTeacherOwnsMaterial(teacherId, materialId, database);
+  validateStoredCleanupKeys(material.attachments, teacherId);
 
   const attachment = await database.attachment.findFirst({
     where: {
@@ -428,14 +715,36 @@ export async function unlinkCourseMaterialAttachmentForTeacher(
     throw new Error("Material attachment not found or not owned by teacher.");
   }
 
+  const [cleanupAttachment] = validateStoredCleanupAttachments([attachment], teacherId);
+  if (!cleanupAttachment) throw new Error("Material attachment metadata is unavailable.");
+  const storageKey = cleanupAttachment.storageKey;
+
+  assertMaterialTransactionClient(database);
   await database.attachment.delete({
     where: { id: attachment.id },
   });
 
+  const finalMaterial = await database.courseMaterial.findUnique({
+    where: { id: material.id },
+    include: materialInclude,
+  });
+  if (!finalMaterial) throw new Error("Material not found after unlinking attachment.");
+  const orphanStorageKeys = await queueMaterialAttachmentsForDeletion(
+    [cleanupAttachment],
+    teacherId,
+    database,
+  );
+
   return {
+    ...finalMaterial,
     attachmentId: attachment.id,
     materialId,
-    storageKey: attachment.storageKey,
+    storageKey,
+    cleanup: {
+      queued: orphanStorageKeys.length > 0,
+      deleted: 0,
+      storageKeys: orphanStorageKeys,
+    },
   };
 }
 
@@ -490,7 +799,9 @@ export async function listStudentCourseMaterials(
   const materials = await database.courseMaterial.findMany({
     where,
     include: {
-      attachments: true,
+      attachments: {
+        orderBy: newestAttachmentOrderBy(),
+      },
       scheduledClass: {
         select: {
           id: true,
@@ -511,7 +822,7 @@ export async function listStudentCourseMaterials(
       title: material.title,
       description: material.description ?? null,
       fileUrl: material.fileUrl,
-      safeFileUrl: safeCourseMaterialHref(material.fileUrl),
+      safeFileUrl: preferredStoredFileHref(material.attachments[0]?.storageKey, material.fileUrl),
       attachments: material.attachments.map((attachment) => ({
         filename: attachment.filename,
         href: attachmentHref(attachment.storageKey),

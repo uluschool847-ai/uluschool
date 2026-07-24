@@ -44,8 +44,8 @@ describe("Admin scheduled lessons list page", () => {
   });
 
   it("requires ADMIN, forwards filters, and renders lesson/session rows", async () => {
-    const from = "2026-06-01";
-    const to = "2026-06-30";
+    const from = "2026-01-01";
+    const to = "2026-01-31";
     listAdminLessonsMock.mockResolvedValueOnce([
       {
         id: "lesson-1",
@@ -54,8 +54,8 @@ describe("Admin scheduled lessons list page", () => {
         classGroup: { id: "group-1", name: "IGCSE Mathematics Group A" },
         teacher: { id: "teacher-1", fullName: "Jane Teacher", email: "jane@example.com" },
         subject: { id: "subject-math", name: "Mathematics", slug: "mathematics" },
-        startAt: new Date("2026-06-01T10:00:00.000Z"),
-        endAt: new Date("2026-06-01T11:00:00.000Z"),
+        startAt: new Date("2026-01-01T10:00:00.000Z"),
+        endAt: new Date("2026-01-01T11:00:00.000Z"),
         status: "SCHEDULED",
         liveLessonUrl: "https://meet.google.com/abc-defg-hij",
         remindersCount: 2,
@@ -67,8 +67,8 @@ describe("Admin scheduled lessons list page", () => {
         classGroup: { id: "group-1", name: "IGCSE Mathematics Group A" },
         teacher: { id: "teacher-1", fullName: "Jane Teacher", email: "jane@example.com" },
         subject: { id: "subject-math", name: "Mathematics", slug: "mathematics" },
-        startAt: new Date("2026-06-03T10:00:00.000Z"),
-        endAt: new Date("2026-06-03T11:00:00.000Z"),
+        startAt: new Date("2026-01-03T10:00:00.000Z"),
+        endAt: new Date("2026-01-03T11:00:00.000Z"),
         status: "CANCELLED",
         liveLessonUrl: "https://meet.google.com/cancelled",
         remindersCount: 0,
@@ -96,8 +96,8 @@ describe("Admin scheduled lessons list page", () => {
       classGroupId: "group-1",
       subjectId: "subject-math",
       status: "SCHEDULED",
-      from: new Date(`${from}T00:00:00`),
-      to: new Date(`${to}T23:59:59.999`),
+      from: new Date("2025-12-31T21:00:00.000Z"),
+      to: new Date("2026-01-31T20:59:59.999Z"),
     });
     expect(screen.getByRole("heading", { name: /lessons|sessions/i })).toBeDefined();
     expect(screen.getByText("Quadratic functions")).toBeDefined();
@@ -108,6 +108,7 @@ describe("Admin scheduled lessons list page", () => {
     expect(screen.getByText(/cancelled/i)).toBeDefined();
     expect(screen.getByText("https://meet.google.com/abc-defg-hij")).toBeDefined();
     expect(screen.getByText(/2 reminders/i)).toBeDefined();
+    expect(screen.getAllByText(/13:00.*14:00/)).toHaveLength(2);
     expect(screen.getByLabelText(/teacher/i)).toBeDefined();
     expect(screen.getByLabelText(/class group/i)).toBeDefined();
     expect(screen.getByLabelText(/subject/i)).toBeDefined();

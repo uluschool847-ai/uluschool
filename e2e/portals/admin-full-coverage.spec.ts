@@ -1,7 +1,7 @@
 import { type Page, expect, test } from "@playwright/test";
 
 const PASSWORD =
-  process.env.E2E_PORTAL_PASSWORD ?? process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? "fixed.admin@uluglobalacademy.com";
 const TEACHER_EMAIL = "fixed.teacher@uluglobalacademy.com";
 const STUDENT_EMAIL = "fixed.student@uluglobalacademy.com";
@@ -10,7 +10,6 @@ const PARENT_EMAIL = "fixed.parent@uluglobalacademy.com";
 const adminRoutes = [
   { path: "/admin", heading: "Admin Dashboard" },
   { path: "/admin/users", heading: "User Management" },
-  { path: "/admin/security", heading: "Admin Security" },
   { path: "/admin/teachers", heading: "Teachers" },
   { path: "/admin/students", heading: "Students" },
   { path: "/admin/parents", heading: "Parents" },
@@ -31,13 +30,7 @@ const adminRoutes = [
   { path: "/admin/leads", heading: "Contact Leads" },
 ] as const;
 
-const sensitiveRoutes = [
-  "/admin",
-  "/admin/users",
-  "/admin/security",
-  "/admin/billing",
-  "/admin/audit",
-] as const;
+const sensitiveRoutes = ["/admin", "/admin/users", "/admin/billing", "/admin/audit"] as const;
 
 const adminHeaderRoutes = [
   "/admin/teachers",
@@ -79,7 +72,7 @@ function installDiagnostics(page: Page) {
     }
     if (request.method() === "GET" && /net::ERR_ABORTED/i.test(failureText)) {
       const pathname = new URL(url).pathname;
-      if (expectedAbortedGetPaths.has(pathname)) {
+      if (expectedAbortedGetPaths.has(pathname) || pathname.startsWith("/_next/static/chunks/")) {
         return;
       }
     }

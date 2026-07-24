@@ -15,7 +15,6 @@ export type ContactFormState = {
   message: string;
   referenceId?: string;
   submittedAt?: string;
-  adminPath?: string;
   nextSteps?: string;
   errors?: Partial<Record<keyof ContactInput, string[]>>;
 };

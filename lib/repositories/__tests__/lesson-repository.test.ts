@@ -96,6 +96,7 @@ type LessonRepositoryModule = {
     input: {
       startAt: Date;
       endAt: Date;
+      timezone: string;
       teacherId?: string | null;
       liveLessonUrl?: string | null;
     },
@@ -481,6 +482,7 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
     const result = await rescheduleLesson("lesson-1", {
       startAt: newStart,
       endAt: newEnd,
+      timezone: "Asia/Tokyo",
       teacherId: "teacher-2",
       liveLessonUrl: "https://meet.google.com/res-ched-ule",
     });
@@ -491,6 +493,7 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
         data: expect.objectContaining({
           startAt: newStart,
           endAt: newEnd,
+          timezone: "Asia/Tokyo",
           teacher: { connect: { id: "teacher-2" } },
           liveLessonUrl: "https://meet.google.com/res-ched-ule",
           status: "RESCHEDULED",
@@ -616,6 +619,7 @@ describe("lesson-repository ScheduledClass-as-lesson contract", () => {
         repository.rescheduleLesson("lesson-1", {
           startAt: new Date("2026-06-08T10:00:00.000Z"),
           endAt: new Date("2026-06-08T11:00:00.000Z"),
+          timezone: "Africa/Nairobi",
         }),
     },
     {

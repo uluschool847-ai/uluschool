@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import {
   submitCourseMaterialAction,
@@ -50,11 +50,21 @@ const ALLOWED_MIME_TYPES = new Set([
   "image/jpg",
   "image/webp",
   "image/gif",
+  "text/plain",
 ]);
 
-function isSafeMaterialUrl(value: string) {
+function isLegacyMaterialUrl(value: string) {
+  return value.startsWith("/uploads/") || value.startsWith("/public/uploads/");
+}
+
+function isSafeMaterialUrl(value: string, trustedStorageUrl?: string) {
   const trimmed = value.trim();
-  if (trimmed.startsWith("/uploads/")) return true;
+  if (isLegacyMaterialUrl(trimmed)) {
+    return Boolean(trustedStorageUrl && trimmed === trustedStorageUrl.trim());
+  }
+  if (/^\/api\/(?:public-)?files\/[A-Za-z0-9_-]+$/.test(trimmed)) {
+    return Boolean(trustedStorageUrl && trimmed === trustedStorageUrl.trim());
+  }
 
   try {
     return new URL(trimmed).protocol === "https:";
@@ -64,7 +74,7 @@ function isSafeMaterialUrl(value: string) {
 }
 
 function isAllowedFileType(file: File) {
-  return file.type.startsWith("image/") || ALLOWED_MIME_TYPES.has(file.type);
+  return ALLOWED_MIME_TYPES.has(file.type);
 }
 
 function formatFileSize(size: number) {
@@ -73,7 +83,7 @@ function formatFileSize(size: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function validate(values: MaterialFormValues): FormErrors {
+function validate(values: MaterialFormValues, trustedStorageUrl?: string): FormErrors {
   const errors: FormErrors = {};
 
   if (!values.title.trim()) {
@@ -84,7 +94,7 @@ function validate(values: MaterialFormValues): FormErrors {
   }
   if (!values.fileUrl.trim()) {
     errors.fileUrl = "File URL is required";
-  } else if (!isSafeMaterialUrl(values.fileUrl)) {
+  } else if (!isSafeMaterialUrl(values.fileUrl, trustedStorageUrl)) {
     errors.fileUrl = "File URL must be a safe HTTPS URL or internal upload path.";
   }
 
@@ -128,6 +138,25 @@ function navigateAfterSuccess(href: string, material?: { id?: string; title?: st
   window.location.href = `${target.pathname}${target.search}`;
 }
 
+function releasePendingAttachment(
+  pendingAttachment: Pick<UploadedAttachment, "storageKey"> | null,
+) {
+  if (!pendingAttachment) return;
+
+  try {
+    void Promise.resolve(
+      fetch("/api/upload", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ storageKey: pendingAttachment.storageKey }),
+        keepalive: true,
+      }),
+    ).catch(() => undefined);
+  } catch {
+    // The durable reservation remains available to the server-side sweeper.
+  }
+}
+
 export function MaterialForm({
   cancelHref = "/portal/teacher/materials",
   initialValues,
@@ -145,13 +174,38 @@ export function MaterialForm({
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "uploaded">("idle");
   const [attachment, setAttachment] = useState<UploadedAttachment | null>(null);
   const [fileUrl, setFileUrl] = useState(initialValues?.fileUrl ?? "");
+  const [activeUploadCount, setActiveUploadCount] = useState(0);
+  const activeUploadCountRef = useRef(0);
+  const attachmentRef = useRef<UploadedAttachment | null>(null);
+  const mountedRef = useRef(true);
+  const isSubmittingRef = useRef(false);
+  const uploadGenerationRef = useRef(0);
 
   useEffect(() => {
+    mountedRef.current = true;
     setIsHydrated(true);
+    return () => {
+      mountedRef.current = false;
+      uploadGenerationRef.current += 1;
+      releasePendingAttachment(attachmentRef.current);
+      attachmentRef.current = null;
+    };
   }, []);
+
+  function setCurrentAttachment(nextAttachment: UploadedAttachment | null) {
+    attachmentRef.current = nextAttachment;
+    setAttachment(nextAttachment);
+  }
+
+  function updateActiveUploadCount(delta: number) {
+    const nextCount = Math.max(0, activeUploadCountRef.current + delta);
+    activeUploadCountRef.current = nextCount;
+    if (mountedRef.current) setActiveUploadCount(nextCount);
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSubmittingRef.current) return;
     const formData = new FormData(event.currentTarget);
     const submittedValues = {
       title: formData.get("title")?.toString() ?? "",
@@ -159,12 +213,18 @@ export function MaterialForm({
       fileUrl: fileUrl,
       scheduledClassId: formData.get("scheduledClassId")?.toString() ?? "",
     };
-    const nextErrors = validate(submittedValues);
+    const trustedStorageUrl = attachment
+      ? submittedValues.fileUrl
+      : mode === "edit"
+        ? initialValues?.fileUrl
+        : undefined;
+    const nextErrors = validate(submittedValues, trustedStorageUrl);
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
       return;
     }
 
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
     setErrors({});
 
@@ -184,6 +244,7 @@ export function MaterialForm({
 
       if (!result.success) {
         setErrors(normalizeActionErrors(result.error));
+        isSubmittingRef.current = false;
         setIsSubmitting(false);
         return;
       }
@@ -191,13 +252,17 @@ export function MaterialForm({
       navigateAfterSuccess(cancelHref, result.data);
     } catch {
       setErrors({ form: "Something went wrong." });
+      isSubmittingRef.current = false;
       setIsSubmitting(false);
     }
   }
 
   function onFileChange(file: File | null) {
+    if (isSubmittingRef.current) return;
+    uploadGenerationRef.current += 1;
+    releasePendingAttachment(attachmentRef.current);
     setSelectedFile(file);
-    setAttachment(null);
+    setCurrentAttachment(null);
     setUploadStatus("idle");
     setUploadError("");
 
@@ -216,7 +281,9 @@ export function MaterialForm({
   }
 
   async function uploadSelectedFile() {
+    if (isSubmittingRef.current) return;
     if (!selectedFile) return;
+    const file = selectedFile;
     if (selectedFile.size <= 0) {
       setUploadError("File is empty.");
       return;
@@ -229,15 +296,20 @@ export function MaterialForm({
       setUploadError("Unsupported file type.");
       return;
     }
+    const requestGeneration = uploadGenerationRef.current + 1;
+    uploadGenerationRef.current = requestGeneration;
+    releasePendingAttachment(attachmentRef.current);
+    setCurrentAttachment(null);
     setUploadStatus("uploading");
     setUploadError("");
+    updateActiveUploadCount(1);
 
     try {
       const formData = new FormData();
-      formData.append("file", selectedFile, selectedFile.name);
+      formData.append("purpose", "course-material");
+      formData.append("file", file, file.name);
       const response = await fetch("/api/upload", {
         method: "POST",
-        headers: { "x-role": "TEACHER" },
         body: formData,
       });
       const payload = (await response.json()) as Partial<UploadedAttachment> & {
@@ -251,21 +323,31 @@ export function MaterialForm({
       }
 
       const nextAttachment = {
-        filename: payload.filename ?? selectedFile.name,
+        filename: payload.filename ?? file.name,
         storageKey: payload.storageKey ?? "",
-        mimeType: payload.mimeType ?? selectedFile.type,
-        size: payload.size ?? selectedFile.size,
+        mimeType: payload.mimeType ?? file.type,
+        size: payload.size ?? file.size,
       };
       if (!nextAttachment.storageKey || !payload.publicUrl) {
+        if (nextAttachment.storageKey) releasePendingAttachment(nextAttachment);
         throw new Error("Upload failed");
       }
 
-      setAttachment(nextAttachment);
+      if (!mountedRef.current || requestGeneration !== uploadGenerationRef.current) {
+        releasePendingAttachment(nextAttachment);
+        return;
+      }
+
+      setCurrentAttachment(nextAttachment);
       setFileUrl(payload.publicUrl);
       setUploadStatus("uploaded");
     } catch (error) {
-      setUploadStatus("idle");
-      setUploadError(error instanceof Error ? error.message : "Upload failed");
+      if (mountedRef.current && requestGeneration === uploadGenerationRef.current) {
+        setUploadStatus("idle");
+        setUploadError(error instanceof Error ? error.message : "Upload failed");
+      }
+    } finally {
+      updateActiveUploadCount(-1);
     }
   }
 
@@ -292,9 +374,13 @@ export function MaterialForm({
           id="material-file-url"
           name="fileUrl"
           value={fileUrl}
+          disabled={isSubmitting}
           onChange={(event) => {
+            if (isSubmittingRef.current) return;
+            uploadGenerationRef.current += 1;
             setFileUrl(event.target.value);
-            setAttachment(null);
+            releasePendingAttachment(attachmentRef.current);
+            setCurrentAttachment(null);
           }}
         />
         {errors.fileUrl ? <p role="alert">{errors.fileUrl}</p> : null}
@@ -307,7 +393,8 @@ export function MaterialForm({
           id="material-upload-file"
           name="uploadFile"
           type="file"
-          accept=".pdf,.doc,.docx,.ppt,.pptx,.zip,image/*"
+          disabled={isSubmitting}
+          accept=".pdf,.doc,.docx,.ppt,.pptx,.zip,.txt,.png,.jpg,.jpeg,.webp,.gif"
           onChange={(event) => onFileChange(event.currentTarget.files?.[0] ?? null)}
         />
         {selectedFile && !uploadError ? (
@@ -322,7 +409,7 @@ export function MaterialForm({
         {selectedFile ? (
           <button
             type="button"
-            disabled={uploadStatus === "uploading"}
+            disabled={uploadStatus === "uploading" || isSubmitting}
             onClick={() => void uploadSelectedFile()}
           >
             {uploadStatus === "uploading"
@@ -355,7 +442,7 @@ export function MaterialForm({
 
       {errors.form ? <p role="alert">{errors.form}</p> : null}
 
-      <button type="submit" disabled={!isHydrated || isSubmitting}>
+      <button type="submit" disabled={!isHydrated || isSubmitting || activeUploadCount > 0}>
         {isSubmitting
           ? mode === "edit"
             ? "Saving..."
@@ -364,7 +451,21 @@ export function MaterialForm({
             ? "Save changes"
             : "Create material"}
       </button>
-      <a href={cancelHref}>Cancel</a>
+      <a
+        href={cancelHref}
+        aria-disabled={activeUploadCount > 0 || isSubmitting ? true : undefined}
+        onClick={(event) => {
+          if (activeUploadCountRef.current > 0 || isSubmittingRef.current) {
+            event.preventDefault();
+            return;
+          }
+          uploadGenerationRef.current += 1;
+          releasePendingAttachment(attachmentRef.current);
+          setCurrentAttachment(null);
+        }}
+      >
+        Cancel
+      </a>
     </form>
   );
 }

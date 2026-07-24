@@ -37,13 +37,21 @@ describe("Admin user mutation feedback", () => {
   it("shows loading and success feedback when creating a user", async () => {
     createUserActionMock.mockResolvedValue({
       success: true,
-      data: { defaultPassword: "ChangeMe123!" },
+      data: {
+        user: { email: "teacher@example.com" },
+        temporaryPassword: "UniqueTemporary123_A",
+        mustChangePassword: true,
+      },
     });
     render(<UserCreateForm />);
     fireEvent.change(screen.getByLabelText(/full name/i), { target: { value: "Teacher User" } });
     fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "teacher@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /create user/i }));
-    expect(await screen.findByText(/default password/i)).toBeDefined();
+    expect(await screen.findByRole("heading", { name: /temporary credentials/i })).toBeDefined();
+    expect(screen.getByText("teacher@example.com")).toBeDefined();
+    expect(screen.getByText("UniqueTemporary123_A")).toBeDefined();
+    expect(screen.getByText(/will not be shown after leaving this page/i)).toBeDefined();
+    expect(screen.queryByText(/default password/i)).toBeNull();
   });
 
   it("shows generic error feedback when create user throws unexpectedly", async () => {

@@ -186,9 +186,6 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 </Button>
               ))}
               <Button asChild variant="secondary" size="sm">
-                <Link href="/admin/security">Security</Link>
-              </Button>
-              <Button asChild variant="secondary" size="sm">
                 <Link href="/admin/teachers">Teachers</Link>
               </Button>
               <Button asChild variant="secondary" size="sm">

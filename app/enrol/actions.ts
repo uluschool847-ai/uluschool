@@ -69,6 +69,7 @@ export async function submitEnrolment(
     phoneWhatsapp: String(formData.get("phoneWhatsapp") || "").trim(),
     preferredSchedule: String(formData.get("preferredSchedule") || "").trim(),
     additionalNotes: String(formData.get("additionalNotes") || "").trim(),
+    consentAccepted: formData.get("consentAccepted") === "true",
   };
 
   const parsed = enrolmentSchema.safeParse(rawInput);
@@ -105,11 +106,12 @@ export async function submitEnrolment(
         : "Thank you. Your enquiry has been submitted. Our team will follow up soon.",
       referenceId,
       submittedAt: (enquiry.createdAt ?? now).toISOString(),
-      adminPath: `/admin/enquiries/${enquiry.id}`,
       nextSteps,
     };
   } catch (error) {
-    console.error("Enrolment submission failed", error);
+    console.error("Enrolment submission failed", {
+      errorType: error instanceof Error ? error.name : "UnknownError",
+    });
     return {
       success: false,
       message: "Unable to submit enquiry right now. Please try again in a few minutes.",

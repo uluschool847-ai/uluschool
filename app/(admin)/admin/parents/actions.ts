@@ -16,16 +16,19 @@ import {
   updateUserProfile,
 } from "@/lib/repositories/portal-repository";
 import { findUserById } from "@/lib/repositories/user-repository";
+import { mailboxSchema } from "@/lib/validations/mailbox";
 
 export type ParentActionState = {
   success: boolean;
   message?: string;
+  accountEmail?: string;
+  temporaryPassword?: string;
   errors?: Record<string, string[] | undefined>;
 };
 
 const parentProfileSchema = z.object({
   fullName: z.string().trim().min(2, "Full name must be at least 2 characters (min 2)."),
-  email: z.string().trim().min(1, "Email is required.").email("Enter a valid email address."),
+  email: z.string().trim().min(1, "Email is required.").pipe(mailboxSchema),
 });
 
 const parentProfileUpdateSchema = parentProfileSchema.extend({
@@ -173,9 +176,10 @@ export async function createParentAction(
     return { success: false, errors };
   }
 
+  let created: Awaited<ReturnType<typeof createUser>>;
   try {
     if (!session) throw new Error("Failed to create parent account.");
-    await prisma.$transaction(async (tx) => {
+    created = await prisma.$transaction(async (tx) => {
       const data = await createUser(
         {
           fullName: parsed.data.fullName,
@@ -200,6 +204,7 @@ export async function createParentAction(
         },
         tx,
       );
+      return data;
     }, PARENT_TRANSACTION_OPTIONS);
     revalidatePath("/admin/parents");
   } catch (error) {
@@ -213,10 +218,15 @@ export async function createParentAction(
   }
 
   if (flashMode && successRedirect) {
-    redirect(buildRedirectUrl(successRedirect, "parentMessage", "Parent account created."));
+    redirect(buildRedirectUrl(successRedirect, "parentMessage", "Account created."));
   }
 
-  return { success: true, message: "Parent account created." };
+  return {
+    success: true,
+    message: "Account created.",
+    accountEmail: created.user.email,
+    temporaryPassword: created.temporaryPassword,
+  };
 }
 
 export async function updateParentAction(

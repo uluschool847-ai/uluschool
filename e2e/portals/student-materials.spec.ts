@@ -1,3 +1,4 @@
+import { createSessionToken } from "@/e2e/helpers/session";
 import { type Page, expect, test } from "@playwright/test";
 import {
   ClassGroupStatus,
@@ -6,12 +7,10 @@ import {
   StudentLearningStatus,
   UserRole,
 } from "@prisma/client";
-
-const AUTH_SECRET = process.env.AUTH_SESSION_SECRET ?? "dev-only-auth-session-secret-please-change";
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 const COOKIE_DOMAIN = new URL(BASE_URL).hostname;
 const prisma = new PrismaClient();
-const SAFE_MATERIAL_URL = `${BASE_URL}/e2e-assets/student-material-safe.pdf`;
+const HTTP_MATERIAL_HREF = "http://cdn.example.com/e2e-assets/student-material-http.pdf";
 
 const USER_EMAIL_PREFIX = "qa.student-materials.";
 const LESSON_PREFIX = "QA Student Materials Lesson";
@@ -23,7 +22,7 @@ const LEVEL_SLUG_PREFIX = "qa-student-materials-level";
 type StudentMaterialsFixture = {
   directLessonId: string;
   directLessonTitle: string;
-  directMaterialTitle: string;
+  httpMaterialTitle: string;
   foreignMaterialTitle: string;
   groupMaterialTitle: string;
   groupName: string;
@@ -35,49 +34,6 @@ type StudentMaterialsFixture = {
 };
 
 let fixture: StudentMaterialsFixture;
-
-function toBase64Url(input: string) {
-  return Buffer.from(input, "binary")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-async function signPayload(payloadBase64: string) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(AUTH_SECRET),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payloadBase64));
-  const signatureString = Array.from(new Uint8Array(signature))
-    .map((byte) => String.fromCharCode(byte))
-    .join("");
-  return toBase64Url(signatureString);
-}
-
-async function createSessionToken(input: {
-  email: string;
-  fullName: string;
-  role: UserRole;
-  uid: string;
-}) {
-  const payloadBase64 = toBase64Url(
-    JSON.stringify({
-      authMethod: "password",
-      email: input.email,
-      exp: Date.now() + 1000 * 60 * 60,
-      fullName: input.fullName,
-      mfaVerified: true,
-      role: input.role,
-      uid: input.uid,
-    }),
-  );
-  return `${payloadBase64}.${await signPayload(payloadBase64)}`;
-}
 
 async function setStudentSession(page: Page) {
   await page.context().clearCookies();
@@ -116,18 +72,18 @@ test.describe("Student materials portal", () => {
     await prisma.$disconnect();
   });
 
-  test("student can list, filter, and open only their safe course materials", async ({ page }) => {
+  test("student can list and filter materials without linking unsafe URLs", async ({ page }) => {
     await setStudentSession(page);
     await page.goto(`${BASE_URL}/portal/student/materials`);
 
     await expect(page.getByRole("heading", { name: /^materials$/i })).toBeVisible();
-    await expect(page.getByText(fixture.directMaterialTitle)).toBeVisible();
+    await expect(page.getByText(fixture.httpMaterialTitle)).toBeVisible();
     await expect(page.getByText(fixture.groupMaterialTitle)).toBeVisible();
     await expect(page.getByText(fixture.foreignMaterialTitle)).toHaveCount(0);
 
-    await page.getByLabel(/search/i).fill("Direct");
+    await page.getByLabel(/search/i).fill("HTTP");
     await page.getByRole("button", { name: /apply|filter|show materials/i }).click();
-    await expect(page.getByText(fixture.directMaterialTitle)).toBeVisible();
+    await expect(page.getByText(fixture.httpMaterialTitle)).toBeVisible();
     await expect(page.getByText(fixture.groupMaterialTitle)).toHaveCount(0);
 
     await page.getByLabel(/search/i).fill("");
@@ -135,17 +91,20 @@ test.describe("Student materials portal", () => {
     await page.getByRole("button", { name: /apply|filter|show materials/i }).click();
     await expect(page.getByText(fixture.groupMaterialTitle)).toBeVisible();
 
-    const safeLink = materialCard(page, fixture.directMaterialTitle).getByRole("link", {
+    const httpMaterialCard = materialCard(page, fixture.httpMaterialTitle);
+    const httpMaterialLink = httpMaterialCard.getByRole("link", {
       name: /open material|view file|download/i,
     });
-    await expect(safeLink).toHaveAttribute("href", SAFE_MATERIAL_URL);
+    await expect(httpMaterialLink).toHaveCount(0);
+    await expect(httpMaterialCard.getByText(/file unavailable/i)).toBeVisible();
 
     await page.goto(`${BASE_URL}/portal/student/schedule/${fixture.directLessonId}`);
     await expect(page.getByRole("heading", { name: fixture.directLessonTitle })).toBeVisible();
-    await expect(page.getByRole("link", { name: fixture.directMaterialTitle })).toHaveAttribute(
-      "href",
-      SAFE_MATERIAL_URL,
-    );
+    const materialsSection = page.getByRole("region", { name: /^materials$/i });
+    await expect(materialsSection.getByText(fixture.httpMaterialTitle)).toBeVisible();
+    await expect(
+      materialsSection.getByRole("link", { name: fixture.httpMaterialTitle }),
+    ).toHaveCount(0);
     await expect(page.getByRole("link", { name: /view all materials/i })).toHaveAttribute(
       "href",
       `/portal/student/materials?scheduledClassId=${fixture.directLessonId}`,
@@ -171,7 +130,7 @@ async function createFixtures(): Promise<StudentMaterialsFixture> {
   const subjectName = `QA Student Materials Mathematics ${suffix}`;
   const groupName = `${GROUP_PREFIX} A ${suffix}`;
   const directLessonTitle = `${LESSON_PREFIX} Direct ${suffix}`;
-  const directMaterialTitle = `${MATERIAL_PREFIX} Direct ${suffix}`;
+  const httpMaterialTitle = `${MATERIAL_PREFIX} HTTP ${suffix}`;
   const groupMaterialTitle = `${MATERIAL_PREFIX} Group ${suffix}`;
   const unsafeMaterialTitle = `${MATERIAL_PREFIX} Unsafe ${suffix}`;
   const foreignMaterialTitle = `${MATERIAL_PREFIX} Foreign ${suffix}`;
@@ -290,11 +249,11 @@ async function createFixtures(): Promise<StudentMaterialsFixture> {
   await Promise.all([
     prisma.courseMaterial.create({
       data: {
-        description: "Direct enrollment safe material.",
-        fileUrl: SAFE_MATERIAL_URL,
+        description: "Direct enrollment HTTP material should remain visible but non-clickable.",
+        fileUrl: HTTP_MATERIAL_HREF,
         scheduledClassId: directLesson.id,
         teacherId: teacher.id,
-        title: directMaterialTitle,
+        title: httpMaterialTitle,
       },
     }),
     prisma.courseMaterial.create({
@@ -329,7 +288,7 @@ async function createFixtures(): Promise<StudentMaterialsFixture> {
   return {
     directLessonId: directLesson.id,
     directLessonTitle,
-    directMaterialTitle,
+    httpMaterialTitle,
     foreignMaterialTitle,
     groupMaterialTitle,
     groupName,

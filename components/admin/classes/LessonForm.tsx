@@ -2,6 +2,7 @@ import { LessonStatus } from "@prisma/client";
 
 import { createLessonAction, updateLessonAction } from "@/app/(admin)/admin/lessons/actions";
 import { Button } from "@/components/ui/button";
+import { DEFAULT_AVAILABILITY_TIMEZONE, utcToLocalDateTime } from "@/lib/scheduling/availability";
 
 type Option = { id: string; fullName?: string; email?: string; name?: string; slug?: string };
 
@@ -30,11 +31,14 @@ type LessonFormProps = {
   flashError?: string;
 };
 
-function formatDateTimeInput(value?: Date | string | null) {
+function formatDateTimeInput(
+  value?: Date | string | null,
+  timezone = DEFAULT_AVAILABILITY_TIMEZONE,
+) {
   if (!value) return "";
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString().slice(0, 16);
+  return utcToLocalDateTime({ date, timezone });
 }
 
 function isVitestRuntime() {
@@ -155,7 +159,7 @@ export function LessonForm({
             name="startAt"
             type="datetime-local"
             required
-            defaultValue={formatDateTimeInput(lesson?.startAt)}
+            defaultValue={formatDateTimeInput(lesson?.startAt, lesson?.timezone ?? undefined)}
             className="h-11 w-full rounded-md border border-input bg-background px-3"
           />
         </label>
@@ -165,7 +169,7 @@ export function LessonForm({
             name="endAt"
             type="datetime-local"
             required
-            defaultValue={formatDateTimeInput(lesson?.endAt)}
+            defaultValue={formatDateTimeInput(lesson?.endAt, lesson?.timezone ?? undefined)}
             className="h-11 w-full rounded-md border border-input bg-background px-3"
           />
         </label>

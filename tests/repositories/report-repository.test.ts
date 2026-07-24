@@ -1,15 +1,66 @@
+import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { R2StorageService } from "@/lib/storage/R2StorageService";
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
+const OLD_REPORT_KEY =
+  "private/teachers/teacher-1/reports/00000000-0000-4000-8000-000000000001-old-report.pdf";
+const NEW_REPORT_KEY =
+  "private/teachers/teacher-1/reports/00000000-0000-4000-8000-000000000002-report.pdf";
+const LEGACY_REPORT_KEY = "uploads/reports/old-report.pdf";
+const LEGACY_REPORT_ALIASES = [
+  LEGACY_REPORT_KEY,
+  `/${LEGACY_REPORT_KEY}`,
+  `public/${LEGACY_REPORT_KEY}`,
+  `/public/${LEGACY_REPORT_KEY}`,
+  "reports/old-report.pdf",
+];
+const R2_TEST_CONFIG = {
+  endpoint: "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com",
+  bucket: "ulu-school-private",
+  accessKeyId: "r2-access-key-value",
+  secretAccessKey: "r2-secret-key-value",
+};
+
+type StorageReferences = Partial<
+  Record<"attachment" | "courseMaterial" | "reportSnapshot" | "submission" | "teacher", string[]>
+>;
+
 const prismaMock = vi.hoisted(() => ({
+  $transaction: vi.fn(),
   academicTerm: { findMany: vi.fn() },
   appUser: { findFirst: vi.fn(), findMany: vi.fn() },
+  attachment: { findFirst: vi.fn() },
   classGroup: { findMany: vi.fn() },
+  courseMaterial: { findFirst: vi.fn() },
   reportSnapshot: {
     create: vi.fn(),
     findFirst: vi.fn(),
     findMany: vi.fn(),
     update: vi.fn(),
   },
+  submission: { findFirst: vi.fn() },
+  teacher: { findFirst: vi.fn() },
+}));
+const transactionClientMock = vi.hoisted(() => ({
+  activeStorageObject: {
+    deleteMany: vi.fn(),
+    findUnique: vi.fn(),
+  },
+  attachment: { findFirst: vi.fn() },
+  auditRows: [] as unknown[],
+  courseMaterial: { findFirst: vi.fn() },
+  pendingUpload: {
+    create: vi.fn(),
+    findUnique: vi.fn(),
+  },
+  reportSnapshot: {
+    findFirst: vi.fn(),
+    update: vi.fn(),
+  },
+  submission: { findFirst: vi.fn() },
+  teacher: { findFirst: vi.fn() },
 }));
 const getTeacherStudentGradebookMock = vi.hoisted(() => vi.fn());
 const listAttendanceHistoryForStudentMock = vi.hoisted(() => vi.fn());
@@ -17,6 +68,13 @@ const listProgressNotesForTeacherStudentMock = vi.hoisted(() => vi.fn());
 const renderReportSnapshotPdfMock = vi.hoisted(() => vi.fn());
 const uploadMock = vi.hoisted(() => vi.fn());
 const getURLMock = vi.hoisted(() => vi.fn());
+const deleteMock = vi.hoisted(() => vi.fn());
+const createAdminAuditLogMock = vi.hoisted(() => vi.fn());
+const finalizePendingUploadsMock = vi.hoisted(() => vi.fn());
+const releasePendingUploadMock = vi.hoisted(() => vi.fn());
+const reservePendingUploadMock = vi.hoisted(() => vi.fn());
+
+let committedAuditRows: unknown[] = [];
 
 vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/repositories/gradebook-repository", () => ({
@@ -31,8 +89,19 @@ vi.mock("@/lib/repositories/student-progress-repository", () => ({
 vi.mock("@/lib/services/report-pdf", () => ({
   renderReportSnapshotPdf: renderReportSnapshotPdfMock,
 }));
-vi.mock("@/lib/storage", () => ({
+vi.mock("@/lib/repositories/admin-audit-repository", () => ({
+  createAdminAuditLog: createAdminAuditLogMock,
+}));
+vi.mock("@/lib/repositories/pending-upload-repository", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/repositories/pending-upload-repository")>()),
+  finalizePendingUploads: finalizePendingUploadsMock,
+  releasePendingUpload: releasePendingUploadMock,
+  reservePendingUpload: reservePendingUploadMock,
+}));
+vi.mock("@/lib/storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/storage")>()),
   createStorageService: () => ({
+    delete: deleteMock,
     getURL: getURLMock,
     upload: uploadMock,
   }),
@@ -114,9 +183,82 @@ function snapshot(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function queryIncludesReference(input: unknown, field: string, references: string[] | undefined) {
+  const where = (input as { where?: Record<string, unknown> } | null)?.where;
+  const filter = where?.[field] as { in?: unknown } | undefined;
+  const aliases = Array.isArray(filter?.in) ? filter.in : [];
+  return references?.some((reference) => aliases.includes(reference)) ?? false;
+}
+
+function prepareReportExport(
+  oldPdfStorageKey: string | null = OLD_REPORT_KEY,
+  references: StorageReferences = {},
+  replacementStorageKey = NEW_REPORT_KEY,
+) {
+  const before = snapshot({ pdfStorageKey: oldPdfStorageKey });
+  const after = snapshot({
+    pdfGeneratedAt: new Date("2026-05-21T11:00:00.000Z"),
+    pdfStorageKey: replacementStorageKey,
+  });
+  const reportLookup = async (input: unknown) => {
+    const where = (input as { where?: { id?: string } } | null)?.where;
+    if (where?.id) return before;
+    return queryIncludesReference(input, "pdfStorageKey", references.reportSnapshot)
+      ? { id: "report-reference" }
+      : null;
+  };
+  const attachmentLookup = async (input: unknown) =>
+    queryIncludesReference(input, "storageKey", references.attachment)
+      ? { id: "attachment-reference" }
+      : null;
+  const materialLookup = async (input: unknown) =>
+    queryIncludesReference(input, "fileUrl", references.courseMaterial)
+      ? { id: "material-reference" }
+      : null;
+  const submissionLookup = async (input: unknown) =>
+    queryIncludesReference(input, "contentUrl", references.submission)
+      ? { id: "submission-reference" }
+      : null;
+  const teacherLookup = async (input: unknown) =>
+    queryIncludesReference(input, "photoUrl", references.teacher)
+      ? { id: "teacher-reference" }
+      : null;
+
+  prismaMock.reportSnapshot.findFirst.mockReset();
+  prismaMock.reportSnapshot.findFirst.mockImplementation(reportLookup);
+  prismaMock.attachment.findFirst.mockImplementation(attachmentLookup);
+  prismaMock.courseMaterial.findFirst.mockImplementation(materialLookup);
+  prismaMock.submission.findFirst.mockImplementation(submissionLookup);
+  prismaMock.teacher.findFirst.mockImplementation(teacherLookup);
+  transactionClientMock.reportSnapshot.findFirst.mockImplementation(reportLookup);
+  transactionClientMock.attachment.findFirst.mockImplementation(attachmentLookup);
+  transactionClientMock.courseMaterial.findFirst.mockImplementation(materialLookup);
+  transactionClientMock.submission.findFirst.mockImplementation(submissionLookup);
+  transactionClientMock.teacher.findFirst.mockImplementation(teacherLookup);
+  transactionClientMock.reportSnapshot.update.mockResolvedValueOnce(after);
+  uploadMock.mockResolvedValueOnce(replacementStorageKey);
+  getURLMock.mockReturnValueOnce(storageUrlForKey(replacementStorageKey));
+  return { after, before };
+}
+
 describe("report-repository contract", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    committedAuditRows = [];
+    transactionClientMock.auditRows = [];
+    prismaMock.$transaction.mockImplementation(
+      async (callback: (transaction: typeof transactionClientMock) => Promise<unknown>) => {
+        transactionClientMock.auditRows = [];
+        const result = await callback(transactionClientMock);
+        committedAuditRows.push(...transactionClientMock.auditRows);
+        return result;
+      },
+    );
+    createAdminAuditLogMock.mockImplementation(
+      async (payload: unknown, database: typeof transactionClientMock) => {
+        database.auditRows.push(payload);
+      },
+    );
     prismaMock.appUser.findFirst.mockResolvedValue({
       id: "student-1",
       fullName: "Amina Yusuf",
@@ -149,6 +291,14 @@ describe("report-repository contract", () => {
         pdfStorageKey: "uploads/amina-yusuf-spring-2026.pdf",
       }),
     );
+    transactionClientMock.reportSnapshot.findFirst.mockResolvedValue(snapshot());
+    transactionClientMock.reportSnapshot.update.mockResolvedValue(
+      snapshot({
+        pdfGeneratedAt: new Date("2026-05-21T11:00:00.000Z"),
+        pdfStorageKey:
+          "private/teachers/teacher-1/reports/00000000-0000-4000-8000-000000000002-report.pdf",
+      }),
+    );
     getTeacherStudentGradebookMock.mockResolvedValue(gradebook());
     listAttendanceHistoryForStudentMock.mockResolvedValue([
       { status: "PRESENT" },
@@ -163,8 +313,28 @@ describe("report-repository contract", () => {
       contentType: "application/pdf",
       filename: "amina-yusuf-spring-2026.pdf",
     });
-    uploadMock.mockResolvedValue("uploads/amina-yusuf-spring-2026.pdf");
-    getURLMock.mockReturnValue("/uploads/amina-yusuf-spring-2026.pdf");
+    uploadMock.mockResolvedValue(
+      "private/teachers/teacher-1/reports/00000000-0000-4000-8000-000000000002-report.pdf",
+    );
+    getURLMock.mockReturnValue(
+      "/api/files/cHJpdmF0ZS90ZWFjaGVycy90ZWFjaGVyLTEvcmVwb3J0cy8wMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDItcmVwb3J0LnBkZg",
+    );
+    deleteMock.mockResolvedValue(undefined);
+    finalizePendingUploadsMock.mockResolvedValue(undefined);
+    reservePendingUploadMock.mockResolvedValue(undefined);
+    releasePendingUploadMock.mockImplementation(
+      async (input: {
+        storage: { delete(storageKey: string): Promise<void> };
+        storageKey: string;
+      }) => {
+        await input.storage.delete(input.storageKey);
+        return { claimed: true, deleted: true };
+      },
+    );
+    transactionClientMock.activeStorageObject.findUnique.mockResolvedValue(null);
+    transactionClientMock.activeStorageObject.deleteMany.mockResolvedValue({ count: 1 });
+    transactionClientMock.pendingUpload.findUnique.mockResolvedValue(null);
+    transactionClientMock.pendingUpload.create.mockImplementation(async ({ data }) => data);
   });
 
   it("exports the report repository API", async () => {
@@ -521,7 +691,8 @@ describe("report-repository contract", () => {
     );
   });
 
-  it("exports PDF from saved snapshot data without querying live gradebook or attendance", async () => {
+  it("uploads first, then atomically updates the teacher-owned snapshot and commits the export audit", async () => {
+    prepareReportExport();
     const { exportReportSnapshotPdf } = await loadReportRepository();
     const result = await exportReportSnapshotPdf("teacher-1", "snapshot-1");
 
@@ -531,21 +702,393 @@ describe("report-repository contract", () => {
       }),
     );
     expect(renderReportSnapshotPdfMock).toHaveBeenCalledWith(snapshot().snapshotData);
-    expect(uploadMock).toHaveBeenCalledWith(expect.any(Buffer), "amina-yusuf-spring-2026.pdf");
-    expect(prismaMock.reportSnapshot.update).toHaveBeenCalledWith({
-      where: { id: "snapshot-1" },
+    expect(uploadMock).toHaveBeenCalledWith(expect.any(Buffer), {
+      filename: "amina-yusuf-spring-2026.pdf",
+      namespace: "private/teachers/teacher-1/reports",
+      contentType: "application/pdf",
+    });
+    expect(uploadMock.mock.invocationCallOrder[0]).toBeLessThan(
+      prismaMock.$transaction.mock.invocationCallOrder[0],
+    );
+    expect(transactionClientMock.reportSnapshot.findFirst).toHaveBeenCalledWith({
+      where: { id: "snapshot-1", generatedByTeacherId: "teacher-1" },
+    });
+    expect(transactionClientMock.reportSnapshot.update).toHaveBeenCalledWith({
+      where: {
+        id: "snapshot-1",
+        generatedByTeacherId: "teacher-1",
+        updatedAt: new Date("2026-05-20T10:01:00.000Z"),
+      },
       data: {
         pdfGeneratedAt: expect.any(Date),
-        pdfStorageKey: "uploads/amina-yusuf-spring-2026.pdf",
+        pdfStorageKey: NEW_REPORT_KEY,
       },
     });
+    expect(createAdminAuditLogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "REPORT_PDF_EXPORTED",
+        before: {
+          pdfGeneratedAt: "2026-05-21T10:00:00.000Z",
+          pdfStorageKey: OLD_REPORT_KEY,
+        },
+        after: {
+          pdfGeneratedAt: "2026-05-21T11:00:00.000Z",
+          pdfStorageKey: NEW_REPORT_KEY,
+        },
+        targetId: "snapshot-1",
+        targetType: "reportSnapshot",
+        meta: {
+          teacherId: "teacher-1",
+          reportSnapshotId: "snapshot-1",
+          storageKey: NEW_REPORT_KEY,
+          pdfStorageKey: NEW_REPORT_KEY,
+          pdfGeneratedAt: "2026-05-21T11:00:00.000Z",
+        },
+      }),
+      transactionClientMock,
+    );
+    expect(committedAuditRows).toEqual([
+      expect.objectContaining({ action: "REPORT_PDF_EXPORTED", targetId: "snapshot-1" }),
+    ]);
+    const oldAliases = [OLD_REPORT_KEY, storageUrlForKey(OLD_REPORT_KEY)];
+    expect(transactionClientMock.reportSnapshot.findFirst).toHaveBeenCalledWith({
+      where: { pdfStorageKey: { in: oldAliases } },
+      select: { id: true },
+    });
+    expect(transactionClientMock.attachment.findFirst).toHaveBeenCalledWith({
+      where: { storageKey: { in: oldAliases } },
+      select: { id: true },
+    });
+    expect(transactionClientMock.courseMaterial.findFirst).toHaveBeenCalledWith({
+      where: { fileUrl: { in: oldAliases } },
+      select: { id: true },
+    });
+    expect(transactionClientMock.submission.findFirst).toHaveBeenCalledWith({
+      where: { contentUrl: { in: oldAliases } },
+      select: { id: true },
+    });
+    expect(transactionClientMock.teacher.findFirst).toHaveBeenCalledWith({
+      where: { photoUrl: { in: oldAliases } },
+      select: { id: true },
+    });
+    expect(deleteMock).toHaveBeenCalledWith(OLD_REPORT_KEY);
+    expect(deleteMock).not.toHaveBeenCalledWith(NEW_REPORT_KEY);
     expect(result).toEqual(
       expect.objectContaining({
-        publicUrl: "/uploads/amina-yusuf-spring-2026.pdf",
-        storageKey: "uploads/amina-yusuf-spring-2026.pdf",
+        publicUrl: storageUrlForKey(NEW_REPORT_KEY),
+        storageKey: NEW_REPORT_KEY,
       }),
     );
     expect(getTeacherStudentGradebookMock).not.toHaveBeenCalled();
     expect(listAttendanceHistoryForStudentMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes an unreserved report PDF and returns a generic error when reservation fails", async () => {
+    prepareReportExport(null);
+    reservePendingUploadMock.mockRejectedValueOnce(
+      new Error("database host and credentials must stay private"),
+    );
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await expect(exportReportSnapshotPdf("teacher-1", "snapshot-1")).rejects.toMatchObject({
+      name: "PendingUploadError",
+      message: "Uploaded file is no longer available.",
+    });
+
+    expect(deleteMock).toHaveBeenCalledWith(NEW_REPORT_KEY);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes only the new upload and commits no audit when the snapshot update fails", async () => {
+    prepareReportExport();
+    const updateError = new Error("snapshot update failed");
+    transactionClientMock.reportSnapshot.update.mockReset();
+    transactionClientMock.reportSnapshot.update.mockRejectedValueOnce(updateError);
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await expect(exportReportSnapshotPdf("teacher-1", "snapshot-1")).rejects.toBe(updateError);
+
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(committedAuditRows).toEqual([]);
+    expect(deleteMock).toHaveBeenCalledTimes(1);
+    expect(deleteMock).toHaveBeenCalledWith(NEW_REPORT_KEY);
+    expect(deleteMock).not.toHaveBeenCalledWith(OLD_REPORT_KEY);
+  });
+
+  it("rolls back and writes no success audit when active accounting finalization fails", async () => {
+    prepareReportExport();
+    const finalizationError = new Error("active accounting unavailable");
+    finalizePendingUploadsMock.mockRejectedValueOnce(finalizationError);
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await expect(exportReportSnapshotPdf("teacher-1", "snapshot-1")).rejects.toBe(
+      finalizationError,
+    );
+
+    expect(transactionClientMock.reportSnapshot.update).toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(committedAuditRows).toEqual([]);
+    expect(deleteMock).toHaveBeenCalledWith(NEW_REPORT_KEY);
+    expect(deleteMock).not.toHaveBeenCalledWith(OLD_REPORT_KEY);
+  });
+
+  it("rolls back the update, deletes only the new upload, and leaves no committed audit when audit fails", async () => {
+    prepareReportExport();
+    const auditError = new Error("report export audit failed");
+    createAdminAuditLogMock.mockImplementationOnce(
+      async (payload: unknown, database: typeof transactionClientMock) => {
+        database.auditRows.push(payload);
+        throw auditError;
+      },
+    );
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await expect(exportReportSnapshotPdf("teacher-1", "snapshot-1")).rejects.toBe(auditError);
+
+    expect(transactionClientMock.reportSnapshot.update).toHaveBeenCalled();
+    expect(committedAuditRows).toEqual([]);
+    expect(deleteMock).toHaveBeenCalledTimes(1);
+    expect(deleteMock).toHaveBeenCalledWith(NEW_REPORT_KEY);
+    expect(deleteMock).not.toHaveBeenCalledWith(OLD_REPORT_KEY);
+  });
+
+  it("preserves the transaction error when rollback cleanup of the new upload also fails", async () => {
+    prepareReportExport();
+    const updateError = new Error("original snapshot update failure");
+    transactionClientMock.reportSnapshot.update.mockReset();
+    transactionClientMock.reportSnapshot.update.mockRejectedValueOnce(updateError);
+    deleteMock.mockRejectedValueOnce(new Error("rollback cleanup failed"));
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await expect(exportReportSnapshotPdf("teacher-1", "snapshot-1")).rejects.toBe(updateError);
+
+    expect(deleteMock).toHaveBeenCalledWith(NEW_REPORT_KEY);
+    expect(committedAuditRows).toEqual([]);
+  });
+
+  it("re-checks teacher ownership inside the transaction before updating or auditing", async () => {
+    prepareReportExport();
+    transactionClientMock.reportSnapshot.findFirst.mockReset();
+    transactionClientMock.reportSnapshot.findFirst.mockResolvedValueOnce(null);
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await expect(exportReportSnapshotPdf("teacher-1", "snapshot-1")).rejects.toThrow(/not found/i);
+
+    expect(transactionClientMock.reportSnapshot.update).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(deleteMock).toHaveBeenCalledWith(NEW_REPORT_KEY);
+    expect(committedAuditRows).toEqual([]);
+  });
+
+  it("normalizes and deletes an unreferenced trusted legacy report key after commit", async () => {
+    prepareReportExport(`/${LEGACY_REPORT_KEY}`);
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await expect(exportReportSnapshotPdf("teacher-1", "snapshot-1")).resolves.toEqual(
+      expect.objectContaining({ storageKey: NEW_REPORT_KEY }),
+    );
+
+    expect(transactionClientMock.reportSnapshot.findFirst).toHaveBeenCalledWith({
+      where: { pdfStorageKey: { in: LEGACY_REPORT_ALIASES } },
+      select: { id: true },
+    });
+    expect(transactionClientMock.teacher.findFirst).toHaveBeenCalledWith({
+      where: { photoUrl: { in: LEGACY_REPORT_ALIASES } },
+      select: { id: true },
+    });
+    expect(deleteMock).toHaveBeenCalledWith(LEGACY_REPORT_KEY);
+  });
+
+  it("passes repository-normalized legacy cleanup through the actual R2 adapter", async () => {
+    prepareReportExport(`/${LEGACY_REPORT_KEY}`);
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    const normalizedCleanupKey = deleteMock.mock.calls[0]?.[0] as string;
+    expect(normalizedCleanupKey).toBe(LEGACY_REPORT_KEY);
+
+    const service = new R2StorageService(R2_TEST_CONFIG);
+    const client = Reflect.get(service, "client") as {
+      send(command: unknown): Promise<unknown>;
+    };
+    const sendSpy = vi.spyOn(client, "send").mockResolvedValue({});
+
+    await service.delete(normalizedCleanupKey);
+
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    const command = sendSpy.mock.calls[0]?.[0];
+    expect(command).toBeInstanceOf(DeleteObjectCommand);
+    expect((command as DeleteObjectCommand).input).toEqual({
+      Bucket: R2_TEST_CONFIG.bucket,
+      Key: LEGACY_REPORT_KEY,
+    });
+  });
+
+  it("normalizes a canonical current previous value and deletes its unreferenced raw key", async () => {
+    prepareReportExport(storageUrlForKey(OLD_REPORT_KEY));
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    expect(deleteMock).toHaveBeenCalledWith(OLD_REPORT_KEY);
+  });
+
+  it("retains a raw current key referenced through its canonical current alias", async () => {
+    const canonicalOldUrl = storageUrlForKey(OLD_REPORT_KEY);
+    prepareReportExport(OLD_REPORT_KEY, { reportSnapshot: [canonicalOldUrl] });
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    expect(transactionClientMock.reportSnapshot.findFirst).toHaveBeenCalledWith({
+      where: { pdfStorageKey: { in: [OLD_REPORT_KEY, canonicalOldUrl] } },
+      select: { id: true },
+    });
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it("normalizes a bare legacy previous value and retains its aliased live reference", async () => {
+    prepareReportExport("reports/old-report.pdf", {
+      reportSnapshot: [`/${LEGACY_REPORT_KEY}`],
+    });
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    expect(transactionClientMock.reportSnapshot.findFirst).toHaveBeenCalledWith({
+      where: { pdfStorageKey: { in: LEGACY_REPORT_ALIASES } },
+      select: { id: true },
+    });
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "current attachment key",
+      model: "attachment" as const,
+      previous: storageUrlForKey(OLD_REPORT_KEY),
+      reference: OLD_REPORT_KEY,
+    },
+    {
+      label: "legacy material URL",
+      model: "courseMaterial" as const,
+      previous: `/${LEGACY_REPORT_KEY}`,
+      reference: "reports/old-report.pdf",
+    },
+    {
+      label: "legacy submission URL",
+      model: "submission" as const,
+      previous: LEGACY_REPORT_KEY,
+      reference: `/public/${LEGACY_REPORT_KEY}`,
+    },
+    {
+      label: "legacy teacher photo URL",
+      model: "teacher" as const,
+      previous: `public/${LEGACY_REPORT_KEY}`,
+      reference: `/${LEGACY_REPORT_KEY}`,
+    },
+  ])("retains an old object referenced by a cross-model $label", async (testCase) => {
+    prepareReportExport(testCase.previous, {
+      [testCase.model]: [testCase.reference],
+    } as StorageReferences);
+    const referenceLookupMocks = {
+      attachment: transactionClientMock.attachment.findFirst,
+      courseMaterial: transactionClientMock.courseMaterial.findFirst,
+      submission: transactionClientMock.submission.findFirst,
+      teacher: transactionClientMock.teacher.findFirst,
+    };
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    expect(referenceLookupMocks[testCase.model]).toHaveBeenCalled();
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it("does not delete when canonical previous and raw replacement normalize to the same key", async () => {
+    prepareReportExport(storageUrlForKey(OLD_REPORT_KEY), {}, OLD_REPORT_KEY);
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    expect(transactionClientMock.attachment.findFirst).not.toHaveBeenCalled();
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it("rolls back the export when a cross-model reference query fails", async () => {
+    prepareReportExport();
+    transactionClientMock.attachment.findFirst.mockRejectedValueOnce(
+      new Error("reference query failed"),
+    );
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await expect(exportReportSnapshotPdf("teacher-1", "snapshot-1")).rejects.toThrow(
+      /uploaded file/i,
+    );
+
+    expect(transactionClientMock.attachment.findFirst).toHaveBeenCalled();
+    expect(committedAuditRows).toEqual([]);
+    expect(deleteMock).toHaveBeenCalledWith(NEW_REPORT_KEY);
+    expect(deleteMock).not.toHaveBeenCalledWith(OLD_REPORT_KEY);
+  });
+
+  it.each([
+    "https://cdn.example.com/reports/external.pdf",
+    "private/teachers/teacher-1/reports/file name.pdf",
+    "private/teachers/teacher-2/reports/foreign.pdf",
+    storageUrlForKey("private/teachers/teacher-2/reports/foreign.pdf"),
+    storageUrlForKey("public/teachers/admin-1/report.pdf"),
+  ])(
+    "does not delete an external, malformed, or untrusted previous value: %s",
+    async (oldValue) => {
+      prepareReportExport(oldValue);
+      const { exportReportSnapshotPdf } = await loadReportRepository();
+
+      await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+      expect(deleteMock).not.toHaveBeenCalled();
+      expect(committedAuditRows).toHaveLength(1);
+    },
+  );
+
+  it("does not delete a previous report key that remains referenced after commit", async () => {
+    prepareReportExport(OLD_REPORT_KEY, { reportSnapshot: [OLD_REPORT_KEY] });
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    expect(deleteMock).not.toHaveBeenCalled();
+    expect(committedAuditRows).toHaveLength(1);
+  });
+
+  it("keeps a legacy report object referenced through an equivalent persisted URL form", async () => {
+    prepareReportExport(`/${LEGACY_REPORT_KEY}`, {
+      reportSnapshot: [`public/${LEGACY_REPORT_KEY}`],
+    });
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await exportReportSnapshotPdf("teacher-1", "snapshot-1");
+
+    expect(transactionClientMock.reportSnapshot.findFirst).toHaveBeenCalledWith({
+      where: { pdfStorageKey: { in: LEGACY_REPORT_ALIASES } },
+      select: { id: true },
+    });
+    expect(deleteMock).not.toHaveBeenCalled();
+    expect(committedAuditRows).toHaveLength(1);
+  });
+
+  it("returns the committed export when old-key cleanup fails", async () => {
+    prepareReportExport();
+    deleteMock.mockRejectedValueOnce(new Error("old object cleanup failed"));
+    const { exportReportSnapshotPdf } = await loadReportRepository();
+
+    await expect(exportReportSnapshotPdf("teacher-1", "snapshot-1")).resolves.toEqual(
+      expect.objectContaining({ storageKey: NEW_REPORT_KEY }),
+    );
+
+    expect(committedAuditRows).toHaveLength(1);
+    expect(deleteMock).toHaveBeenCalledWith(OLD_REPORT_KEY);
   });
 });

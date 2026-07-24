@@ -56,8 +56,8 @@ describe("ClassGroupLessons admin controls", () => {
             id: "lesson-upcoming",
             title: "Quadratic functions",
             description: "Upcoming lesson",
-            startAt: new Date("2026-06-01T10:00:00.000Z"),
-            endAt: new Date("2026-06-01T11:00:00.000Z"),
+            startAt: new Date("2026-01-15T10:00:00.000Z"),
+            endAt: new Date("2026-01-15T11:00:00.000Z"),
             liveLessonUrl: "https://meet.example.com/upcoming",
             classGroupId: "group-1",
             subject: { id: "subject-math", name: "Mathematics", slug: "mathematics" },
@@ -68,8 +68,8 @@ describe("ClassGroupLessons admin controls", () => {
             id: "lesson-past",
             title: "Algebra foundations",
             description: "Past lesson",
-            startAt: new Date("2026-05-01T10:00:00.000Z"),
-            endAt: new Date("2026-05-01T11:00:00.000Z"),
+            startAt: new Date("2026-01-01T10:00:00.000Z"),
+            endAt: new Date("2026-01-01T11:00:00.000Z"),
             liveLessonUrl: "https://meet.example.com/past",
             classGroupId: "group-1",
             subject: { id: "subject-math", name: "Mathematics", slug: "mathematics" },
@@ -84,6 +84,7 @@ describe("ClassGroupLessons admin controls", () => {
     expect(screen.getByText(/algebra foundations/i)).toBeDefined();
     expect(screen.getByText(/https:\/\/meet\.example\.com\/upcoming/i)).toBeDefined();
     expect(screen.getByText(/https:\/\/meet\.example\.com\/past/i)).toBeDefined();
+    expect(screen.getAllByText(/13:00.*14:00/)).toHaveLength(2);
     expect(screen.getByRole("link", { name: /create lesson|new lesson/i })).toHaveProperty(
       "href",
       expect.stringContaining("/admin/classes/group-1/lessons/new"),

@@ -4,9 +4,11 @@ out
 coverage
 test-results
 .e2e-debug
+.worktrees/
 *.log
 *.tsbuildinfo
 public/uploads
+.data/
 .env
 .env.local
 .env.development.local

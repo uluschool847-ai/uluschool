@@ -2,6 +2,8 @@ import { within } from "@testing-library/dom";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
 const getActiveTeachersMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/repositories/cms-repository", () => ({
@@ -110,6 +112,31 @@ describe("Public teachers page", () => {
         within(secondCard as HTMLElement).getByRole("group", { name: /teacher subjects/i }),
       ).getByText(/chemistry/i),
     ).toBeDefined();
+  });
+
+  it("renders the canonical public teacher photo URL unchanged", async () => {
+    const photoUrl = storageUrlForKey("public/teachers/admin-1/teacher.webp");
+    getActiveTeachersMock.mockResolvedValueOnce([
+      {
+        id: "teacher-1",
+        fullName: "Canonical Teacher",
+        title: "Mathematics Specialist",
+        bio: "Published profile",
+        photoUrl,
+        displayOrder: 1,
+        isActive: true,
+        cabinetUserId: null,
+        subjects: [],
+      },
+    ]);
+
+    const page = await loadTeachersPage();
+    render(await page.default());
+
+    expect(screen.getByRole("img", { name: /canonical teacher/i })).toHaveAttribute(
+      "src",
+      photoUrl,
+    );
   });
 
   it("shows an empty state when no active teachers are available", async () => {

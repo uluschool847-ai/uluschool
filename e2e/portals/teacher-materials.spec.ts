@@ -1,9 +1,8 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { createSessionToken } from "@/e2e/helpers/session";
+import { createTinyPdf } from "@/e2e/helpers/tiny-pdf";
+import { storageKeyFromUrl } from "@/lib/storage/storage-url";
 import { type Locator, type Page, expect, test } from "@playwright/test";
 import { ClassGroupStatus, LessonStatus, PrismaClient, UserRole } from "@prisma/client";
-
-const AUTH_SECRET = process.env.AUTH_SESSION_SECRET ?? "dev-only-auth-session-secret-please-change";
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 const COOKIE_DOMAIN = new URL(BASE_URL).hostname;
 const prisma = new PrismaClient();
@@ -25,49 +24,6 @@ type Fixture = {
 };
 
 let fixture: Fixture;
-
-function toBase64Url(input: string) {
-  return Buffer.from(input, "binary")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-async function signPayload(payloadBase64: string) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(AUTH_SECRET),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payloadBase64));
-  const signatureString = Array.from(new Uint8Array(signature))
-    .map((byte) => String.fromCharCode(byte))
-    .join("");
-  return toBase64Url(signatureString);
-}
-
-async function createSessionToken(input: {
-  email: string;
-  fullName: string;
-  role: UserRole;
-  uid: string;
-}) {
-  const payloadBase64 = toBase64Url(
-    JSON.stringify({
-      authMethod: "password",
-      email: input.email,
-      exp: Date.now() + 1000 * 60 * 60,
-      fullName: input.fullName,
-      mfaVerified: true,
-      role: input.role,
-      uid: input.uid,
-    }),
-  );
-  return `${payloadBase64}.${await signPayload(payloadBase64)}`;
-}
 
 async function setPortalSession(page: Page) {
   await page.context().clearCookies();
@@ -156,19 +112,12 @@ test.describe("Teacher course materials portal", () => {
     );
     await page.getByLabel(/^title$/i).fill(fixture.createdTitle);
     await page.getByLabel(/description/i).fill("Created from E2E materials flow.");
-    await page.getByLabel(/file url/i).fill("/uploads/teacher/material-e2e.pdf");
+    await page.getByLabel(/file url/i).fill("https://cdn.school/material-e2e.pdf");
     await page.getByLabel(/lesson|scheduled class/i).selectOption(fixture.lessonId);
     await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          response.url().includes("/portal/teacher/materials/new") &&
-          response.status() < 500,
-      ),
+      page.waitForURL(/\/portal\/teacher\/materials\?updated=/, { timeout: 30_000 }),
       page.getByRole("button", { name: /create material/i }).click(),
     ]);
-
-    await page.waitForURL(/\/portal\/teacher\/materials/, { timeout: 15_000 });
     await expect(page.getByText(fixture.createdTitle)).toBeVisible();
 
     const createdEditHref = await page
@@ -182,16 +131,9 @@ test.describe("Teacher course materials portal", () => {
     await page.getByLabel(/description/i).fill("Edited from E2E materials flow.");
     await page.getByLabel(/file url/i).fill("https://cdn.school/materials/edited-e2e.pdf");
     await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          response.url().includes("/portal/teacher/materials/") &&
-          response.status() < 500,
-      ),
+      page.waitForURL(/\/portal\/teacher\/materials\?updated=/, { timeout: 30_000 }),
       page.getByRole("button", { name: /save changes/i }).click(),
     ]);
-
-    await page.waitForURL(/\/portal\/teacher\/materials/, { timeout: 15_000 });
     await expect(page.getByText(fixture.editedTitle)).toBeVisible();
 
     const editedCard = page
@@ -212,55 +154,93 @@ test.describe("Teacher course materials portal", () => {
 
   test("teacher can upload, replace, and delete material files through the UI", async ({
     page,
-  }, testInfo) => {
-    const uploadDir = testInfo.outputPath("material-fixtures");
-    await mkdir(uploadDir, { recursive: true });
-    const firstFile = path.join(uploadDir, "worksheet-upload.pdf");
-    const replacementFile = path.join(uploadDir, "worksheet-replacement.pdf");
-    await writeFile(firstFile, "first pdf");
-    await writeFile(replacementFile, "replacement pdf");
+  }) => {
+    const uploadedTitle = `QA Teacher Materials Uploaded ${Date.now()}`;
+    const firstFile = {
+      name: "worksheet-upload.pdf",
+      mimeType: "application/pdf",
+      buffer: createTinyPdf(),
+    };
+    const supersededFile = {
+      name: "worksheet-superseded.pdf",
+      mimeType: "application/pdf",
+      buffer: createTinyPdf(),
+    };
+    const replacementFile = {
+      name: "worksheet-replacement.pdf",
+      mimeType: "application/pdf",
+      buffer: createTinyPdf(),
+    };
 
     await setPortalSession(page);
     await page.goto(
       `${BASE_URL}/portal/teacher/materials/new?scheduledClassId=${fixture.lessonId}`,
     );
 
-    await page.getByLabel(/^title$/i).fill(`QA Teacher Materials Uploaded ${Date.now()}`);
+    await page.getByLabel(/^title$/i).fill(uploadedTitle);
     await page.getByLabel(/description/i).fill("Uploaded from E2E materials flow.");
     await page.getByLabel(/lesson|scheduled class/i).selectOption(fixture.lessonId);
     await page.getByLabel(/upload file|file upload|choose file/i).setInputFiles(firstFile);
 
     await expect(page.getByText(/worksheet-upload\.pdf/i)).toBeVisible();
-    await Promise.all([
+    const [firstUploadResponse] = await Promise.all([
       page.waitForResponse(
         (response) =>
-          response.request().method() === "POST" &&
-          response.url().includes("/api/upload") &&
-          response.status() < 500,
+          response.request().method() === "POST" && response.url().includes("/api/upload"),
       ),
       page.getByRole("button", { name: /^(upload|retry upload|replace upload)$/i }).click(),
     ]);
+    expect(firstUploadResponse.status()).toBe(201);
+    expect(await firstUploadResponse.json()).toEqual(
+      expect.objectContaining({
+        filename: firstFile.name,
+        publicUrl: expect.stringMatching(/^\/api\/files\/[A-Za-z0-9_-]+$/),
+        storageKey: expect.stringMatching(
+          new RegExp(`^private/teachers/${fixture.teacherId}/materials/.+-worksheet-upload\\.pdf$`),
+        ),
+        success: true,
+      }),
+    );
     await expect(page.getByText(/^Upload complete:/i)).toBeVisible();
     await expect(page.locator('input[name="storageKey"], input[name$=".storageKey"]')).toHaveCount(
       0,
     );
 
-    await Promise.all([
+    const [releaseResponse] = await Promise.all([
       page.waitForResponse(
         (response) =>
-          response.request().method() === "POST" &&
-          response.url().includes("/portal/teacher/materials/new") &&
-          response.status() < 500,
+          response.request().method() === "DELETE" && response.url().includes("/api/upload"),
       ),
+      page.getByLabel(/upload file|file upload|choose file/i).setInputFiles(supersededFile),
+    ]);
+    expect(releaseResponse.status()).toBe(200);
+
+    const [supersededUploadResponse] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" && response.url().includes("/api/upload"),
+      ),
+      page.getByRole("button", { name: /^(upload|retry upload|replace upload)$/i }).click(),
+    ]);
+    expect(supersededUploadResponse.status()).toBe(201);
+    await expect(page.getByText(supersededFile.name).first()).toBeVisible();
+
+    await Promise.all([
+      page.waitForURL(/\/portal\/teacher\/materials\?updated=/, { timeout: 30_000 }),
       page.getByRole("button", { name: /create material/i }).click(),
     ]);
-    await page.goto(`${BASE_URL}/portal/teacher/materials`);
-    await expect(page.getByRole("link", { name: /view worksheet-upload\.pdf/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /view worksheet-superseded\.pdf/i })).toBeVisible();
 
-    const uploadedCard = page.locator("article").filter({ hasText: /worksheet-upload\.pdf/i });
-    await expect(
-      uploadedCard.getByRole("link", { name: /view file|worksheet-upload\.pdf/i }),
-    ).toBeVisible();
+    const uploadedCard = page.locator("article").filter({ hasText: uploadedTitle });
+    const uploadedFileLink = uploadedCard.getByRole("link", {
+      name: /view file|worksheet-superseded\.pdf/i,
+    });
+    await expect(uploadedFileLink).toBeVisible();
+    const uploadedHref = await uploadedFileLink.getAttribute("href");
+    expect(uploadedHref).toMatch(/^\/api\/files\/[A-Za-z0-9_-]+$/);
+    expect(storageKeyFromUrl(uploadedHref ?? "")).toMatch(
+      new RegExp(`^private/teachers/${fixture.teacherId}/materials/.+-worksheet-superseded\\.pdf$`),
+    );
     const uploadedEditHref = await uploadedCard
       .getByRole("link", { name: /edit/i })
       .getAttribute("href");
@@ -269,36 +249,46 @@ test.describe("Teacher course materials portal", () => {
 
     await expect(page.getByText(/current file/i).first()).toBeVisible();
     await page.getByLabel(/upload file|file upload|choose file/i).setInputFiles(replacementFile);
-    await Promise.all([
+    const [replacementUploadResponse] = await Promise.all([
       page.waitForResponse(
         (response) =>
-          response.request().method() === "POST" &&
-          response.url().includes("/api/upload") &&
-          response.status() < 500,
+          response.request().method() === "POST" && response.url().includes("/api/upload"),
       ),
       page.getByRole("button", { name: /^(upload|retry upload|replace upload)$/i }).click(),
     ]);
+    expect(replacementUploadResponse.status()).toBe(201);
+    expect(await replacementUploadResponse.json()).toEqual(
+      expect.objectContaining({
+        filename: replacementFile.name,
+        publicUrl: expect.stringMatching(/^\/api\/files\/[A-Za-z0-9_-]+$/),
+        storageKey: expect.stringMatching(
+          new RegExp(
+            `^private/teachers/${fixture.teacherId}/materials/.+-worksheet-replacement\\.pdf$`,
+          ),
+        ),
+        success: true,
+      }),
+    );
     await expect(page.getByText("worksheet-replacement.pdf").first()).toBeVisible();
     await expect(page.getByText(/^Upload complete:/i)).toBeVisible();
     await Promise.all([
-      page.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          response.url().includes("/portal/teacher/materials/") &&
-          response.status() < 500,
-      ),
+      page.waitForURL(/\/portal\/teacher\/materials\?updated=/, { timeout: 30_000 }),
       page.getByRole("button", { name: /save changes/i }).click(),
     ]);
-
-    await page.goto(`${BASE_URL}/portal/teacher/materials`);
-    await expect(page.locator('a[href*="worksheet-replacement"]')).toBeVisible();
-
-    const replacementCard = page
-      .locator("article")
-      .filter({ has: page.locator('a[href*="worksheet-replacement"]') })
-      .first();
+    const replacementCard = page.locator("article").filter({ hasText: uploadedTitle }).first();
+    const replacementLink = replacementCard.getByRole("link", {
+      name: /view file|worksheet-replacement\.pdf/i,
+    });
+    await expect(replacementLink).toBeVisible();
+    const replacementHref = await replacementLink.getAttribute("href");
+    expect(replacementHref).toMatch(/^\/api\/files\/[A-Za-z0-9_-]+$/);
+    expect(storageKeyFromUrl(replacementHref ?? "")).toMatch(
+      new RegExp(
+        `^private/teachers/${fixture.teacherId}/materials/.+-worksheet-replacement\\.pdf$`,
+      ),
+    );
     await confirmDeleteMaterial(page, replacementCard);
-    await expect(page.locator('a[href*="worksheet-replacement"]')).toHaveCount(0);
+    await expect(page.getByText(uploadedTitle)).toHaveCount(0);
 
     await page.goto(`${BASE_URL}/portal/teacher/materials/${fixture.foreignMaterialId}/edit`);
     await expect(
@@ -404,6 +394,17 @@ async function createFixtures(): Promise<Fixture> {
       },
     }),
   ]);
+
+  await prisma.activeStorageObject.create({
+    data: {
+      ownerId: teacherA.id,
+      purpose: "course-material",
+      storageKey: "uploads/teacher/existing.pdf",
+      filename: "existing.pdf",
+      mimeType: "application/pdf",
+      byteSize: 128,
+    },
+  });
 
   void materialA;
 

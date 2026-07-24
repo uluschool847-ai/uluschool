@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { type Browser, type Page, expect, test } from "@playwright/test";
 import { UserRole } from "@prisma/client";
@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 
 const ADMIN_EMAIL = "fixed.admin@uluglobalacademy.com";
 const PASSWORD =
-  process.env.E2E_PORTAL_PASSWORD ?? process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 const RUN_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const TEACHER_PREFIX = "E2E Teacher";
 const USER_EMAIL_PREFIX = "e2e.teacher.";
@@ -21,7 +21,6 @@ const oversizedPngPath = path.join(TEST_DIR, "oversized.png");
 const createdTeacherIds: string[] = [];
 
 type TestUsers = {
-  createUser: { id: string; email: string };
   editUser: { id: string; email: string };
   deleteUser: { id: string; email: string };
   linkedUser: { id: string; email: string };
@@ -56,8 +55,9 @@ test.describe("Admin Teacher Management", () => {
     await expect(page.getByRole("columnheader", { name: "Actions" })).toBeVisible();
 
     await verifyRequiredValidation(page);
-    await verifyCabinetAccessFiltering(page);
     await verifyUploadValidation(page);
+    const createUser = await createTeacherCabinetUser(page);
+    await verifyCabinetAccessFiltering(page, createUser.email);
 
     const mainTeacher = await createTeacherProfile(page, {
       fullName: `${TEACHER_PREFIX} Flow ${RUN_ID}`,
@@ -65,19 +65,24 @@ test.describe("Admin Teacher Management", () => {
       bio: "This e2e teacher profile verifies the admin teacher workflow through a real browser.",
       displayOrder: 8,
       subjects: ["Mathematics", "Physics"],
-      cabinetUserId: testUsers.createUser.id,
+      cabinetUserId: createUser.id,
       photoPath: validPngPath,
     });
 
     const createdRow = rowByText(page, mainTeacher.fullName);
+    const createdPhotoUrl = requirePhotoUrl(mainTeacher.photoUrl);
     await expect(createdRow.getByRole("img", { name: mainTeacher.fullName })).toBeVisible();
+    await expect(createdRow.getByRole("img", { name: mainTeacher.fullName })).toHaveAttribute(
+      "src",
+      createdPhotoUrl,
+    );
     await expect(createdRow).toContainText("Linked account");
 
     const updatedName = `${TEACHER_PREFIX} Flow Updated ${RUN_ID}`;
     await editTeacherProfile(page, mainTeacher.id, {
       fullName: updatedName,
       title: "E2E Science Lead",
-      bio: "Updated e2e biography verifies field persistence, subject replacement, cabinet changes, and photo replacement.",
+      bio: "Updated e2e biography verifies field persistence, subject replacement, cabinet changes, and photo removal.",
       displayOrder: 9,
       checkSubjects: ["Biology", "Chemistry"],
       uncheckSubjects: ["Mathematics", "Physics"],
@@ -86,7 +91,8 @@ test.describe("Admin Teacher Management", () => {
     });
 
     await page.reload();
-    await expect(rowByText(page, updatedName)).toBeVisible();
+    const updatedRow = rowByText(page, updatedName);
+    await expect(updatedRow).toBeVisible();
 
     const updatedTeacher = await prisma.teacher.findUniqueOrThrow({
       where: { id: mainTeacher.id },
@@ -97,6 +103,10 @@ test.describe("Admin Teacher Management", () => {
       "Biology",
       "Chemistry",
     ]);
+    await expect(updatedRow.getByRole("img", { name: updatedName })).toHaveAttribute(
+      "src",
+      requirePhotoUrl(updatedTeacher.photoUrl),
+    );
 
     await removeTeacherPhoto(page, mainTeacher.id, updatedName);
     await verifyStatusToggleAndPublicFiltering(page, updatedName);
@@ -170,11 +180,11 @@ async function verifyRequiredValidation(page: Page) {
   await expect(page.getByText("Bio must be at least 20 characters")).toBeVisible();
 }
 
-async function verifyCabinetAccessFiltering(page: Page) {
+async function verifyCabinetAccessFiltering(page: Page, createUserEmail: string) {
   await page.goto("/admin/teachers/new");
   const cabinetOptions = await page.getByRole("combobox", { name: "Cabinet access" }).textContent();
 
-  expect(cabinetOptions).toContain(testUsers.createUser.email);
+  expect(cabinetOptions).toContain(createUserEmail);
   expect(cabinetOptions).not.toContain(testUsers.linkedUser.email);
   expect(cabinetOptions).not.toContain(testUsers.inactiveUser.email);
   expect(cabinetOptions).not.toContain(testUsers.parentUser.email);
@@ -239,6 +249,30 @@ async function createTeacherProfile(
   return teacher;
 }
 
+async function createTeacherCabinetUser(page: Page) {
+  const email = `${USER_EMAIL_PREFIX}create.${RUN_ID}@uluglobalacademy.com`;
+  const fullName = `${TEACHER_PREFIX} Cabinet ${RUN_ID}`;
+
+  await page.goto("/admin/users");
+  const createUserSection = page
+    .getByRole("heading", { name: "Create User" })
+    .locator("xpath=ancestor::section[1]");
+  await createUserSection.getByLabel("Full name").fill(fullName);
+  await createUserSection.getByLabel("Email").fill(email);
+  await createUserSection.getByLabel("Role").selectOption(UserRole.TEACHER);
+  await createUserSection.getByRole("button", { name: "Create User" }).click();
+
+  await expect(page.getByRole("region", { name: /^temporary credentials$/i })).toBeVisible({
+    timeout: 30000,
+  });
+  await page.getByRole("button", { name: "Dismiss temporary credentials" }).click();
+
+  return prisma.appUser.findUniqueOrThrow({
+    select: { email: true, id: true },
+    where: { email },
+  });
+}
+
 async function editTeacherProfile(
   page: Page,
   teacherId: string,
@@ -271,6 +305,14 @@ async function editTeacherProfile(
   await page.getByRole("button", { name: "Save Changes" }).click();
 
   await expect(rowByText(page, input.fullName)).toBeVisible({ timeout: 60000 });
+}
+
+function requirePhotoUrl(photoUrl: string | null) {
+  expect(photoUrl).toBeTruthy();
+  if (!photoUrl) {
+    throw new Error("Expected teacher photo to persist after upload.");
+  }
+  return photoUrl;
 }
 
 async function removeTeacherPhoto(page: Page, teacherId: string, teacherName: string) {
@@ -433,14 +475,13 @@ function rowByText(page: Page, text: string) {
 async function createCabinetAccessFixtures(): Promise<TestUsers> {
   const passwordHash = await hashPassword(PASSWORD);
   const users = await Promise.all([
-    createTestUser("create", UserRole.TEACHER, true, passwordHash),
     createTestUser("edit", UserRole.TEACHER, true, passwordHash),
     createTestUser("delete", UserRole.TEACHER, true, passwordHash),
     createTestUser("linked", UserRole.TEACHER, true, passwordHash),
     createTestUser("inactive", UserRole.TEACHER, false, passwordHash),
     createTestUser("parent", UserRole.PARENT, true, passwordHash),
   ]);
-  const [createUser, editUser, deleteUser, linkedUser, inactiveUser, parentUser] = users;
+  const [editUser, deleteUser, linkedUser, inactiveUser, parentUser] = users;
 
   const mathematics = await prisma.subject.findFirstOrThrow({
     where: { name: "Mathematics" },
@@ -463,7 +504,6 @@ async function createCabinetAccessFixtures(): Promise<TestUsers> {
   createdTeacherIds.push(linkedTeacher.id);
 
   return {
-    createUser,
     editUser,
     deleteUser,
     linkedUser,
@@ -493,7 +533,7 @@ async function createTestUser(
 async function cleanupTestData() {
   const teachers = await prisma.teacher.findMany({
     where: { fullName: { startsWith: TEACHER_PREFIX } },
-    select: { id: true, photoUrl: true },
+    select: { id: true },
   });
   const teacherIds = [...new Set([...teachers.map((teacher) => teacher.id), ...createdTeacherIds])];
 
@@ -501,10 +541,6 @@ async function cleanupTestData() {
     await prisma.adminAuditLog.deleteMany({
       where: { targetType: "teacher", targetId: { in: teacherIds } },
     });
-  }
-
-  for (const teacher of teachers) {
-    removeLocalUpload(teacher.photoUrl);
   }
 
   await prisma.teacher.deleteMany({
@@ -529,15 +565,4 @@ function ensureUploadFixtures() {
     '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
   );
   writeFileSync(oversizedPngPath, Buffer.alloc(6 * 1024 * 1024));
-}
-
-function removeLocalUpload(photoUrl?: string | null) {
-  if (!photoUrl?.startsWith("/uploads/")) {
-    return;
-  }
-
-  const uploadPath = path.join(process.cwd(), "public", photoUrl.slice(1));
-  if (existsSync(uploadPath)) {
-    rmSync(uploadPath, { force: true });
-  }
 }

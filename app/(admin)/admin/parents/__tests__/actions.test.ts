@@ -54,6 +54,8 @@ type ParentActionsModule = {
   createParentAction: (formData: FormData) => Promise<{
     success: boolean;
     message?: string;
+    accountEmail?: string;
+    temporaryPassword?: string;
     errors?: Record<string, string[] | undefined>;
   }>;
   updateParentAction: (formData: FormData) => Promise<{
@@ -107,6 +109,14 @@ function buildParentFormData(options?: {
   if (options?.successRedirect) formData.set("successRedirect", options.successRedirect);
   if (options?.errorRedirect) formData.set("errorRedirect", options.errorRedirect);
   return formData;
+}
+
+function mailboxAddress(length: 254 | 255) {
+  const address = `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(
+    length === 254 ? 61 : 62,
+  )}`;
+  expect(address).toHaveLength(length);
+  return address;
 }
 
 function buildStudentLinkFormData(options?: {
@@ -172,8 +182,8 @@ describe("Admin parent account actions", () => {
         role: "PARENT",
         isActive: true,
       },
-      defaultPassword: "ChangeMe123!",
-      mustResetPassword: true,
+      temporaryPassword: "UniqueTemporary123_A",
+      mustChangePassword: true,
     });
 
     const { createParentAction } = await loadParentActions();
@@ -210,10 +220,88 @@ describe("Admin parent account actions", () => {
     expect(result).toEqual(
       expect.objectContaining({
         success: true,
-        message: expect.stringMatching(/created|parent/i),
+        message: "Account created.",
+        accountEmail: "mary.parent@example.com",
+        temporaryPassword: "UniqueTemporary123_A",
       }),
     );
+    expect(JSON.stringify(createAdminAuditLogMock.mock.calls)).not.toContain(
+      "UniqueTemporary123_A",
+    );
   });
+
+  it.each([
+    ["create", 254, true],
+    ["create", 255, false],
+    ["update", 254, true],
+    ["update", 255, false],
+  ] as const)(
+    "%s accepts 254 and rejects 255 mailbox characters before repository work: %i / %s",
+    async (operation, length, accepted) => {
+      const email = mailboxAddress(length);
+      const { createParentAction, updateParentAction } = await loadParentActions();
+
+      if (operation === "create") {
+        if (accepted) {
+          createUserMock.mockResolvedValueOnce({
+            user: {
+              id: "parent-1",
+              email,
+              fullName: "Mary Parent",
+              role: UserRole.PARENT,
+              isActive: true,
+            },
+            temporaryPassword: "UniqueTemporary123_A",
+            mustChangePassword: true,
+          });
+        }
+
+        const result = await createParentAction(buildParentFormData({ email }));
+
+        expect(result.success).toBe(accepted);
+        if (accepted) {
+          expect(createUserMock).toHaveBeenCalledWith(
+            expect.objectContaining({ email }),
+            transactionClientMock,
+          );
+        } else {
+          expect(createUserMock).not.toHaveBeenCalled();
+          expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+        }
+        return;
+      }
+
+      if (accepted) {
+        findUserByIdMock.mockResolvedValueOnce({
+          id: "parent-1",
+          role: UserRole.PARENT,
+          email: "mary.parent@example.com",
+          fullName: "Mary Parent",
+          isActive: true,
+        });
+        updateUserProfileMock.mockResolvedValueOnce({
+          id: "parent-1",
+          email,
+          fullName: "Mary Parent",
+          phoneWhatsapp: "+254700000001",
+        });
+      }
+
+      const result = await updateParentAction(buildParentFormData({ id: "parent-1", email }));
+
+      expect(result.success).toBe(accepted);
+      if (accepted) {
+        expect(updateUserProfileMock).toHaveBeenCalledWith(
+          expect.objectContaining({ email }),
+          transactionClientMock,
+        );
+      } else {
+        expect(findUserByIdMock).not.toHaveBeenCalled();
+        expect(updateUserProfileMock).not.toHaveBeenCalled();
+        expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it("returns structured validation errors for missing name or invalid email", async () => {
     const { createParentAction } = await loadParentActions();
@@ -645,8 +733,8 @@ describe("Admin parent account actions", () => {
         role: "PARENT",
         isActive: true,
       },
-      defaultPassword: "ChangeMe123!",
-      mustResetPassword: true,
+      temporaryPassword: "UniqueTemporary123_A",
+      mustChangePassword: true,
     });
 
     const { createParentAction } = await loadParentActions();
@@ -658,7 +746,8 @@ describe("Admin parent account actions", () => {
       }),
     );
 
-    expect(redirectMock).toHaveBeenCalledWith(expect.stringContaining("parentMessage="));
+    expect(redirectMock).toHaveBeenCalledWith("/admin/parents?parentMessage=Account%20created.");
+    expect(JSON.stringify(redirectMock.mock.calls)).not.toContain("UniqueTemporary123_A");
 
     await createParentAction(
       buildParentFormData({

@@ -20,6 +20,8 @@ const bodyFont = Inter({
   variable: "--font-body",
 });
 
+const isProduction = (process.env.APP_ENV ?? "") === "production";
+
 export const metadata: Metadata = {
   metadataBase: new URL(siteConfig.url),
   title: {
@@ -43,6 +45,10 @@ export const metadata: Metadata = {
   },
   alternates: {
     canonical: "/",
+  },
+  robots: {
+    index: isProduction,
+    follow: isProduction,
   },
 };
 

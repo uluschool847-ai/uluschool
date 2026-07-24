@@ -2,6 +2,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StudentMaterialList } from "@/app/portal/student/components/StudentMaterialList";
+import { storageUrlForKey } from "@/lib/storage/storage-url";
 
 type StudentMaterialListMaterials = Parameters<typeof StudentMaterialList>[0]["materials"];
 
@@ -153,42 +154,43 @@ describe("StudentMaterialList", () => {
     expect(container.textContent).not.toContain(unsafeUrl);
   });
 
-  it.each(["https://cdn.school/material.pdf", "/uploads/materials/internal.pdf"])(
-    "allows safe material URLs: %s",
-    (safeUrl) => {
-      const materials = [
-        {
-          id: "mat-safe",
-          title: "Safe material",
-          description: "Long description ".repeat(40),
-          fileUrl: safeUrl,
-          safeFileUrl: safeUrl,
-          attachments: [
-            {
-              filename: "safe-attachment.pdf",
-              href: safeUrl,
-              mimeType: "application/pdf",
-              size: 123,
-            },
-          ],
-          className: "IGCSE English",
-          scheduledClass: { id: "lesson-safe", title: "English lesson" },
-          classGroup: { id: "group-english", name: "English Group" },
-          subjectName: "English",
-          subject: { id: "subject-english", name: "English" },
-          createdAt: new Date("2026-06-01T09:00:00.000Z"),
-          updatedAt: new Date("2026-06-01T09:00:00.000Z"),
-        },
-      ] as unknown as StudentMaterialListMaterials;
+  it.each([
+    "https://cdn.school/material.pdf",
+    "/uploads/materials/internal.pdf",
+    storageUrlForKey("private/teachers/teacher-1/materials/internal.pdf"),
+  ])("allows safe material URLs: %s", (safeUrl) => {
+    const materials = [
+      {
+        id: "mat-safe",
+        title: "Safe material",
+        description: "Long description ".repeat(40),
+        fileUrl: safeUrl,
+        safeFileUrl: safeUrl,
+        attachments: [
+          {
+            filename: "safe-attachment.pdf",
+            href: safeUrl,
+            mimeType: "application/pdf",
+            size: 123,
+          },
+        ],
+        className: "IGCSE English",
+        scheduledClass: { id: "lesson-safe", title: "English lesson" },
+        classGroup: { id: "group-english", name: "English Group" },
+        subjectName: "English",
+        subject: { id: "subject-english", name: "English" },
+        createdAt: new Date("2026-06-01T09:00:00.000Z"),
+        updatedAt: new Date("2026-06-01T09:00:00.000Z"),
+      },
+    ] as unknown as StudentMaterialListMaterials;
 
-      render(<StudentMaterialList materials={materials} />);
+    render(<StudentMaterialList materials={materials} />);
 
-      expect(screen.getByRole("link", { name: /open material/i })).toHaveAttribute("href", safeUrl);
-      expect(screen.getByRole("link", { name: /safe-attachment\.pdf/i })).toHaveAttribute(
-        "href",
-        safeUrl,
-      );
-      expect(screen.getByText(/long description long description/i)).toBeDefined();
-    },
-  );
+    expect(screen.getByRole("link", { name: /open material/i })).toHaveAttribute("href", safeUrl);
+    expect(screen.getByRole("link", { name: /safe-attachment\.pdf/i })).toHaveAttribute(
+      "href",
+      safeUrl,
+    );
+    expect(screen.getByText(/long description long description/i)).toBeDefined();
+  });
 });

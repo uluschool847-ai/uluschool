@@ -2,16 +2,11 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const useActionStateMock = vi.hoisted(() => vi.fn());
-const useFormStatusMock = vi.hoisted(() => vi.fn());
+const formActionMock = vi.hoisted(() => vi.fn());
 
 vi.mock("react", async () => {
   const actual = await vi.importActual<typeof import("react")>("react");
   return { ...actual, useActionState: useActionStateMock };
-});
-
-vi.mock("react-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-dom")>("react-dom");
-  return { ...actual, useFormStatus: useFormStatusMock };
 });
 
 vi.mock("@/app/enrol/actions", () => ({ submitEnrolment: vi.fn() }));
@@ -58,13 +53,12 @@ function advanceToSubmitStep() {
 describe("EnrolForm action feedback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useFormStatusMock.mockReturnValue({ pending: false });
-    useActionStateMock.mockReturnValue([{ success: false, message: "" }, vi.fn()]);
+    useActionStateMock.mockReturnValue([{ success: false, message: "" }, formActionMock, false]);
   });
   afterEach(() => cleanup());
 
   it("shows loading feedback while submitting", () => {
-    useFormStatusMock.mockReturnValue({ pending: true });
+    useActionStateMock.mockReturnValue([{ success: false, message: "" }, formActionMock, true]);
     render(<EnrolForm {...props} />);
     advanceToSubmitStep();
     expect(
@@ -76,6 +70,7 @@ describe("EnrolForm action feedback", () => {
     useActionStateMock.mockReturnValue([
       { success: true, message: "Sent", referenceId: "MS-2026-0010" },
       vi.fn(),
+      false,
     ]);
     render(<EnrolForm {...props} />);
     expect(screen.getByText(/thank you/i)).toBeDefined();
@@ -92,6 +87,7 @@ describe("EnrolForm action feedback", () => {
     useActionStateMock.mockReturnValue([
       { success: false, message: "Validation failed", errors: { email: ["Invalid email"] } },
       vi.fn(),
+      false,
     ]);
     rerender(<EnrolForm {...props} />);
 
@@ -102,17 +98,70 @@ describe("EnrolForm action feedback", () => {
     expect((screen.getByLabelText(/email address/i) as HTMLInputElement).value).toBe("bad@email");
   });
 
+  it("shows the server consent error on the required checkbox", () => {
+    useActionStateMock.mockReturnValue([
+      {
+        success: false,
+        message: "Please enter valid details in the highlighted fields.",
+        errors: { consentAccepted: ["Parent or guardian consent is required."] },
+      },
+      vi.fn(),
+      false,
+    ]);
+    render(<EnrolForm {...props} />);
+    advanceToSubmitStep();
+
+    expect(screen.getByText(/parent or guardian consent is required/i)).toBeDefined();
+  });
+
+  it("does not invoke the action when final-step consent is unchecked", async () => {
+    render(<EnrolForm {...props} />);
+    advanceToSubmitStep();
+    fireEvent.change(screen.getByLabelText(/preferred schedule/i), {
+      target: { value: "Weekday evenings" },
+    });
+
+    fireEvent.submit(
+      screen.getByRole("button", { name: /submit enrolment/i }).closest("form") as HTMLFormElement,
+    );
+
+    expect(formActionMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toMatch(/valid details/i);
+  });
+
+  it("invokes the action when final-step required controls are valid", async () => {
+    render(<EnrolForm {...props} />);
+    advanceToSubmitStep();
+    fireEvent.change(screen.getByLabelText(/preferred schedule/i), {
+      target: { value: "Weekday evenings" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: /i am the parent or guardian/i }));
+
+    fireEvent.submit(
+      screen.getByRole("button", { name: /submit enrolment/i }).closest("form") as HTMLFormElement,
+    );
+
+    expect(formActionMock).toHaveBeenCalledTimes(1);
+    const submittedData = formActionMock.mock.calls[0]?.[0] as FormData;
+    expect(submittedData.get("consentAccepted")).toBe("true");
+  });
+
   it("shows generic error feedback for unexpected failures", () => {
     useActionStateMock.mockReturnValue([
       { success: false, message: "Something went wrong" },
       vi.fn(),
+      false,
     ]);
     render(<EnrolForm {...props} />);
     expect(screen.getByText(/something went wrong/i)).toBeDefined();
   });
 
   it("re-enables submit after an error", () => {
-    useActionStateMock.mockReturnValue([{ success: false, message: "Submission failed" }, vi.fn()]);
+    useActionStateMock.mockReturnValue([
+      { success: false, message: "Submission failed" },
+      vi.fn(),
+      false,
+    ]);
     render(<EnrolForm {...props} />);
     advanceToSubmitStep();
     const button = screen.getByRole("button", { name: /submit enrolment/i }) as HTMLButtonElement;

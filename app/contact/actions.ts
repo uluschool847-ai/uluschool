@@ -96,11 +96,12 @@ export async function submitContactEnquiry(
         : "Thank you. Your message has been received. Our team will follow up soon.",
       referenceId,
       submittedAt: (lead.createdAt ?? now).toISOString(),
-      adminPath: `/admin/leads/${lead.id}`,
       nextSteps,
     };
   } catch (error) {
-    console.error("Contact submission failed", error);
+    console.error("Contact submission failed", {
+      errorType: error instanceof Error ? error.name : "UnknownError",
+    });
     return {
       success: false,
       message: "Unable to submit your message right now. Please try again in a few minutes.",

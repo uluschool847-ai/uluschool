@@ -92,21 +92,45 @@ function getDateParts(date: Date, timezone: string): DateParts {
 }
 
 function parseLocalDateTimeValue(value: string) {
-  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  const match = value
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/);
   if (!match) {
-    const absolute = new Date(value);
-    if (!Number.isNaN(absolute.getTime())) return absolute;
     throw new Error("Date and time must be valid.");
   }
-  const [, year, month, day, hour, minute, second = "00"] = match;
-  return {
+  const [, year, month, day, hour, minute, second = "00", fraction = ""] = match;
+  const parsed = {
     year: Number(year),
     month: Number(month),
     day: Number(day),
     hour: Number(hour),
     minute: Number(minute),
     second: Number(second),
+    millisecond: Number(fraction.slice(0, 3).padEnd(3, "0")),
   };
+  const normalized = new Date(
+    Date.UTC(
+      parsed.year,
+      parsed.month - 1,
+      parsed.day,
+      parsed.hour,
+      parsed.minute,
+      parsed.second,
+      parsed.millisecond,
+    ),
+  );
+  if (
+    parsed.year < 1 ||
+    normalized.getUTCFullYear() !== parsed.year ||
+    normalized.getUTCMonth() !== parsed.month - 1 ||
+    normalized.getUTCDate() !== parsed.day ||
+    normalized.getUTCHours() !== parsed.hour ||
+    normalized.getUTCMinutes() !== parsed.minute ||
+    normalized.getUTCSeconds() !== parsed.second
+  ) {
+    throw new Error("Date and time must be valid.");
+  }
+  return parsed;
 }
 
 function getTimezoneOffsetMs(date: Date, timezone: string) {
@@ -132,6 +156,7 @@ function getTimezoneOffsetMs(date: Date, timezone: string) {
     hour,
     Number(parts.minute),
     Number(parts.second),
+    date.getUTCMilliseconds(),
   );
   return localAsUtc - date.getTime();
 }
@@ -151,6 +176,7 @@ export function localDateTimeToUtc(input: { value: string; timezone: string }) {
     parsed.hour,
     parsed.minute,
     parsed.second,
+    parsed.millisecond,
   );
   let utc = localAsUtc - getTimezoneOffsetMs(new Date(localAsUtc), input.timezone);
   utc = localAsUtc - getTimezoneOffsetMs(new Date(utc), input.timezone);

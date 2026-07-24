@@ -243,7 +243,7 @@ describe("Student and parent course material repository access", () => {
           ],
           classGroup: { id: "group-physics-a", name: "Physics A" },
           createdAt: new Date("2026-06-01T09:00:00.000Z"),
-          safeFileUrl: "https://cdn.school/materials/forces.pdf",
+          safeFileUrl: "/uploads/materials/forces-lab.pdf",
           scheduledClass: expect.objectContaining({
             id: "class-physics-a",
             startAt: new Date("2026-06-03T10:00:00.000Z"),

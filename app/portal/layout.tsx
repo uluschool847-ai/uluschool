@@ -19,7 +19,9 @@ export default async function PortalLayout({ children }: { children: React.React
               {session ? (
                 <>
                   <Button asChild variant="secondary" size="sm">
-                    <Link href="/portal">Overview</Link>
+                    <Link href="/portal" prefetch={false}>
+                      Overview
+                    </Link>
                   </Button>
                   <Button asChild variant="secondary" size="sm">
                     <Link href="/portal/schedule">Schedule</Link>

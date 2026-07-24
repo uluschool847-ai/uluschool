@@ -187,9 +187,35 @@ describe("Portal schedule subject display", () => {
     const { from: start, to: end } = range ?? {};
     expect(start).toBeInstanceOf(Date);
     expect(end).toBeInstanceOf(Date);
-    expect((start as Date).getMonth()).toBe(6);
-    expect((end as Date).getMonth()).toBe(7);
+    expect(start).toEqual(new Date("2026-06-30T21:00:00.000Z"));
+    expect(end).toEqual(new Date("2026-07-31T21:00:00.000Z"));
     expect(screen.getByLabelText(/month/i)).toHaveProperty("value", "2026-07");
     expect(screen.getByText(/no lessons scheduled|no classes scheduled/i)).toBeDefined();
+  });
+
+  it("queries and groups lessons by Africa/Nairobi month and calendar date", async () => {
+    listLessonsForStudentMock.mockResolvedValue([
+      {
+        id: "nairobi-midnight-lesson",
+        title: "Nairobi midnight lesson",
+        startAt: new Date("2026-01-31T21:30:00.000Z"),
+        endAt: new Date("2026-01-31T22:30:00.000Z"),
+        liveLessonUrl: "https://example.com/live/nairobi-midnight",
+        teacher: { id: "teacher-1", fullName: "Jane Teacher", email: "jane@example.com" },
+        subject: { id: "subject-math", name: "Mathematics", slug: "mathematics" },
+        classGroup: { id: "group-math-a", name: "IGCSE Mathematics Group A" },
+      },
+    ]);
+
+    await renderServerComponent(
+      <PortalSchedulePage searchParams={Promise.resolve({ month: "2026-02" })} />,
+    );
+
+    expect(listLessonsForStudentMock).toHaveBeenCalledWith("student-1", {
+      from: new Date("2026-01-31T21:00:00.000Z"),
+      to: new Date("2026-02-28T21:00:00.000Z"),
+    });
+    expect(screen.getByText("01 Feb 2026")).toBeDefined();
+    expect(screen.getByText("00:30 - 01:30")).toBeDefined();
   });
 });

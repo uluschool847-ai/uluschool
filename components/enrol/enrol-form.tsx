@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
-import { useFormStatus } from "react-dom";
+import Link from "next/link";
+import { startTransition, useActionState, useCallback, useEffect, useRef, useState } from "react";
 
 import type { CatalogueLevel, CatalogueSubject } from "@/lib/repositories/catalogue-repository";
 import type { EnrolmentFormState, EnrolmentInput } from "@/lib/validations/enrolment";
@@ -28,9 +28,7 @@ type EnrolFormProps = {
   levels?: CatalogueLevel[];
 };
 
-function SubmitButton() {
-  const { pending } = useFormStatus();
-
+function SubmitButton({ pending }: { pending: boolean }) {
   return (
     <Button
       type="submit"
@@ -115,7 +113,18 @@ function SuccessMessage({ state }: { state: EnrolmentFormState }) {
 }
 
 export function EnrolForm({ subjects, levels }: EnrolFormProps) {
-  const [state, formAction] = useActionState(submitEnrolment, initialState);
+  const submissionInFlightRef = useRef(false);
+  const submitWithRelease = useCallback(
+    async (previousState: EnrolmentFormState, formData: FormData) => {
+      try {
+        return await submitEnrolment(previousState, formData);
+      } finally {
+        submissionInFlightRef.current = false;
+      }
+    },
+    [],
+  );
+  const [state, formAction, isPending] = useActionState(submitWithRelease, initialState);
   const [step, setStep] = useState(1);
   const [curriculumLevel, setCurriculumLevel] = useState("");
   const [clientValidationMessage, setClientValidationMessage] = useState("");
@@ -186,9 +195,11 @@ export function EnrolForm({ subjects, levels }: EnrolFormProps) {
       ),
     );
 
-    const hasInvalidRequiredControl = requiredControls.some((control) => {
-      return !control.value.trim();
-    });
+    const hasInvalidRequiredControl = requiredControls.some((control) =>
+      control instanceof HTMLInputElement && control.type === "checkbox"
+        ? !control.checked
+        : !control.value.trim(),
+    );
 
     if (currentStep === 2) {
       const selectedSubjects = form.querySelectorAll('input[name="subjects"]:checked').length;
@@ -234,7 +245,26 @@ export function EnrolForm({ subjects, levels }: EnrolFormProps) {
           </div>
         </div>
 
-        <form ref={formRef} action={formAction} className="grid gap-6" noValidate>
+        <form
+          ref={formRef}
+          className="grid gap-6"
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (
+              step !== 3 ||
+              isPending ||
+              submissionInFlightRef.current ||
+              !validateStepBeforeAdvance(3)
+            ) {
+              return;
+            }
+
+            const formData = new FormData(event.currentTarget);
+            submissionInFlightRef.current = true;
+            startTransition(() => formAction(formData));
+          }}
+        >
           <input
             type="text"
             name="companyWebsite"
@@ -479,6 +509,25 @@ export function EnrolForm({ subjects, levels }: EnrolFormProps) {
                 errors={state.errors?.additionalNotes}
               />
             </div>
+
+            <div>
+              <label className="flex items-start gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  name="consentAccepted"
+                  value="true"
+                  required
+                  aria-describedby="enrol-consent-help enrol-consent-error"
+                  className={cn("mt-0.5 h-4 w-4", fieldTone("consentAccepted"))}
+                />
+                <span id="enrol-consent-help">
+                  I am the parent or guardian, or I am authorized to submit this child&apos;s
+                  information, and I have read the{" "}
+                  <Link href="/privacy-policy">Privacy Policy</Link>.
+                </span>
+              </label>
+              <FieldError id="enrol-consent-error" errors={state.errors?.consentAccepted} />
+            </div>
           </section>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -507,7 +556,7 @@ export function EnrolForm({ subjects, levels }: EnrolFormProps) {
               ) : null}
             </div>
 
-            {step === 3 ? <SubmitButton /> : null}
+            {step === 3 ? <SubmitButton pending={isPending} /> : null}
           </div>
 
           {step === 3 ? <TurnstileWidget /> : null}

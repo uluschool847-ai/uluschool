@@ -13,16 +13,35 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 type UserRepositoryModule = {
+  findUserByEmail: (email: string) => Promise<{
+    id: string;
+    email: string;
+    fullName: string;
+    role: "ADMIN" | "TEACHER" | "PARENT" | "STUDENT";
+    passwordHash: string;
+    mustChangePassword: boolean;
+    isActive: boolean;
+  } | null>;
   findUserById: (userId: string) => Promise<{
     id: string;
     email: string;
     fullName: string;
     role: "ADMIN" | "TEACHER" | "PARENT" | "STUDENT";
     isActive: boolean;
+    mustChangePassword: boolean;
     learningStatus?: "TRIAL" | "ACTIVE" | "PAUSED" | "INACTIVE" | null;
     phoneWhatsapp: string | null;
     createdAt: Date;
     updatedAt: Date;
+  } | null>;
+  findUserForInitialSetup: (userId: string) => Promise<{
+    id: string;
+    email: string;
+    fullName: string;
+    role: "ADMIN" | "TEACHER" | "PARENT" | "STUDENT";
+    passwordHash: string;
+    mustChangePassword: boolean;
+    isActive: boolean;
   } | null>;
   listUsersByRole: (role: UserRole) => Promise<
     Array<{
@@ -60,6 +79,43 @@ describe("user-repository lookup contract", () => {
     vi.clearAllMocks();
   });
 
+  it("findUserByEmail selects only password authentication fields", async () => {
+    prismaMock.appUser.findUnique.mockResolvedValueOnce({
+      id: "admin-1",
+      email: "admin@example.com",
+      fullName: "Admin User",
+      role: "ADMIN",
+      passwordHash: "password-hash",
+      mustChangePassword: true,
+      isActive: true,
+    });
+
+    const { findUserByEmail } = await loadUserRepository();
+    const result = await findUserByEmail("Admin@Example.com");
+
+    expect(prismaMock.appUser.findUnique).toHaveBeenCalledWith({
+      where: { email: "admin@example.com" },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        passwordHash: true,
+        mustChangePassword: true,
+        isActive: true,
+      },
+    });
+    expect(result).toEqual({
+      id: "admin-1",
+      email: "admin@example.com",
+      fullName: "Admin User",
+      role: "ADMIN",
+      passwordHash: "password-hash",
+      mustChangePassword: true,
+      isActive: true,
+    });
+  });
+
   it("findUserById selects the edit-page contract including phoneWhatsapp and timestamps", async () => {
     prismaMock.appUser.findUnique.mockResolvedValueOnce({
       id: "student-1",
@@ -67,6 +123,7 @@ describe("user-repository lookup contract", () => {
       fullName: "Alice Student",
       role: "STUDENT",
       isActive: true,
+      mustChangePassword: false,
       learningStatus: "TRIAL",
       phoneWhatsapp: "+254700000000",
       createdAt: new Date("2026-05-01T10:00:00.000Z"),
@@ -84,6 +141,7 @@ describe("user-repository lookup contract", () => {
         fullName: true,
         role: true,
         isActive: true,
+        mustChangePassword: true,
         learningStatus: true,
         phoneWhatsapp: true,
         createdAt: true,
@@ -96,10 +154,48 @@ describe("user-repository lookup contract", () => {
       fullName: "Alice Student",
       role: "STUDENT",
       isActive: true,
+      mustChangePassword: false,
       learningStatus: "TRIAL",
       phoneWhatsapp: "+254700000000",
       createdAt: expect.any(Date),
       updatedAt: expect.any(Date),
+    });
+  });
+
+  it("findUserForInitialSetup selects the complete server-only setup contract", async () => {
+    prismaMock.appUser.findUnique.mockResolvedValueOnce({
+      id: "admin-1",
+      email: "admin@example.com",
+      fullName: "Admin User",
+      role: "ADMIN",
+      passwordHash: "password-hash",
+      mustChangePassword: true,
+      isActive: true,
+    });
+
+    const { findUserForInitialSetup } = await loadUserRepository();
+    const result = await findUserForInitialSetup("admin-1");
+
+    expect(prismaMock.appUser.findUnique).toHaveBeenCalledWith({
+      where: { id: "admin-1" },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        passwordHash: true,
+        mustChangePassword: true,
+        isActive: true,
+      },
+    });
+    expect(result).toEqual({
+      id: "admin-1",
+      email: "admin@example.com",
+      fullName: "Admin User",
+      role: "ADMIN",
+      passwordHash: "password-hash",
+      mustChangePassword: true,
+      isActive: true,
     });
   });
 

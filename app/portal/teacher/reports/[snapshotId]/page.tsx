@@ -9,6 +9,7 @@ import { exportReportSnapshotPdfAction } from "@/app/portal/teacher/actions/repo
 import { requireRole } from "@/lib/auth/session";
 import { listReportCommentDraftsForTeacher } from "@/lib/repositories/ai-draft-repository";
 import { getReportSnapshotForTeacher } from "@/lib/repositories/report-repository";
+import { preferredStoredFileHref } from "@/lib/security/storage-links";
 
 type PageProps = {
   params: Promise<{ snapshotId: string }> | { snapshotId: string };
@@ -25,12 +26,7 @@ function getRecord(value: unknown): Record<string, unknown> {
 }
 
 function pdfHref(storageKey?: string | null) {
-  const value = storageKey?.trim();
-  if (!value) return null;
-  const normalized = value.replace(/^\/+/, "");
-  if (normalized.startsWith("uploads/")) return `/${normalized}`;
-  if (normalized.startsWith("reports/")) return `/uploads/${normalized}`;
-  return null;
+  return preferredStoredFileHref(storageKey, storageKey);
 }
 
 export default async function TeacherReportSnapshotPage({ params }: PageProps) {

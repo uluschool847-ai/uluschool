@@ -20,16 +20,19 @@ import {
   updateUserProfile,
 } from "@/lib/repositories/portal-repository";
 import { findUserById } from "@/lib/repositories/user-repository";
+import { mailboxSchema } from "@/lib/validations/mailbox";
 
 export type StudentActionState = {
   success: boolean;
   message?: string;
+  accountEmail?: string;
+  temporaryPassword?: string;
   errors?: Record<string, string[] | undefined>;
 };
 
 const studentProfileSchema = z.object({
   fullName: z.string().trim().min(2, "Full name must be at least 2 characters (min 2)."),
-  email: z.string().trim().min(1, "Email is required.").email("Enter a valid email address."),
+  email: z.string().trim().min(1, "Email is required.").pipe(mailboxSchema),
 });
 
 const studentProfileUpdateSchema = studentProfileSchema.extend({
@@ -210,11 +213,12 @@ export async function createStudentAction(
     return { success: false, errors };
   }
 
+  let created: Awaited<ReturnType<typeof createUser>>;
   try {
     if (!session) {
       throw new Error("Failed to create student account.");
     }
-    await prisma.$transaction(async (tx) => {
+    created = await prisma.$transaction(async (tx) => {
       const data = await createUser(
         {
           fullName: parsed.data.fullName,
@@ -239,6 +243,7 @@ export async function createStudentAction(
         },
         tx,
       );
+      return data;
     }, STUDENT_TRANSACTION_OPTIONS);
     revalidatePath("/admin/students");
   } catch (error) {
@@ -260,10 +265,15 @@ export async function createStudentAction(
   }
 
   if (flashMode && successRedirect) {
-    redirect(buildRedirectUrl(successRedirect, "studentMessage", "Student account created."));
+    redirect(buildRedirectUrl(successRedirect, "studentMessage", "Account created."));
   }
 
-  return { success: true, message: "Student account created." };
+  return {
+    success: true,
+    message: "Account created.",
+    accountEmail: created.user.email,
+    temporaryPassword: created.temporaryPassword,
+  };
 }
 
 export async function updateStudentAction(

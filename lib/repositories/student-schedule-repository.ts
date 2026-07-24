@@ -5,7 +5,8 @@ import {
   parseLessonStatus,
 } from "@/lib/lessons/lesson-status";
 import { prisma } from "@/lib/prisma";
-import { safeCourseMaterialHref } from "@/lib/security/course-material-links";
+import { newestAttachmentOrderBy } from "@/lib/repositories/attachment-selection";
+import { preferredStoredFileHref, storageHrefForKey } from "@/lib/security/storage-links";
 
 const DEFAULT_TIMEZONE = "Africa/Nairobi";
 
@@ -224,6 +225,7 @@ function buildLessonInclude(studentId?: string, studentIds?: string[]) {
             mimeType: true,
             size: true,
           },
+          orderBy: newestAttachmentOrderBy(),
         },
       },
       orderBy: { createdAt: "desc" as const },
@@ -319,20 +321,16 @@ function mapLesson(
     materialsCount: lesson._count?.courseMaterials ?? lesson.courseMaterials?.length ?? 0,
     materials: (lesson.courseMaterials ?? []).map((material) => {
       const url = material.fileUrl ?? material.url ?? null;
+      const primaryStorageKey = material.attachments?.[0]?.storageKey;
       return {
         id: material.id,
         title: material.title,
         url,
-        safeFileUrl: safeCourseMaterialHref(url),
+        safeFileUrl: preferredStoredFileHref(primaryStorageKey, url),
         attachments: (material.attachments ?? []).map((attachment) => {
-          const normalized = attachment.storageKey.replace(/^\/+/, "").replace(/^public[\\\/]/, "");
-          const href = normalized.startsWith("uploads/")
-            ? safeCourseMaterialHref(`/${normalized}`)
-            : null;
-
           return {
             filename: attachment.filename,
-            href,
+            href: storageHrefForKey(attachment.storageKey),
             mimeType: attachment.mimeType,
             size: attachment.size,
           };

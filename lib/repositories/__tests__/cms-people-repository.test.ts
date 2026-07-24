@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
 const prismaMock = vi.hoisted(() => ({
   teacher: {
     findMany: vi.fn(),
@@ -174,6 +176,33 @@ describe("cms-repository teachers and testimonials queries", () => {
         subjects: expect.arrayContaining([expect.objectContaining({ name: "Mathematics" })]),
       }),
     );
+  });
+
+  it("preserves canonical, external, root-static, and null photos for active public teachers", async () => {
+    const canonical = storageUrlForKey("public/teachers/admin-1/teacher.webp");
+    const photoUrls = [canonical, "https://images.example.com/teacher.webp", "/teacher.jpg", null];
+    prismaMock.teacher.findMany.mockResolvedValueOnce(
+      photoUrls.map((photoUrl, index) => ({
+        id: `teacher-${index}`,
+        fullName: `Teacher ${index}`,
+        title: "Teacher",
+        bio: "Public profile",
+        photoUrl,
+        cabinetUserId: null,
+        displayOrder: index,
+        isActive: true,
+        updatedAt: new Date("2026-07-14T10:00:00.000Z"),
+        teacherSubjects: [],
+      })),
+    );
+
+    const { getActiveTeachers } = await loadCmsRepository();
+    const results = await getActiveTeachers();
+
+    expect(prismaMock.teacher.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { isActive: true } }),
+    );
+    expect(results.map((teacher) => teacher.photoUrl)).toEqual(photoUrls);
   });
 
   it("getAdminTeachers returns all teachers in admin display order", async () => {

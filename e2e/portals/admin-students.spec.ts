@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 
 const ADMIN_EMAIL = "fixed.admin@uluglobalacademy.com";
 const PASSWORD =
-  process.env.E2E_PORTAL_PASSWORD ?? process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 const FIXED_PARENT_NAME = "Fixed Parent";
 const FIXED_CLASS_TITLE = "IGCSE Mathematics - Algebra";
 const FIXED_CLASS_TEACHER = "Fixed Teacher";
@@ -54,9 +54,19 @@ test.describe("Admin Student Management", () => {
     await page.getByLabel(/phone/i).fill("+254700999000");
     await page.getByRole("button", { name: /create student/i }).click();
 
-    await page.waitForURL(
-      /\/admin\/students(?:\?.*studentMessage=Student%20account%20created\.)?$/,
-    );
+    await expect(page).toHaveURL(/\/admin\/students\/new$/);
+    const credentialsPanel = page.getByRole("region", { name: /^temporary credentials$/i });
+    await expect(credentialsPanel).toBeVisible();
+    const temporaryPasswordLocator = credentialsPanel
+      .locator("dt")
+      .filter({ hasText: /temporary password/i })
+      .locator("xpath=following-sibling::dd[1]/code");
+    await expect(temporaryPasswordLocator).toHaveCount(1);
+    const temporaryPassword = (await temporaryPasswordLocator.textContent())?.trim() ?? "";
+    expect(temporaryPassword).toMatch(/\S+/);
+
+    await page.goto("/admin/students");
+    await expect(page.getByRole("heading", { name: /temporary credentials/i })).toHaveCount(0);
     const registryRow = await openStudentRegistryByEmail(page, email);
     await expect(registryRow).toContainText(fullName);
 

@@ -4,6 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const createStudentActionMock = vi.hoisted(() => vi.fn());
 const updateStudentActionMock = vi.hoisted(() => vi.fn());
+const createFormActionMock = vi.hoisted(() => vi.fn());
+const useActionStateMock = vi.hoisted(() => vi.fn());
+
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return { ...actual, useActionState: useActionStateMock };
+});
 
 vi.mock("@/app/(admin)/admin/students/actions", () => ({
   createStudentAction: createStudentActionMock,
@@ -35,6 +42,7 @@ async function loadStudentForm() {
 describe("StudentForm admin controls", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useActionStateMock.mockReturnValue([{ success: false }, createFormActionMock, false]);
   });
 
   afterEach(() => {
@@ -59,6 +67,9 @@ describe("StudentForm admin controls", () => {
     expect(screen.getByRole("button", { name: /create student/i })).toBeDefined();
     expect(screen.queryByLabelText(/role/i)).toBeNull();
     expect(screen.queryByRole("combobox", { name: /role/i })).toBeNull();
+    expect(document.querySelector('input[name="flash"]')).toBeNull();
+    expect(document.querySelector('input[name="successRedirect"]')).toBeNull();
+    expect(document.querySelector('input[name="errorRedirect"]')).toBeNull();
   }, 15_000);
 
   it("renders edit mode with existing student values", async () => {
@@ -86,6 +97,107 @@ describe("StudentForm admin controls", () => {
     expect(screen.getByRole("button", { name: /save changes|update student/i })).toBeDefined();
     expect(screen.queryByLabelText(/role/i)).toBeNull();
     expect(screen.queryByRole("combobox", { name: /role/i })).toBeNull();
+    expect(document.querySelector('input[name="flash"]')).not.toBeNull();
+    expect(document.querySelector('input[name="successRedirect"]')).not.toBeNull();
+    expect(document.querySelector('input[name="errorRedirect"]')).not.toBeNull();
+  });
+
+  it("shows credentials only for the current create action state and clears them on remount", async () => {
+    useActionStateMock
+      .mockReturnValueOnce([
+        {
+          success: true,
+          message: "Account created.",
+          accountEmail: "alice.student@example.com",
+          temporaryPassword: "UniqueTemporary123_A",
+        },
+        createFormActionMock,
+        false,
+      ])
+      .mockReturnValueOnce([{ success: false }, createFormActionMock, false]);
+    const { StudentForm } = await loadStudentForm();
+
+    const { unmount } = render(
+      <StudentForm
+        mode="create"
+        successRedirect="/admin/students"
+        errorRedirect="/admin/students/new"
+      />,
+    );
+
+    expect(screen.getByText("alice.student@example.com")).toBeDefined();
+    expect(screen.getByText("UniqueTemporary123_A")).toBeDefined();
+
+    unmount();
+    render(
+      <StudentForm
+        mode="create"
+        successRedirect="/admin/students"
+        errorRedirect="/admin/students/new"
+      />,
+    );
+
+    expect(screen.queryByText("UniqueTemporary123_A")).toBeNull();
+  });
+
+  it("disables create submission while pending and after credentials are returned", async () => {
+    const { StudentForm } = await loadStudentForm();
+    useActionStateMock.mockReturnValueOnce([{ success: false }, createFormActionMock, true]);
+
+    const { rerender } = render(
+      <StudentForm
+        mode="create"
+        successRedirect="/admin/students"
+        errorRedirect="/admin/students/new"
+      />,
+    );
+
+    expect(
+      (screen.getByRole("button", { name: /create student/i }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    useActionStateMock.mockReturnValueOnce([
+      {
+        success: true,
+        accountEmail: "alice.student@example.com",
+        temporaryPassword: "UniqueTemporary123_A",
+      },
+      createFormActionMock,
+      false,
+    ]);
+    rerender(
+      <StudentForm
+        mode="create"
+        successRedirect="/admin/students"
+        errorRedirect="/admin/students/new"
+      />,
+    );
+
+    expect(
+      (screen.getByRole("button", { name: /create student/i }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("keeps edit submission enabled when create state is pending", async () => {
+    useActionStateMock.mockReturnValueOnce([{ success: false }, createFormActionMock, true]);
+    const { StudentForm } = await loadStudentForm();
+
+    render(
+      <StudentForm
+        mode="edit"
+        student={{
+          id: "student-1",
+          fullName: "Alice Student",
+          email: "alice.student@example.com",
+        }}
+        successRedirect="/admin/students"
+        errorRedirect="/admin/students/student-1/edit"
+      />,
+    );
+
+    expect(
+      (screen.getByRole("button", { name: /save changes/i }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 
   it("shows flash success and error feedback visibly", async () => {

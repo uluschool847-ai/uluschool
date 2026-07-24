@@ -1,10 +1,8 @@
 import type { Metadata } from "next";
 
-export const siteConfig = {
-  name: "mathSchool",
-  description: "Advanced online mathematics education for ambitious students.",
-  url: process.env.NEXT_PUBLIC_APP_URL || "https://mathschool.example.com",
-};
+import { siteConfig } from "@/lib/content";
+
+export { siteConfig };
 
 type StructuredDataPayload = {
   name?: string;
@@ -25,6 +23,8 @@ export function constructMetadata({
   image?: string;
   noIndex?: boolean;
 } = {}): Metadata {
+  const isIndexable = (process.env.APP_ENV ?? "") === "production" && !noIndex;
+
   return {
     title: {
       default: title,
@@ -48,8 +48,8 @@ export function constructMetadata({
       creator: "@mathschool",
     },
     robots: {
-      index: !noIndex,
-      follow: !noIndex,
+      index: isIndexable,
+      follow: isIndexable,
     },
     metadataBase: new URL(siteConfig.url),
   };

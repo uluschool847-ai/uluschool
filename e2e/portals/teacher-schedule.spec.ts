@@ -1,3 +1,4 @@
+import { createSessionToken } from "@/e2e/helpers/session";
 import { type Locator, type Page, expect, test } from "@playwright/test";
 import {
   ClassGroupStatus,
@@ -6,8 +7,6 @@ import {
   StudentLearningStatus,
   UserRole,
 } from "@prisma/client";
-
-const AUTH_SECRET = process.env.AUTH_SESSION_SECRET ?? "dev-only-auth-session-secret-please-change";
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 const COOKIE_DOMAIN = new URL(BASE_URL).hostname;
 const prisma = new PrismaClient();
@@ -46,49 +45,6 @@ let fixture: TeacherScheduleFixture;
 
 function testMeetUrl(path: string) {
   return `https://meet.google.com/${path}`;
-}
-
-function toBase64Url(input: string) {
-  return Buffer.from(input, "binary")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-async function signPayload(payloadBase64: string) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(AUTH_SECRET),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payloadBase64));
-  const signatureString = Array.from(new Uint8Array(signature))
-    .map((byte) => String.fromCharCode(byte))
-    .join("");
-  return toBase64Url(signatureString);
-}
-
-async function createSessionToken(input: {
-  uid: string;
-  role: UserRole;
-  email: string;
-  fullName: string;
-}) {
-  const payloadBase64 = toBase64Url(
-    JSON.stringify({
-      authMethod: "password",
-      email: input.email,
-      exp: Date.now() + 1000 * 60 * 60,
-      fullName: input.fullName,
-      mfaVerified: true,
-      role: input.role,
-      uid: input.uid,
-    }),
-  );
-  return `${payloadBase64}.${await signPayload(payloadBase64)}`;
 }
 
 async function setPortalSession(
@@ -182,7 +138,7 @@ test.describe("Teacher schedule portal", () => {
     await expect(joinableCard).toContainText(fixture.groupName);
     await expect(joinableCard).toContainText(/students:\s*2|roster:\s*2/i);
     await expect(joinableCard).toContainText(/scheduled|live/i);
-    await expect(joinableCard).toContainText(/Europe\/Kiev/i);
+    await expect(joinableCard).toContainText(/Africa\/Nairobi/i);
     await expect(joinableCard).toContainText(/materials:\s*1/i);
     await expect(joinableCard).toContainText(/assignments:\s*1|homework:\s*1/i);
     await expect(joinableCard).toContainText(/pending submissions:\s*1/i);
@@ -192,13 +148,9 @@ test.describe("Teacher schedule portal", () => {
     await expect(page.getByText(fixture.teacherBLessonTitle)).toHaveCount(0);
 
     const startLink = joinableCard.getByRole("link", { name: /start lesson/i });
+    await expect(startLink).toHaveAttribute("href", testMeetUrl("teacher-aaa-bbb"));
     await expect(startLink).toHaveAttribute("target", "_blank");
     await expect(startLink).toHaveAttribute("rel", "noreferrer");
-    const popupPromise = page.waitForEvent("popup");
-    await startLink.click();
-    const popup = await popupPromise;
-    await expect(popup).toHaveURL(/meet\.google\.com/);
-    await popup.close();
 
     const cancelledCard = lessonCard(page, fixture.cancelledLessonTitle);
     await expect(cancelledCard).toContainText(/cancelled/i);

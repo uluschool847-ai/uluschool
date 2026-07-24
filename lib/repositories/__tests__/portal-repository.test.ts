@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { encodeStorageKey, storageUrlForKey } from "@/lib/storage/storage-url";
+
 const prismaMock = vi.hoisted(() => ({
   appUser: {
     count: vi.fn(),
@@ -80,8 +82,8 @@ type PortalRepositoryModule = {
       isActive: boolean;
       learningStatus?: StudentLearningStatus;
     };
-    defaultPassword: string;
-    mustResetPassword: boolean;
+    temporaryPassword: string;
+    mustChangePassword: true;
   }>;
   updateUserProfile: (input: {
     userId: string;
@@ -307,10 +309,17 @@ async function loadPortalRepository() {
   return import(/* @vite-ignore */ specifier) as Promise<PortalRepositoryModule>;
 }
 
+function mailboxAddress(length: 254 | 255) {
+  const address = `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(
+    length === 254 ? 61 : 62,
+  )}`;
+  expect(address).toHaveLength(length);
+  return address;
+}
+
 describe("portal-repository admin user management", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    process.env.DEFAULT_PORTAL_PASSWORD = "ChangeMe123!";
     hashPasswordMock.mockResolvedValue("hashed-default-password");
   });
 
@@ -397,7 +406,7 @@ describe("portal-repository admin user management", () => {
     );
   });
 
-  it("createUser hashes the default credential and creates an active student account with lifecycle status", async () => {
+  it("createUser issues a temporary credential and requires a password change for a new student", async () => {
     prismaMock.appUser.findUnique.mockResolvedValueOnce(null);
     prismaMock.appUser.create.mockResolvedValueOnce({
       id: "student-1",
@@ -415,21 +424,22 @@ describe("portal-repository admin user management", () => {
       role: "STUDENT",
     });
 
-    expect(hashPasswordMock).toHaveBeenCalledWith("ChangeMe123!");
+    expect(hashPasswordMock).toHaveBeenCalledWith(expect.stringMatching(/^[A-Za-z0-9_-]{20}$/));
     expect(prismaMock.appUser.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         email: "student@example.com",
         fullName: "Student One",
         role: "STUDENT",
         passwordHash: "hashed-default-password",
+        mustChangePassword: true,
         isActive: true,
         learningStatus: "ACTIVE",
       }),
     });
     expect(result).toEqual({
       user: expect.objectContaining({ id: "student-1", email: "student@example.com" }),
-      defaultPassword: "ChangeMe123!",
-      mustResetPassword: true,
+      temporaryPassword: expect.stringMatching(/^[A-Za-z0-9_-]{20}$/),
+      mustChangePassword: true,
     });
   });
 
@@ -501,6 +511,44 @@ describe("portal-repository admin user management", () => {
       }),
     );
   });
+
+  it.each([
+    [254, true],
+    [255, false],
+  ] as const)(
+    "createUser defensively accepts 254 and rejects 255 mailbox characters: %i / %s",
+    async (length, accepted) => {
+      const email = mailboxAddress(length);
+      if (accepted) {
+        prismaMock.appUser.findUnique.mockResolvedValueOnce(null);
+        prismaMock.appUser.create.mockResolvedValueOnce({
+          id: "student-1",
+          email,
+          fullName: "Student One",
+          role: "STUDENT",
+          isActive: true,
+          learningStatus: "ACTIVE",
+        });
+      }
+
+      const { createUser } = await loadPortalRepository();
+      const operation = createUser({ email, fullName: "Student One", role: "STUDENT" });
+
+      if (accepted) {
+        await expect(operation).resolves.toEqual(
+          expect.objectContaining({ user: expect.objectContaining({ email }) }),
+        );
+        expect(prismaMock.appUser.create).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ email }) }),
+        );
+      } else {
+        await expect(operation).rejects.toThrow(/email|mailbox|invalid/i);
+        expect(prismaMock.appUser.findUnique).not.toHaveBeenCalled();
+        expect(hashPasswordMock).not.toHaveBeenCalled();
+        expect(prismaMock.appUser.create).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it.each(["TEACHER", "ADMIN"] as const)(
     "createUser keeps learningStatus student-only when creating a %s account",
@@ -610,6 +658,55 @@ describe("portal-repository admin user management", () => {
       phoneWhatsapp: "+254711111111",
     });
   });
+
+  it.each([
+    [254, true],
+    [255, false],
+  ] as const)(
+    "updateUserProfile defensively accepts 254 and rejects 255 mailbox characters: %i / %s",
+    async (length, accepted) => {
+      const email = mailboxAddress(length);
+      if (accepted) {
+        prismaMock.appUser.findUnique
+          .mockResolvedValueOnce({ id: "student-1", role: "STUDENT" })
+          .mockResolvedValueOnce(null);
+        prismaMock.appUser.update.mockResolvedValueOnce({
+          id: "student-1",
+          email,
+          fullName: "Student One",
+          phoneWhatsapp: null,
+        });
+      } else {
+        prismaMock.appUser.findUnique.mockResolvedValueOnce({
+          id: "student-1",
+          role: "STUDENT",
+        });
+      }
+
+      const { updateUserProfile } = await loadPortalRepository();
+      const operation = updateUserProfile({
+        userId: "student-1",
+        fullName: "Student One",
+        email,
+        phoneWhatsapp: null,
+      });
+
+      if (accepted) {
+        await expect(operation).resolves.toEqual(expect.objectContaining({ email }));
+        expect(prismaMock.appUser.update).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ email }) }),
+        );
+      } else {
+        await expect(operation).rejects.toThrow(/email|mailbox|invalid/i);
+        expect(prismaMock.appUser.findUnique).toHaveBeenCalledTimes(1);
+        expect(prismaMock.appUser.findUnique).toHaveBeenCalledWith({
+          where: { id: "student-1" },
+          select: { id: true, role: true },
+        });
+        expect(prismaMock.appUser.update).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it("updateUserProfile rejects duplicate emails before updating the student profile", async () => {
     prismaMock.appUser.findUnique.mockResolvedValueOnce({
@@ -1552,7 +1649,6 @@ describe("portal-repository admin user management", () => {
 describe("portal-repository admin parent management", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    process.env.DEFAULT_PORTAL_PASSWORD = "ChangeMe123!";
     hashPasswordMock.mockResolvedValue("hashed-default-password");
   });
 
@@ -1759,8 +1855,8 @@ describe("portal-repository admin parent management", () => {
     );
     expect(result).toEqual(
       expect.objectContaining({
-        defaultPassword: "ChangeMe123!",
-        mustResetPassword: true,
+        temporaryPassword: expect.stringMatching(/^[A-Za-z0-9_-]{20}$/),
+        mustChangePassword: true,
         user: expect.objectContaining({
           role: "PARENT",
         }),
@@ -1938,6 +2034,30 @@ describe("portal-repository teacher portal visibility", () => {
     const endAt = new Date("2026-06-01T10:00:00.000Z");
     const dueDate = new Date("2026-06-03T09:00:00.000Z");
     const submittedAt = new Date("2026-05-31T12:00:00.000Z");
+    const submissionStorageKey = "private/teachers/teacher-john/submissions/submission-sofia.pdf";
+    const externalHref =
+      "https://CDN.Example.com/Files/Submission%20One.pdf?download=1#teacher-copy";
+    const crossPurposeHref = `/api/public-files/${encodeStorageKey(submissionStorageKey)}`;
+    const submissionRecord = (
+      id: string,
+      contentUrl: string,
+      attachments: Array<{ storageKey: string; id?: string; createdAt?: Date }> = [],
+    ) => ({
+      id,
+      contentUrl,
+      submittedAt,
+      attachments,
+      student: {
+        id: `student-${id}`,
+        fullName: `Student ${id}`,
+        email: `${id}@example.com`,
+      },
+      assignment: {
+        id: "assignment-math",
+        title: "Math Homework",
+        scheduledClass: { id: "class-math", title: "Math - Group A", classGroup: null },
+      },
+    });
 
     prismaMock.classGroup.count.mockResolvedValueOnce(1);
     prismaMock.scheduledClass.count.mockResolvedValueOnce(1);
@@ -1979,20 +2099,30 @@ describe("portal-repository teacher portal visibility", () => {
     ]);
     prismaMock.submission.findMany.mockResolvedValueOnce([
       {
-        id: "submission-sofia",
-        contentUrl: "/uploads/sofia.pdf",
-        submittedAt,
+        ...submissionRecord("submission-sofia", "https://cdn.example.com/stale-submission.pdf", [
+          {
+            id: "attachment-z",
+            storageKey: submissionStorageKey,
+            createdAt: new Date("2026-05-31T11:00:00.000Z"),
+          },
+          {
+            id: "attachment-a",
+            storageKey: "private/teachers/teacher-john/submissions/obsolete.pdf",
+            createdAt: new Date("2026-05-31T11:00:00.000Z"),
+          },
+        ]),
         student: {
           id: "student-sofia",
           fullName: "Sofia",
           email: "sofia@example.com",
         },
-        assignment: {
-          id: "assignment-math",
-          title: "Math Homework",
-          scheduledClass: { id: "class-math", title: "Math - Group A", classGroup: null },
-        },
       },
+      submissionRecord("submission-external", externalHref),
+      submissionRecord(
+        "submission-malformed",
+        "private/teachers/teacher-john/submissions/file name.pdf",
+      ),
+      submissionRecord("submission-cross-purpose", crossPurposeHref),
     ]);
     prismaMock.scheduledClass.findMany.mockResolvedValueOnce([
       {
@@ -2062,6 +2192,11 @@ describe("portal-repository teacher portal visibility", () => {
         }),
       }),
     );
+    expect(prismaMock.submission.findMany.mock.calls[0]?.[0]?.select?.attachments).toEqual({
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { storageKey: true },
+      take: 1,
+    });
     expect(result.classes).toEqual([
       expect.objectContaining({
         id: "class-math",
@@ -2082,13 +2217,19 @@ describe("portal-repository teacher portal visibility", () => {
         studentCount: 2,
       }),
     ]);
-    expect(result.pendingSubmissions).toEqual([
-      expect.objectContaining({
-        studentName: "Sofia",
-        assignmentTitle: "Math Homework",
-        classTitle: "Math - Group A",
-      }),
-    ]);
+    expect(result.pendingSubmissions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          contentUrl: storageUrlForKey(submissionStorageKey),
+          studentName: "Sofia",
+          assignmentTitle: "Math Homework",
+          classTitle: "Math - Group A",
+        }),
+        expect.objectContaining({ id: "submission-external", contentUrl: externalHref }),
+        expect.objectContaining({ id: "submission-malformed", contentUrl: null }),
+        expect.objectContaining({ id: "submission-cross-purpose", contentUrl: null }),
+      ]),
+    );
     expect(JSON.stringify(result)).not.toContain("Other Teacher");
     expect(JSON.stringify(result)).not.toContain("Unassigned Student");
   });

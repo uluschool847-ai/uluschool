@@ -2,11 +2,12 @@
 
 import { verifyPassword } from "@/lib/auth/password";
 import {
-  createAdminPendingTwoFactor,
+  clearInitialSetupSession,
+  clearSession,
+  createInitialSetupSession,
   createSession,
   getPortalRedirectPath,
 } from "@/lib/auth/session";
-import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 import { logAuthEvent } from "@/lib/repositories/admin-audit-repository";
 import { findUserByEmail } from "@/lib/repositories/user-repository";
 import {
@@ -15,16 +16,18 @@ import {
   recordSuccessfulLogin,
 } from "@/lib/security/rate-limit";
 import { type LoginFormState, loginSchema } from "@/lib/validations/auth";
-import { UserRole } from "@prisma/client";
 import { redirect } from "next/navigation";
 
 export async function loginAction(
   prevState: LoginFormState,
   formData: FormData,
 ): Promise<LoginFormState> {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
-  const nextPath = formData.get("next") as string | null;
+  const emailValue = formData.get("email");
+  const passwordValue = formData.get("password");
+  const nextValue = formData.get("next");
+  const email = typeof emailValue === "string" ? emailValue : "";
+  const password = typeof passwordValue === "string" ? passwordValue : "";
+  const nextPath = typeof nextValue === "string" ? nextValue : undefined;
   const identifier = email.trim().toLowerCase();
 
   const parsed = loginSchema.safeParse({ email, password });
@@ -91,95 +94,33 @@ export async function loginAction(
   }
 
   recordSuccessfulLogin(identifier);
-  await logAuthEvent({
-    eventType: "LOGIN_SUCCESS",
-    userId: user.id,
-    identifier,
-    timestamp: new Date(),
-  });
 
-  if (user.role === UserRole.ADMIN) {
-    const require2FA = (process.env.ADMIN_REQUIRE_2FA ?? "true") !== "false";
-    if (require2FA) {
-      if (user.twoFactorEnabled) {
-        await createAdminAuditLog({
-          adminUserId: user.id,
-          action: "ADMIN_LOGIN_PENDING_2FA",
-          targetType: "AUTH",
-          meta: {
-            ipAddress: "127.0.0.1",
-            userAgent: "unknown",
-          },
-        });
+  await clearSession();
+  await clearInitialSetupSession();
 
-        await createAdminPendingTwoFactor({ uid: user.id, email: user.email });
-
-        const nextQuery = nextPath ? `?next=${encodeURIComponent(nextPath)}` : "";
-        redirect(`/portal/login/verify-2fa${nextQuery}`);
-      }
-
-      if ((process.env.NODE_ENV ?? "development") !== "production") {
-        await createAdminAuditLog({
-          adminUserId: user.id,
-          action: "ADMIN_LOGIN_2FA_REQUIRED_DEV_BYPASS",
-          targetType: "AUTH",
-          meta: {
-            ipAddress: "127.0.0.1",
-            userAgent: "dev-bypass",
-            details: { note: "Bypassed 2FA UI for dev." },
-          },
-        });
-
-        await createSession({
-          uid: user.id,
-          role: user.role,
-          email: user.email,
-          fullName: user.fullName,
-          mfaVerified: true,
-          authMethod: "password",
-        });
-
-        const nextQuery = nextPath ? `&next=${encodeURIComponent(nextPath)}` : "";
-        redirect(`/admin/security?setup2fa=required${nextQuery}`);
-      }
-
-      return {
-        success: false,
-        message: "Admin 2FA is required. Contact an administrator to finish setup.",
-      };
-    }
-
-    // 2FA Disabled
-    await createAdminAuditLog({
-      adminUserId: user.id,
-      action: "ADMIN_LOGIN_PASSWORD_ONLY",
-      targetType: "AUTH",
-      meta: {
-        ipAddress: "127.0.0.1",
-        userAgent: "unknown",
-      },
-    });
-
-    await createSession({
+  if (user.mustChangePassword) {
+    await createInitialSetupSession({
       uid: user.id,
-      role: user.role,
       email: user.email,
-      fullName: user.fullName,
-      mfaVerified: false,
-      authMethod: "password",
+      role: user.role,
+      ...(nextPath ? { nextPath } : {}),
     });
-
-    redirect(getPortalRedirectPath(user.role, nextPath));
+    redirect("/portal/setup/password");
   }
 
-  // Non-Admin Login
   await createSession({
     uid: user.id,
     role: user.role,
     email: user.email,
     fullName: user.fullName,
-    mfaVerified: true,
     authMethod: "password",
+  });
+  await logAuthEvent({
+    eventType: "LOGIN_SUCCESS",
+    userId: user.id,
+    identifier,
+    metadata: { authenticationStage: "final", authMethod: "password" },
+    timestamp: new Date(),
   });
 
   redirect(getPortalRedirectPath(user.role, nextPath));

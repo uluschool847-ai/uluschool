@@ -4,6 +4,8 @@ import { notFound } from "next/navigation";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
 const requireRoleMock = vi.hoisted(() => vi.fn());
 const getStudentScheduleLessonMock = vi.hoisted(() => vi.fn());
 const canJoinLessonMock = vi.hoisted(() => vi.fn());
@@ -136,7 +138,7 @@ describe("Student schedule lesson detail page", () => {
     expect(screen.getAllByText(/igcse/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/jane teacher/i)).toBeDefined();
     expect(screen.getByText(/igcse mathematics group a/i)).toBeDefined();
-    expect(screen.getByText(/europe\/kiev/i)).toBeDefined();
+    expect(screen.getByText(/africa\/nairobi/i)).toBeDefined();
     expect(screen.getAllByText(/cancelled/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/teacher unavailable/i)).toBeDefined();
     expect(screen.getByText(/focus on factoring strategies/i)).toBeDefined();
@@ -195,6 +197,32 @@ describe("Student schedule lesson detail page", () => {
     expect(joinLink).toHaveProperty("target", "_blank");
     expect(joinLink).toHaveProperty("rel", "noreferrer");
     expect(container.textContent).not.toContain("https://meet.google.com/abc-defg-hij");
+  });
+
+  it("renders canonical private material links from the scoped schedule DTO", async () => {
+    const href = storageUrlForKey("private/teachers/teacher-1/materials/schedule.pdf");
+    getStudentScheduleLessonMock.mockResolvedValueOnce(
+      lessonDetail({
+        materials: [
+          {
+            id: "material-current",
+            title: "Private schedule notes",
+            url: href,
+            safeFileUrl: href,
+            attachments: [{ filename: "schedule.pdf", href }],
+          },
+        ],
+      }),
+    );
+
+    const page = await loadStudentScheduleDetailPage();
+    render(await page.default({ params: { lessonId: "lesson-1" } }));
+
+    expect(screen.getByRole("link", { name: /private schedule notes/i })).toHaveAttribute(
+      "href",
+      href,
+    );
+    expect(screen.getByRole("link", { name: /schedule\.pdf/i })).toHaveAttribute("href", href);
   });
 
   it("shows grade without feedback when graded submission feedback is null", async () => {

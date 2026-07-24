@@ -1,16 +1,32 @@
+// @vitest-environment node
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const uploadMock = vi.hoisted(() => vi.fn());
 const getURLMock = vi.hoisted(() => vi.fn());
 const deleteMock = vi.hoisted(() => vi.fn());
+const getSessionMock = vi.hoisted(() => vi.fn());
+const consumePendingUploadRequestRateLimitMock = vi.hoisted(() => vi.fn());
+const releasePendingUploadMock = vi.hoisted(() => vi.fn());
+const reservePendingUploadMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/storage", () => ({
-  // RED phase: contract we want route to consume
+vi.mock("@/lib/storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/storage")>()),
   createStorageService: () => ({
     upload: uploadMock,
     getURL: getURLMock,
     delete: deleteMock,
   }),
+}));
+
+vi.mock("@/lib/auth/session", () => ({
+  getSession: getSessionMock,
+}));
+
+vi.mock("@/lib/repositories/pending-upload-repository", () => ({
+  consumePendingUploadRequestRateLimit: consumePendingUploadRequestRateLimitMock,
+  releasePendingUpload: releasePendingUploadMock,
+  reservePendingUpload: reservePendingUploadMock,
 }));
 
 vi.mock("next/server", () => ({
@@ -23,75 +39,238 @@ vi.mock("next/server", () => ({
   },
 }));
 
+import { DELETE, POST } from "@/app/api/upload/route";
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
+const MAX_UPLOAD_FILE_COUNT = 10;
+const MAX_UPLOAD_AGGREGATE_BYTES = 20 * 1024 * 1024;
+const MAX_UPLOAD_REQUEST_BYTES = 21 * 1024 * 1024;
+
+function requestFromForm(form: FormData, headers?: HeadersInit) {
+  return new Request("http://localhost/api/upload", {
+    method: "POST",
+    headers,
+    body: form,
+  });
+}
+
+function buildUploadRequest(
+  input: {
+    roleHeader?: string;
+    purpose?: string;
+    file?: File;
+  } = {},
+) {
+  const form = new FormData();
+  form.append("purpose", input.purpose ?? "course-material");
+  const file = input.file ?? new File(["content"], "lesson.pdf", { type: "application/pdf" });
+  form.append("file", file, file.name);
+
+  return requestFromForm(form, input.roleHeader ? { "x-role": input.roleHeader } : undefined);
+}
+
 describe("app/api/upload/route local-first upload integration", () => {
   beforeEach(() => {
-    vi.resetModules();
     vi.resetAllMocks();
+    getSessionMock.mockResolvedValue({
+      purpose: "SESSION",
+      version: 3,
+      uid: "teacher-1",
+      role: "TEACHER",
+      email: "teacher@example.com",
+      exp: Date.now() + 60_000,
+      authMethod: "password",
+    });
+    reservePendingUploadMock.mockResolvedValue(undefined);
+    releasePendingUploadMock.mockResolvedValue({ claimed: true, deleted: true });
   });
 
-  it("returns 201 with local path for DEVELOPER role happy path", async () => {
-    uploadMock.mockResolvedValueOnce("uploads/dev/1234.pdf");
-    getURLMock.mockReturnValueOnce("/public/uploads/dev/1234.pdf");
-
-    const { POST } = await import("@/app/api/upload/route");
-
-    const form = new FormData();
-    form.append(
-      "file",
-      new File(["hello"], "homework.pdf", { type: "application/pdf" }),
-      "homework.pdf",
-    );
+  it("returns 201 with upload metadata for an authorized teacher", async () => {
+    const storageKey = "private/teachers/teacher-1/materials/1234-homework.pdf";
+    const publicUrl = storageUrlForKey(storageKey);
+    uploadMock.mockResolvedValueOnce(storageKey);
+    getURLMock.mockReturnValueOnce(publicUrl);
 
     const response = await POST(
-      new Request("http://localhost/api/upload", {
-        method: "POST",
-        headers: { "x-role": "DEVELOPER" },
-        body: form,
+      buildUploadRequest({
+        file: new File(["hello"], "homework.pdf", { type: "application/pdf" }),
       }),
     );
 
     expect(response.status).toBe(201);
-    expect(await response.json()).toEqual({
-      success: true,
-      fileId: "uploads/dev/1234.pdf",
-      url: "/public/uploads/dev/1234.pdf",
+    expect(uploadMock).toHaveBeenCalledWith(expect.any(File), {
+      filename: "homework.pdf",
+      namespace: "private/teachers/teacher-1/materials",
+      contentType: "application/pdf",
     });
-  });
-
-  it("should reject uploads from roles outside allowed policy", async () => {
-    const { POST } = await import("@/app/api/upload/route");
-
-    const form = new FormData();
-    form.append(
-      "file",
-      new File(["hello"], "homework.pdf", { type: "application/pdf" }),
-      "homework.pdf",
-    );
-
-    const response = await POST(
-      new Request("http://localhost/api/upload", {
-        method: "POST",
-        headers: { "x-role": "STUDENT" },
-        body: form,
+    expect(reservePendingUploadMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerId: "teacher-1",
+        purpose: "course-material",
+        storageKey,
+        filename: "homework.pdf",
+        mimeType: "application/pdf",
+        byteSize: 5,
       }),
     );
+    expect(uploadMock.mock.invocationCallOrder[0]).toBeLessThan(
+      reservePendingUploadMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(await response.json()).toEqual(
+      expect.objectContaining({
+        success: true,
+        fileId: storageKey,
+        url: publicUrl,
+        storageKey,
+        publicUrl,
+        filename: expect.any(String),
+        mimeType: "application/pdf",
+        size: expect.any(Number),
+      }),
+    );
+  });
+
+  it("returns 401 without a revalidated session", async () => {
+    getSessionMock.mockResolvedValueOnce(null);
+
+    const response = await POST(buildUploadRequest({ roleHeader: "TEACHER" }));
+
+    expect(response.status).toBe(401);
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["STUDENT", "PARENT"])("returns 403 for %s", async (role) => {
+    getSessionMock.mockResolvedValueOnce({
+      purpose: "SESSION",
+      version: 3,
+      uid: `${role.toLowerCase()}-1`,
+      role,
+      email: `${role.toLowerCase()}@example.com`,
+      exp: Date.now() + 60_000,
+      authMethod: "password",
+    });
+
+    const response = await POST(buildUploadRequest({ roleHeader: "TEACHER" }));
 
     expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({
-      success: false,
-      error: expect.stringMatching(/(forbidden|role|policy)/i),
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("returns the thirty-first owner request as 429 without reading or cloning its body", async () => {
+    consumePendingUploadRequestRateLimitMock.mockImplementationOnce(() => {
+      throw new Error("rate limited");
     });
+    const bodyRead = vi.fn();
+    const clone = vi.fn();
+    const request = {
+      headers: new Headers(),
+      get body() {
+        bodyRead();
+        return null;
+      },
+      clone,
+    } as unknown as Request;
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({ success: false, error: "Upload failed" });
+    expect(consumePendingUploadRequestRateLimitMock).toHaveBeenCalledWith("teacher-1");
+    expect(bodyRead).not.toHaveBeenCalled();
+    expect(clone).not.toHaveBeenCalled();
+  });
+
+  it("ignores a forged x-role header", async () => {
+    getSessionMock.mockResolvedValueOnce(null);
+
+    const response = await POST(buildUploadRequest({ roleHeader: "TEACHER" }));
+
+    expect(response.status).toBe(401);
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a teacher upload for an unapproved purpose", async () => {
+    const response = await POST(buildUploadRequest({ purpose: "teacher-photo" }));
+
+    expect(response.status).toBe(403);
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["course-material", "teacher-photo"])(
+    "allows an admin upload for %s",
+    async (purpose) => {
+      getSessionMock.mockResolvedValueOnce({
+        purpose: "SESSION",
+        version: 3,
+        uid: "admin-1",
+        role: "ADMIN",
+        email: "admin@example.com",
+        exp: Date.now() + 60_000,
+        authMethod: "password",
+      });
+      const storageKey =
+        purpose === "teacher-photo"
+          ? "public/teachers/admin-1/00000000-0000-4000-8000-000000000001-teacher-photo.pdf"
+          : "private/teachers/admin-1/materials/00000000-0000-4000-8000-000000000001-course-material.pdf";
+      const publicUrl = storageUrlForKey(storageKey);
+      uploadMock.mockResolvedValueOnce(storageKey);
+      getURLMock.mockReturnValueOnce(publicUrl);
+
+      const response = await POST(buildUploadRequest({ purpose }));
+
+      expect(response.status).toBe(201);
+      expect(uploadMock).toHaveBeenCalledWith(expect.any(File), {
+        filename: "lesson.pdf",
+        namespace:
+          purpose === "teacher-photo"
+            ? "public/teachers/admin-1"
+            : "private/teachers/admin-1/materials",
+        contentType: "application/pdf",
+      });
+      expect(await response.json()).toEqual(
+        expect.objectContaining({
+          success: true,
+          storageKey,
+          publicUrl,
+          filename: expect.any(String),
+          mimeType: "application/pdf",
+          size: expect.any(Number),
+        }),
+      );
+    },
+  );
+
+  it("rejects an admin upload for an unapproved purpose", async () => {
+    getSessionMock.mockResolvedValueOnce({
+      purpose: "SESSION",
+      version: 3,
+      uid: "admin-1",
+      role: "ADMIN",
+      email: "admin@example.com",
+      exp: Date.now() + 60_000,
+      authMethod: "password",
+    });
+
+    const response = await POST(buildUploadRequest({ purpose: "profile-photo" }));
+
+    expect(response.status).toBe(403);
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown upload purpose", async () => {
+    const response = await POST(buildUploadRequest({ purpose: "profile-photo" }));
+
+    expect(response.status).toBe(403);
+    expect(uploadMock).not.toHaveBeenCalled();
   });
 
   it("rejects request when file is missing", async () => {
-    const { POST } = await import("@/app/api/upload/route");
-
     const form = new FormData();
+    form.append("purpose", "course-material");
 
     const response = await POST(
       new Request("http://localhost/api/upload", {
         method: "POST",
-        headers: { "x-role": "DEVELOPER" },
         body: form,
       }),
     );
@@ -104,13 +283,10 @@ describe("app/api/upload/route local-first upload integration", () => {
   });
 
   it("should handle malformed multipart payload with 400", async () => {
-    const { POST } = await import("@/app/api/upload/route");
-
     const response = await POST(
       new Request("http://localhost/api/upload", {
         method: "POST",
         headers: {
-          "x-role": "DEVELOPER",
           "content-type": "multipart/form-data; boundary=broken",
         },
         body: "--broken\r\nnot-valid-form-data" as BodyInit,
@@ -122,18 +298,140 @@ describe("app/api/upload/route local-first upload integration", () => {
       success: false,
       error: expect.stringMatching(/(multipart|payload|bad request)/i),
     });
+    expect(consumePendingUploadRequestRateLimitMock).toHaveBeenCalledWith("teacher-1");
+  });
+
+  it("rejects a declared oversized body before formData parsing", async () => {
+    const formData = vi.fn(async () => new FormData());
+    const response = await POST({
+      headers: new Headers({ "content-length": String(MAX_UPLOAD_REQUEST_BYTES + 1) }),
+      formData,
+    } as unknown as Request);
+
+    expect(response.status).toBe(413);
+    expect(formData).not.toHaveBeenCalled();
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed instead of parsing an unbounded bodyless formData shim", async () => {
+    const form = new FormData();
+    form.append("purpose", "course-material");
+    form.append("file", new File(["note"], "note.txt", { type: "text/plain" }));
+    const formData = vi.fn(async () => form);
+
+    const response = await POST({ headers: new Headers(), formData } as unknown as Request);
+
+    expect(response.status).toBe(400);
+    expect(formData).not.toHaveBeenCalled();
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized stream when Content-Length is absent", async () => {
+    const request = new Request("http://localhost/api/upload", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=bounded" },
+      body: new Uint8Array(MAX_UPLOAD_REQUEST_BYTES + 1),
+    });
+    expect(request.headers.has("content-length")).toBe(false);
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(413);
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects excessive file count before any storage upload", async () => {
+    const form = new FormData();
+    form.append("purpose", "course-material");
+    for (let index = 0; index <= MAX_UPLOAD_FILE_COUNT; index += 1) {
+      form.append(
+        "files",
+        new File(["note"], `note-${index}.txt`, { type: "text/plain" }),
+        `note-${index}.txt`,
+      );
+    }
+
+    const response = await POST(requestFromForm(form));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ success: false, error: "Too many files" });
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("counts files in unexpected multipart fields toward the file-count limit", async () => {
+    const form = new FormData();
+    form.append("purpose", "course-material");
+    form.append("file", new File(["note"], "note.txt", { type: "text/plain" }));
+    for (let index = 0; index < MAX_UPLOAD_FILE_COUNT; index += 1) {
+      form.append(
+        `unexpected-${index}`,
+        new File(["note"], `extra-${index}.txt`, { type: "text/plain" }),
+      );
+    }
+
+    const response = await POST(requestFromForm(form));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ success: false, error: "Too many files" });
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects excessive aggregate file bytes before any storage upload", async () => {
+    const form = new FormData();
+    form.append("purpose", "course-material");
+    const perFileBytes = Math.floor(MAX_UPLOAD_AGGREGATE_BYTES / 5) + 1;
+    for (let index = 0; index < 5; index += 1) {
+      form.append(
+        "files",
+        new File([new Uint8Array(perFileBytes)], `bundle-${index}.zip`, {
+          type: "application/zip",
+        }),
+        `bundle-${index}.zip`,
+      );
+    }
+
+    const response = await POST(requestFromForm(form));
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: "Combined files are too large",
+    });
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("counts files in unexpected multipart fields toward the aggregate limit", async () => {
+    const form = new FormData();
+    form.append("purpose", "course-material");
+    form.append("file", new File(["note"], "note.txt", { type: "text/plain" }));
+    const perFileBytes = Math.floor(MAX_UPLOAD_AGGREGATE_BYTES / 5) + 1;
+    for (let index = 0; index < 5; index += 1) {
+      form.append(
+        `unexpected-${index}`,
+        new File([new Uint8Array(perFileBytes)], `extra-${index}.zip`, {
+          type: "application/zip",
+        }),
+      );
+    }
+
+    const response = await POST(requestFromForm(form));
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: "Combined files are too large",
+    });
+    expect(uploadMock).not.toHaveBeenCalled();
   });
 
   it("rejects invalid MIME type", async () => {
-    const { POST } = await import("@/app/api/upload/route");
-
     const form = new FormData();
+    form.append("purpose", "course-material");
     form.append("file", new File(["x"], "exploit.html", { type: "text/html" }), "exploit.html");
 
     const response = await POST(
       new Request("http://localhost/api/upload", {
         method: "POST",
-        headers: { "x-role": "DEVELOPER" },
         body: form,
       }),
     );
@@ -142,6 +440,53 @@ describe("app/api/upload/route local-first upload integration", () => {
     expect(await response.json()).toEqual({
       success: false,
       error: expect.stringMatching(/(mime|type|allowed)/i),
+    });
+  });
+
+  it("rejects image subtypes outside the strict MIME allowlist", async () => {
+    const response = await POST(
+      buildUploadRequest({
+        file: new File(["<svg />"], "diagram.svg", { type: "image/svg+xml" }),
+      }),
+    );
+
+    expect(response.status).toBe(415);
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unbounded filename before invoking storage", async () => {
+    const response = await POST(
+      buildUploadRequest({
+        file: new File(["content"], `${"a".repeat(256)}.pdf`, {
+          type: "application/pdf",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores client namespace input and derives it from the signed session", async () => {
+    const storageKey = "private/teachers/teacher-1/materials/1234-lesson.pdf";
+    uploadMock.mockResolvedValueOnce(storageKey);
+    getURLMock.mockReturnValueOnce(storageUrlForKey(storageKey));
+    const form = new FormData();
+    form.append("purpose", "course-material");
+    form.append("namespace", "private/teachers/teacher-2/materials");
+    form.append(
+      "file",
+      new File(["content"], "lesson.pdf", { type: "application/pdf" }),
+      "lesson.pdf",
+    );
+
+    const response = await POST(requestFromForm(form));
+
+    expect(response.status).toBe(201);
+    expect(uploadMock).toHaveBeenCalledWith(expect.any(File), {
+      filename: "lesson.pdf",
+      namespace: "private/teachers/teacher-1/materials",
+      contentType: "application/pdf",
     });
   });
 
@@ -162,18 +507,18 @@ describe("app/api/upload/route local-first upload integration", () => {
     ["ZIP", "materials.zip", "application/zip"],
     ["PNG image", "diagram.png", "image/png"],
   ])("accepts allowed course material MIME type: %s", async (_label, filename, mimeType) => {
-    uploadMock.mockResolvedValueOnce(`uploads/teacher/${filename}`);
-    getURLMock.mockReturnValueOnce(`/uploads/teacher/${filename}`);
-
-    const { POST } = await import("@/app/api/upload/route");
+    const storageKey = `private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-${filename}`;
+    const publicUrl = storageUrlForKey(storageKey);
+    uploadMock.mockResolvedValueOnce(storageKey);
+    getURLMock.mockReturnValueOnce(publicUrl);
 
     const form = new FormData();
+    form.append("purpose", "course-material");
     form.append("file", new File(["content"], filename, { type: mimeType }), filename);
 
     const response = await POST(
       new Request("http://localhost/api/upload", {
         method: "POST",
-        headers: { "x-role": "TEACHER" },
         body: form,
       }),
     );
@@ -182,8 +527,8 @@ describe("app/api/upload/route local-first upload integration", () => {
     expect(await response.json()).toEqual(
       expect.objectContaining({
         success: true,
-        storageKey: `uploads/teacher/${filename}`,
-        publicUrl: `/uploads/teacher/${filename}`,
+        storageKey,
+        publicUrl,
         filename,
         mimeType,
         size: expect.any(Number),
@@ -192,17 +537,11 @@ describe("app/api/upload/route local-first upload integration", () => {
   });
 
   it("rejects file over 5MB", async () => {
-    const { POST } = await import("@/app/api/upload/route");
-
     const sixMb = new Uint8Array(6 * 1024 * 1024);
     const form = new FormData();
+    form.append("purpose", "course-material");
     form.append("file", new File([sixMb], "big.zip", { type: "application/zip" }), "big.zip");
-    const req = {
-      headers: new Headers({ "x-role": "DEVELOPER" }),
-      formData: async () => form,
-    } as unknown as Request;
-
-    const response = await POST(req);
+    const response = await POST(requestFromForm(form));
 
     expect(response.status).toBe(413);
     expect(await response.json()).toEqual({
@@ -212,20 +551,14 @@ describe("app/api/upload/route local-first upload integration", () => {
   });
 
   it("should reject zero-byte files with 400", async () => {
-    const { POST } = await import("@/app/api/upload/route");
-
     const form = new FormData();
+    form.append("purpose", "course-material");
     form.append(
       "file",
       new File([new Uint8Array(0)], "empty.pdf", { type: "application/pdf" }),
       "empty.pdf",
     );
-    const req = {
-      headers: new Headers({ "x-role": "DEVELOPER" }),
-      formData: async () => form,
-    } as unknown as Request;
-
-    const response = await POST(req);
+    const response = await POST(requestFromForm(form));
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
@@ -235,17 +568,20 @@ describe("app/api/upload/route local-first upload integration", () => {
   });
 
   it("should report partial failure in batch upload when one file is invalid", async () => {
+    const pdfKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-a.pdf";
+    const zipKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000002-c.zip";
     uploadMock
-      .mockResolvedValueOnce("uploads/dev/a.pdf")
+      .mockResolvedValueOnce(pdfKey)
       .mockRejectedValueOnce(new Error("MIME type not allowed"))
-      .mockResolvedValueOnce("uploads/dev/c.zip");
+      .mockResolvedValueOnce(zipKey);
     getURLMock
-      .mockReturnValueOnce("/public/uploads/dev/a.pdf")
-      .mockReturnValueOnce("/public/uploads/dev/c.zip");
-
-    const { POST } = await import("@/app/api/upload/route");
+      .mockReturnValueOnce(storageUrlForKey(pdfKey))
+      .mockReturnValueOnce(storageUrlForKey(zipKey));
 
     const form = new FormData();
+    form.append("purpose", "course-material");
     form.append("files", new File(["a"], "a.pdf", { type: "application/pdf" }), "a.pdf");
     form.append("files", new File(["b"], "b.exe", { type: "application/x-msdownload" }), "b.exe");
     form.append("files", new File(["c"], "c.zip", { type: "application/zip" }), "c.zip");
@@ -253,7 +589,6 @@ describe("app/api/upload/route local-first upload integration", () => {
     const response = await POST(
       new Request("http://localhost/api/upload", {
         method: "POST",
-        headers: { "x-role": "DEVELOPER" },
         body: form,
       }),
     );
@@ -268,20 +603,42 @@ describe("app/api/upload/route local-first upload integration", () => {
     );
   });
 
-  it("should keep storage integrity under concurrent upload requests for the same file", async () => {
+  it("bounds unexpected storage errors in batch responses", async () => {
+    const storageKey = "private/teachers/teacher-1/materials/c.zip";
     uploadMock
-      .mockResolvedValueOnce("uploads/dev/same-1.pdf")
-      .mockResolvedValueOnce("uploads/dev/same-2.pdf")
-      .mockResolvedValueOnce("uploads/dev/same-3.pdf");
-    getURLMock
-      .mockReturnValueOnce("/public/uploads/dev/same-1.pdf")
-      .mockReturnValueOnce("/public/uploads/dev/same-2.pdf")
-      .mockReturnValueOnce("/public/uploads/dev/same-3.pdf");
+      .mockRejectedValueOnce(new Error("backend-secret: bucket unavailable"))
+      .mockResolvedValueOnce(storageKey);
+    getURLMock.mockReturnValueOnce(storageUrlForKey(storageKey));
+    const form = new FormData();
+    form.append("purpose", "course-material");
+    form.append("files", new File(["a"], "a.pdf", { type: "application/pdf" }), "a.pdf");
+    form.append("files", new File(["c"], "c.zip", { type: "application/zip" }), "c.zip");
 
-    const { POST } = await import("@/app/api/upload/route");
+    const response = await POST(requestFromForm(form));
+    const payload = await response.json();
+
+    expect(response.status).toBe(207);
+    expect(payload.failed).toEqual([{ name: "a.pdf", error: "Upload failed" }]);
+    expect(JSON.stringify(payload)).not.toContain("backend-secret");
+  });
+
+  it("should keep storage integrity under concurrent upload requests for the same file", async () => {
+    const storageKeys = [1, 2, 3].map(
+      (index) =>
+        `private/teachers/teacher-1/materials/00000000-0000-4000-8000-00000000000${index}-same.pdf`,
+    );
+    uploadMock
+      .mockResolvedValueOnce(storageKeys[0])
+      .mockResolvedValueOnce(storageKeys[1])
+      .mockResolvedValueOnce(storageKeys[2]);
+    getURLMock
+      .mockReturnValueOnce(storageUrlForKey(storageKeys[0]))
+      .mockReturnValueOnce(storageUrlForKey(storageKeys[1]))
+      .mockReturnValueOnce(storageUrlForKey(storageKeys[2]));
 
     const makeRequest = () => {
       const form = new FormData();
+      form.append("purpose", "course-material");
       form.append(
         "file",
         new File(["same-content"], "same.pdf", { type: "application/pdf" }),
@@ -291,7 +648,6 @@ describe("app/api/upload/route local-first upload integration", () => {
       return POST(
         new Request("http://localhost/api/upload", {
           method: "POST",
-          headers: { "x-role": "DEVELOPER" },
           body: form,
         }),
       );
@@ -306,12 +662,13 @@ describe("app/api/upload/route local-first upload integration", () => {
   });
 
   it("should sanitize dangerous filenames and keep final path within uploads root", async () => {
-    uploadMock.mockResolvedValueOnce("uploads/dev/safe-secret.txt");
-    getURLMock.mockReturnValueOnce("/public/uploads/dev/safe-secret.txt");
-
-    const { POST } = await import("@/app/api/upload/route");
+    const storageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-safe-secret.txt";
+    uploadMock.mockResolvedValueOnce(storageKey);
+    getURLMock.mockReturnValueOnce(storageUrlForKey(storageKey));
 
     const form = new FormData();
+    form.append("purpose", "course-material");
     form.append(
       "file",
       new File(["x"], "..\\..\\secret.txt", { type: "text/plain" }),
@@ -321,7 +678,6 @@ describe("app/api/upload/route local-first upload integration", () => {
     const response = await POST(
       new Request("http://localhost/api/upload", {
         method: "POST",
-        headers: { "x-role": "DEVELOPER" },
         body: form,
       }),
     );
@@ -329,16 +685,18 @@ describe("app/api/upload/route local-first upload integration", () => {
     expect(response.status).toBe(201);
     const payload = await response.json();
     expect(payload.fileId).not.toMatch(/\.\./);
-    expect(payload.url).toMatch(/^\/(public\/)?uploads\//i);
+    expect(payload.url).toMatch(/^\/api\/files\//i);
   });
 
   it("returns upload metadata using storageKey/publicUrl rather than trusting path traversal filename", async () => {
-    uploadMock.mockResolvedValueOnce("uploads/teacher/safe-secret.pdf");
-    getURLMock.mockReturnValueOnce("/uploads/teacher/safe-secret.pdf");
-
-    const { POST } = await import("@/app/api/upload/route");
+    const storageKey =
+      "private/teachers/teacher-1/materials/00000000-0000-4000-8000-000000000001-safe-secret.pdf";
+    const publicUrl = storageUrlForKey(storageKey);
+    uploadMock.mockResolvedValueOnce(storageKey);
+    getURLMock.mockReturnValueOnce(publicUrl);
 
     const form = new FormData();
+    form.append("purpose", "course-material");
     form.append(
       "file",
       new File(["pdf"], "..\\..\\secret.pdf", { type: "application/pdf" }),
@@ -348,7 +706,6 @@ describe("app/api/upload/route local-first upload integration", () => {
     const response = await POST(
       new Request("http://localhost/api/upload", {
         method: "POST",
-        headers: { "x-role": "TEACHER" },
         body: form,
       }),
     );
@@ -357,50 +714,53 @@ describe("app/api/upload/route local-first upload integration", () => {
     expect(await response.json()).toEqual(
       expect.objectContaining({
         success: true,
-        storageKey: "uploads/teacher/safe-secret.pdf",
-        publicUrl: "/uploads/teacher/safe-secret.pdf",
-        filename: "safe-secret.pdf",
+        storageKey,
+        publicUrl,
+        filename: "secret.pdf",
         mimeType: "application/pdf",
         size: expect.any(Number),
       }),
     );
   });
 
-  it("returns 507 when underlying storage reports disk full", async () => {
-    uploadMock.mockRejectedValueOnce(new Error("ENOSPC: no space left on device"));
+  it.each([
+    "ENOSPC: no space left on C:\\private\\uploads",
+    "filename index failed at /srv/private/uploads/a.pdf",
+    "content type table size overflow at D:\\storage\\private",
+  ])(
+    "masks backend failures even when their message collides with validation keywords: %s",
+    async (backendMessage) => {
+      uploadMock.mockRejectedValueOnce(new Error(backendMessage));
 
-    const { POST } = await import("@/app/api/upload/route");
+      const form = new FormData();
+      form.append("purpose", "course-material");
+      form.append("file", new File(["x"], "ok.pdf", { type: "application/pdf" }), "ok.pdf");
 
-    const form = new FormData();
-    form.append("file", new File(["x"], "ok.pdf", { type: "application/pdf" }), "ok.pdf");
+      const response = await POST(
+        new Request("http://localhost/api/upload", {
+          method: "POST",
+          body: form,
+        }),
+      );
 
-    const response = await POST(
-      new Request("http://localhost/api/upload", {
-        method: "POST",
-        headers: { "x-role": "DEVELOPER" },
-        body: form,
-      }),
-    );
-
-    expect(response.status).toBe(507);
-    expect(await response.json()).toEqual({
-      success: false,
-      error: expect.stringMatching(/(space|disk|enospc)/i),
-    });
-  });
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        success: false,
+        error: "Upload failed",
+      });
+    },
+  );
 
   it("returns 500 on unexpected storage failure", async () => {
     uploadMock.mockRejectedValueOnce(new Error("unexpected failure"));
 
-    const { POST } = await import("@/app/api/upload/route");
-
     const form = new FormData();
+    form.append("purpose", "course-material");
     form.append("file", new File(["x"], "ok.pdf", { type: "application/pdf" }), "ok.pdf");
 
     const response = await POST(
       new Request("http://localhost/api/upload", {
         method: "POST",
-        headers: { "x-role": "DEVELOPER" },
         body: form,
       }),
     );
@@ -410,5 +770,35 @@ describe("app/api/upload/route local-first upload integration", () => {
       success: false,
       error: expect.stringMatching(/upload failed/i),
     });
+  });
+
+  it("deletes a completed object and returns only a generic failure when reservation persistence fails", async () => {
+    const storageKey = "private/teachers/teacher-1/materials/reservation-failure.pdf";
+    uploadMock.mockResolvedValueOnce(storageKey);
+    reservePendingUploadMock.mockRejectedValueOnce(new Error("database unavailable"));
+
+    const response = await POST(buildUploadRequest());
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ success: false, error: "Upload failed" });
+    expect(deleteMock).toHaveBeenCalledWith(storageKey);
+  });
+
+  it("releases only the authenticated owner pending upload through DELETE", async () => {
+    const storageKey = "private/teachers/teacher-1/materials/cancelled.pdf";
+
+    const response = await DELETE(
+      new Request("http://localhost/api/upload", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ storageKey }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true });
+    expect(releasePendingUploadMock).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerId: "teacher-1", storageKey }),
+    );
   });
 });

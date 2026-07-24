@@ -37,22 +37,17 @@ vi.mock("next/cache", () => ({
 }));
 
 type UsersActionsModule = {
-  createUserAction: (input: {
-    email: string;
-    fullName: string;
-    role: string;
-    phoneWhatsapp?: string;
-  }) => Promise<{
+  createUserAction: (input: unknown) => Promise<{
     success: boolean;
     data?: unknown;
     error?: string;
   }>;
-  updateUserRoleAction: (input: { userId: string; role: string }) => Promise<{
+  updateUserRoleAction: (input: unknown) => Promise<{
     success: boolean;
     data?: unknown;
     error?: string;
   }>;
-  toggleUserStatusAction: (input: { userId: string; isActive: boolean }) => Promise<{
+  toggleUserStatusAction: (input: unknown) => Promise<{
     success: boolean;
     data?: unknown;
     error?: string;
@@ -62,6 +57,14 @@ type UsersActionsModule = {
 async function loadUsersActions() {
   const specifier = "@/app/(admin)/admin/users/actions";
   return import(/* @vite-ignore */ specifier) as Promise<UsersActionsModule>;
+}
+
+function mailboxAddress(length: 254 | 255) {
+  const address = `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(
+    length === 254 ? 61 : 62,
+  )}`;
+  expect(address).toHaveLength(length);
+  return address;
 }
 
 function auditPayloadFor(action: string) {
@@ -99,7 +102,7 @@ describe("Admin user management actions audit coverage", () => {
     requireRoleMock.mockResolvedValue({ uid: "admin-1", role: "ADMIN" });
   });
 
-  it("writes an audit log when creating an AppUser without leaking credentials", async () => {
+  it("returns only the safe AppUser snapshot and one-time credential fields", async () => {
     createUserMock.mockResolvedValueOnce({
       user: {
         id: "user-1",
@@ -108,9 +111,17 @@ describe("Admin user management actions audit coverage", () => {
         role: UserRole.TEACHER,
         isActive: true,
         passwordHash: "$2b$10$secret-hash-that-must-not-be-audited",
+        phoneWhatsapp: "+254700000000",
+        mustChangePassword: true,
+        learningStatus: null,
+        twoFactorEnabled: true,
+        twoFactorSecret: "sensitive-totp-secret",
+        twoFactorBackupCodes: ["sensitive-backup-code"],
+        createdAt: new Date("2026-07-13T10:00:00.000Z"),
+        updatedAt: new Date("2026-07-13T10:00:00.000Z"),
       },
-      defaultPassword: "ChangeMe123!",
-      mustResetPassword: true,
+      temporaryPassword: "UniqueTemporary123_A",
+      mustChangePassword: true,
     });
 
     const { createUserAction } = await loadUsersActions();
@@ -131,7 +142,23 @@ describe("Admin user management actions audit coverage", () => {
       },
       transactionClientMock,
     );
-    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(result).toEqual({
+      success: true,
+      data: {
+        user: {
+          id: "user-1",
+          email: "teacher.portal@example.com",
+          fullName: "Teacher Portal",
+          role: UserRole.TEACHER,
+          isActive: true,
+        },
+        temporaryPassword: "UniqueTemporary123_A",
+        mustChangePassword: true,
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(
+      /passwordHash|twoFactorSecret|twoFactorBackupCodes|sensitive-totp-secret|sensitive-backup-code/i,
+    );
     expect(revalidatePathMock).toHaveBeenCalledWith("/admin/users");
     expectAppUserAuditTarget("APP_USER_CREATED");
     expect(auditPayloadFor("APP_USER_CREATED")).toEqual(
@@ -145,6 +172,9 @@ describe("Admin user management actions audit coverage", () => {
       }),
     );
     expectNoSensitiveAuditData(auditPayloadFor("APP_USER_CREATED"));
+    expect(JSON.stringify(auditPayloadFor("APP_USER_CREATED"))).not.toContain(
+      "UniqueTemporary123_A",
+    );
   });
 
   it("writes an audit log when changing an AppUser role", async () => {
@@ -211,22 +241,101 @@ describe("Admin user management actions audit coverage", () => {
     expectNoSensitiveAuditData(auditPayloadFor("APP_USER_STATUS_UPDATED"));
   });
 
-  it("does not write audit logs on role validation failure", async () => {
-    const { updateUserRoleAction } = await loadUsersActions();
-    const result = await updateUserRoleAction({
-      userId: "user-1",
-      role: "OWNER",
-    });
+  it.each([
+    [254, true],
+    [255, false],
+  ] as const)(
+    "accepts 254 and rejects 255 mailbox characters before generic user creation: %i / %s",
+    async (length, accepted) => {
+      const email = mailboxAddress(length);
+      if (accepted) {
+        createUserMock.mockResolvedValueOnce({
+          user: {
+            id: "user-1",
+            email,
+            fullName: "Teacher Portal",
+            role: UserRole.TEACHER,
+            isActive: true,
+          },
+          temporaryPassword: "UniqueTemporary123_A",
+          mustChangePassword: true,
+        });
+      }
 
+      const { createUserAction } = await loadUsersActions();
+      const result = await createUserAction({
+        email,
+        fullName: "Teacher Portal",
+        role: "TEACHER",
+      });
+
+      expect(result.success).toBe(accepted);
+      if (accepted) {
+        expect(createUserMock).toHaveBeenCalledWith(
+          expect.objectContaining({ email }),
+          transactionClientMock,
+        );
+      } else {
+        expect(prismaMock.$transaction).not.toHaveBeenCalled();
+        expect(createUserMock).not.toHaveBeenCalled();
+        expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it.each([
+    {
+      name: "invalid email",
+      input: { email: "not-an-email", fullName: "Teacher Portal", role: "TEACHER" },
+    },
+    {
+      name: "empty full name",
+      input: { email: "teacher.portal@example.com", fullName: "", role: "TEACHER" },
+    },
+    {
+      name: "invalid role",
+      input: { email: "teacher.portal@example.com", fullName: "Teacher Portal", role: "OWNER" },
+    },
+  ])("rejects create input with $name after admin authorization", async ({ input }) => {
+    const { createUserAction } = await loadUsersActions();
+    const result = await createUserAction(input);
+
+    expect(requireRoleMock).toHaveBeenCalledWith([UserRole.ADMIN]);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(createUserMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ success: false, error: "Invalid input." });
+  });
+
+  it.each([
+    { name: "empty user ID", input: { userId: "", role: "ADMIN" } },
+    { name: "invalid role", input: { userId: "user-1", role: "OWNER" } },
+  ])("rejects role update with $name after admin authorization", async ({ input }) => {
+    const { updateUserRoleAction } = await loadUsersActions();
+    const result = await updateUserRoleAction(input);
+
+    expect(requireRoleMock).toHaveBeenCalledWith([UserRole.ADMIN]);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
     expect(updateUserRoleMock).not.toHaveBeenCalled();
     expect(createAdminAuditLogMock).not.toHaveBeenCalled();
     expect(revalidatePathMock).not.toHaveBeenCalled();
-    expect(result).toEqual(
-      expect.objectContaining({
-        success: false,
-        error: expect.stringMatching(/invalid role/i),
-      }),
-    );
+    expect(result).toEqual({ success: false, error: "Invalid input." });
+  });
+
+  it.each([
+    { name: "empty user ID", input: { userId: "", isActive: true } },
+    { name: "non-boolean status", input: { userId: "user-1", isActive: "false" } },
+  ])("rejects status update with $name after admin authorization", async ({ input }) => {
+    const { toggleUserStatusAction } = await loadUsersActions();
+    const result = await toggleUserStatusAction(input);
+
+    expect(requireRoleMock).toHaveBeenCalledWith([UserRole.ADMIN]);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(toggleUserStatusMock).not.toHaveBeenCalled();
+    expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ success: false, error: "Invalid input." });
   });
 
   it("does not write audit logs when user creation mutation fails", async () => {

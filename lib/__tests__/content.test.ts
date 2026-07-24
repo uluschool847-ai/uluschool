@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // @ts-expect-error Red phase: content helpers are not implemented yet.
 import { containsUnsupportedClaim, isPlaceholder } from "@/lib/content";
@@ -13,6 +13,23 @@ const supportedFeatures = [
   "free trial class",
   "parent progress tracking",
 ];
+
+const originalSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+const originalAppEnv = process.env.APP_ENV;
+
+afterEach(() => {
+  if (originalSiteUrl === undefined) {
+    Reflect.deleteProperty(process.env, "NEXT_PUBLIC_SITE_URL");
+  } else {
+    process.env.NEXT_PUBLIC_SITE_URL = originalSiteUrl;
+  }
+  if (originalAppEnv === undefined) {
+    Reflect.deleteProperty(process.env, "APP_ENV");
+  } else {
+    process.env.APP_ENV = originalAppEnv;
+  }
+  vi.resetModules();
+});
 
 describe("lib/content placeholder and claims guards", () => {
   describe("isPlaceholder", () => {
@@ -81,6 +98,70 @@ describe("lib/content placeholder and claims guards", () => {
       expect(containsUnsupportedClaim("   ", supportedFeatures)).toBe(false);
       expect(containsUnsupportedClaim(null, supportedFeatures)).toBe(false);
       expect(containsUnsupportedClaim(undefined, supportedFeatures)).toBe(false);
+    });
+  });
+});
+
+describe("canonical SEO content", () => {
+  it("uses ULU Online School and NEXT_PUBLIC_SITE_URL in organization structured data", async () => {
+    process.env.NEXT_PUBLIC_SITE_URL = "https://ulu-school.example";
+    vi.resetModules();
+    const { generateStructuredData } = await import("@/lib/seo");
+
+    const structuredData = generateStructuredData("Organization", {});
+    const serialized = JSON.stringify(structuredData);
+
+    expect(structuredData).toEqual({
+      "@context": "https://schema.org",
+      "@type": "EducationalOrganization",
+      name: "ULU Online School",
+      description:
+        "ULU Online School delivers structured, interactive, and exam-focused Cambridge education to students anywhere in the world.",
+      url: "https://ulu-school.example",
+      logo: "https://ulu-school.example/logo.png",
+    });
+    expect(serialized).not.toMatch(/mathSchool|mathschool\.example\.com/i);
+  });
+
+  it.each([
+    ["staging", false, false],
+    [undefined, false, false],
+    ["production", false, true],
+    ["production", true, false],
+  ] as const)(
+    "sets crawler metadata for APP_ENV=%s and noIndex=%s",
+    async (appEnv, noIndex, indexable) => {
+      if (appEnv === undefined) {
+        Reflect.deleteProperty(process.env, "APP_ENV");
+      } else {
+        process.env.APP_ENV = appEnv;
+      }
+      vi.resetModules();
+      const { constructMetadata } = await import("@/lib/seo");
+
+      const metadata = constructMetadata({ noIndex });
+
+      expect(metadata.robots).toEqual({
+        index: indexable,
+        follow: indexable,
+      });
+    },
+  );
+
+  it("keeps the /curriculum metadata non-indexable in staging", async () => {
+    process.env.APP_ENV = "staging";
+    vi.resetModules();
+    const { constructMetadata } = await import("@/lib/seo");
+
+    const curriculumMetadata = constructMetadata({
+      title: "Curriculum",
+      description:
+        "Explore ULU's Cambridge curriculum pathways across Primary, Lower Secondary, and IGCSE.",
+    });
+
+    expect(curriculumMetadata.robots).toEqual({
+      index: false,
+      follow: false,
     });
   });
 });

@@ -83,6 +83,17 @@ export default async function EnquiryCasePage({ params }: PageProps) {
             <span className="font-semibold">Phone</span>
             <p>{enquiry.phoneWhatsapp}</p>
           </div>
+          <div>
+            <span className="font-semibold">Consent evidence</span>
+            {enquiry.consentVersion && enquiry.consentGivenAt ? (
+              <p>
+                Captured: {enquiry.consentVersion} at{" "}
+                {new Date(enquiry.consentGivenAt).toLocaleString()}
+              </p>
+            ) : (
+              <p>Legacy record - consent evidence not captured.</p>
+            )}
+          </div>
         </div>
       </section>
 

@@ -1,3 +1,5 @@
+import { safeStoredFileHref } from "@/lib/security/storage-links";
+
 type SafeLink = {
   href?: string | null;
   title?: string | null;
@@ -70,15 +72,7 @@ function formatSubmissionDate(value: Date | string) {
 }
 
 function safeHref(href: string | null | undefined) {
-  if (!href) return null;
-  if (href.startsWith("/uploads/")) return href;
-
-  try {
-    const parsed = new URL(href);
-    return parsed.protocol === "https:" ? parsed.toString() : null;
-  } catch {
-    return null;
-  }
+  return safeStoredFileHref(href);
 }
 
 function LinkOrText({ href, label }: { href?: string | null; label: string }) {

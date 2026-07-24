@@ -11,14 +11,6 @@ vi.mock("react", async () => {
   };
 });
 
-vi.mock("react-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-dom")>("react-dom");
-  return {
-    ...actual,
-    useFormStatus: () => ({ pending: false }),
-  };
-});
-
 vi.mock("@/app/enrol/actions", () => ({
   submitEnrolment: vi.fn(),
 }));
@@ -58,6 +50,7 @@ describe("Enrolment form success state", () => {
         nextSteps: "We will contact you within 24 hours to arrange the trial class.",
       },
       vi.fn(),
+      false,
     ]);
   });
 
@@ -95,5 +88,6 @@ describe("Enrolment form success state", () => {
     expect(
       screen.getByText(/we will contact you within 24 hours to arrange the trial class/i),
     ).toBeDefined();
+    expect(screen.queryByText(/\/admin\//i)).toBeNull();
   });
 });

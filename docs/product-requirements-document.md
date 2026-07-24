@@ -141,7 +141,7 @@ Can:
 - review audit logs
 - work in CMS
 - review billing data
-- access security / 2FA setup flows
+- manage administrator access within the approved role controls
 - use analytics pages
 
 Cannot:
@@ -205,10 +205,13 @@ Requirements:
 Routes:
 
 - `/portal/login`
-- `/portal/login/verify-2fa`
 
 Requirements:
 
+- ULU Online School administrators authenticate to the application with email and password.
+  Temporary passwords must be changed on first login. Login rate limiting, signed sessions,
+  audit logging, and server-side role enforcement remain mandatory. Infrastructure provider
+  accounts remain protected with provider-level 2FA.
 - seeded users can log in locally
 - invalid credentials show clear error feedback
 - login brute-force protection exists
@@ -274,7 +277,6 @@ Primary routes:
 - `/admin/billing`
 - `/admin/audit`
 - `/admin/analytics`
-- `/admin/security`
 - `/admin/cms`
 - `/admin/enquiries/[id]`
 - `/admin/leads`
@@ -426,7 +428,8 @@ The product must include:
 
 - signed session cookies
 - login rate limiting
-- admin 2FA setup path
+- server-side role enforcement and audit logging for administrator authentication
+- provider-level 2FA for infrastructure accounts
 - protected cron/admin endpoints via secrets/tokens
 
 ### Local developer repeatability

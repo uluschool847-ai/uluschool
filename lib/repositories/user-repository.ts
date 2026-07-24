@@ -1,4 +1,4 @@
-import { Prisma, UserRole } from "@prisma/client";
+import { Prisma, type UserRole } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 
@@ -49,6 +49,15 @@ export async function findUserByEmail(email: string) {
   return withPrismaRetry(() =>
     prisma.appUser.findUnique({
       where: { email: email.toLowerCase() },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        passwordHash: true,
+        mustChangePassword: true,
+        isActive: true,
+      },
     }),
   );
 }
@@ -63,10 +72,28 @@ export async function findUserById(userId: string) {
         fullName: true,
         role: true,
         isActive: true,
+        mustChangePassword: true,
         learningStatus: true,
         phoneWhatsapp: true,
         createdAt: true,
         updatedAt: true,
+      },
+    }),
+  );
+}
+
+export async function findUserForInitialSetup(userId: string) {
+  return withPrismaRetry(() =>
+    prisma.appUser.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        passwordHash: true,
+        mustChangePassword: true,
+        isActive: true,
       },
     }),
   );
@@ -102,81 +129,6 @@ export async function listUsersByRole(role: UserRole) {
         phoneWhatsapp: true,
       },
       orderBy: { fullName: "asc" },
-    }),
-  );
-}
-
-export async function findAdminUserForTwoFactor(userId: string) {
-  return withPrismaRetry(() =>
-    prisma.appUser.findFirst({
-      where: {
-        id: userId,
-        role: UserRole.ADMIN,
-        isActive: true,
-      },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        role: true,
-        twoFactorEnabled: true,
-        twoFactorSecret: true,
-        twoFactorBackupCodes: true,
-      },
-    }),
-  );
-}
-
-export async function saveAdminTwoFactorSecret(userId: string, secret: string) {
-  return withPrismaRetry(() =>
-    prisma.appUser.update({
-      where: { id: userId },
-      data: {
-        twoFactorSecret: secret,
-        twoFactorEnabled: false,
-        twoFactorBackupCodes: [],
-      },
-    }),
-  );
-}
-
-export async function enableAdminTwoFactor(
-  userId: string,
-  secret: string,
-  backupCodeHashes: string[],
-) {
-  return withPrismaRetry(() =>
-    prisma.appUser.update({
-      where: { id: userId },
-      data: {
-        twoFactorEnabled: true,
-        twoFactorSecret: secret,
-        twoFactorBackupCodes: backupCodeHashes,
-      },
-    }),
-  );
-}
-
-export async function disableAdminTwoFactor(userId: string) {
-  return withPrismaRetry(() =>
-    prisma.appUser.update({
-      where: { id: userId },
-      data: {
-        twoFactorEnabled: false,
-        twoFactorSecret: null,
-        twoFactorBackupCodes: [],
-      },
-    }),
-  );
-}
-
-export async function consumeAdminBackupCode(userId: string, remainingCodeHashes: string[]) {
-  return withPrismaRetry(() =>
-    prisma.appUser.update({
-      where: { id: userId },
-      data: {
-        twoFactorBackupCodes: remainingCodeHashes,
-      },
     }),
   );
 }

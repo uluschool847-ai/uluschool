@@ -69,6 +69,8 @@ type StudentActionsModule = {
   createStudentAction: (formData: FormData) => Promise<{
     success: boolean;
     message?: string;
+    accountEmail?: string;
+    temporaryPassword?: string;
     errors?: Record<string, string[] | undefined>;
   }>;
   updateStudentAction: (formData: FormData) => Promise<{
@@ -137,6 +139,14 @@ function buildStudentFormData(options?: {
   if (options?.successRedirect) formData.set("successRedirect", options.successRedirect);
   if (options?.errorRedirect) formData.set("errorRedirect", options.errorRedirect);
   return formData;
+}
+
+function mailboxAddress(length: 254 | 255) {
+  const address = `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(
+    length === 254 ? 61 : 62,
+  )}`;
+  expect(address).toHaveLength(length);
+  return address;
 }
 
 function buildStudentLearningStatusFormData(options?: {
@@ -237,8 +247,8 @@ describe("Admin student account actions", () => {
         learningStatus: "ACTIVE",
         isActive: true,
       },
-      defaultPassword: "ChangeMe123!",
-      mustResetPassword: true,
+      temporaryPassword: "UniqueTemporary123_A",
+      mustChangePassword: true,
     });
 
     const { createStudentAction } = await loadStudentActions();
@@ -251,7 +261,14 @@ describe("Admin student account actions", () => {
       role: "STUDENT",
     });
     expect(revalidatePathMock).toHaveBeenCalledWith("/admin/students");
-    expect(result).toEqual(expect.objectContaining({ success: true }));
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: true,
+        message: "Account created.",
+        accountEmail: "alice.student@example.com",
+        temporaryPassword: "UniqueTemporary123_A",
+      }),
+    );
     expect(createAdminAuditLogMock).toHaveBeenCalledWith(
       expect.objectContaining({
         adminUserId: "admin-1",
@@ -274,7 +291,84 @@ describe("Admin student account actions", () => {
       transactionClientMock,
     );
     expectAuditAfterMutation(createUserMock);
+    expect(JSON.stringify(createAdminAuditLogMock.mock.calls)).not.toContain(
+      "UniqueTemporary123_A",
+    );
   });
+
+  it.each([
+    ["create", 254, true],
+    ["create", 255, false],
+    ["update", 254, true],
+    ["update", 255, false],
+  ] as const)(
+    "%s accepts 254 and rejects 255 mailbox characters before repository work: %i / %s",
+    async (operation, length, accepted) => {
+      const email = mailboxAddress(length);
+      const { createStudentAction, updateStudentAction } = await loadStudentActions();
+
+      if (operation === "create") {
+        if (accepted) {
+          createUserMock.mockResolvedValueOnce({
+            user: {
+              id: "student-1",
+              email,
+              fullName: "Alice Student",
+              role: UserRole.STUDENT,
+              learningStatus: "ACTIVE",
+              isActive: true,
+            },
+            temporaryPassword: "UniqueTemporary123_A",
+            mustChangePassword: true,
+          });
+        }
+
+        const result = await createStudentAction(buildStudentFormData({ email }));
+
+        expect(result.success).toBe(accepted);
+        if (accepted) {
+          expect(createUserMock).toHaveBeenCalledWith(
+            expect.objectContaining({ email }),
+            transactionClientMock,
+          );
+        } else {
+          expect(createUserMock).not.toHaveBeenCalled();
+          expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+        }
+        return;
+      }
+
+      if (accepted) {
+        findUserByIdMock.mockResolvedValueOnce({
+          id: "student-1",
+          email: "alice.student@example.com",
+          fullName: "Alice Student",
+          role: UserRole.STUDENT,
+          isActive: true,
+        });
+        updateUserProfileMock.mockResolvedValueOnce({
+          id: "student-1",
+          email,
+          fullName: "Alice Student",
+          phoneWhatsapp: "+254700000000",
+        });
+      }
+
+      const result = await updateStudentAction(buildStudentFormData({ id: "student-1", email }));
+
+      expect(result.success).toBe(accepted);
+      if (accepted) {
+        expect(updateUserProfileMock).toHaveBeenCalledWith(
+          expect.objectContaining({ email }),
+          transactionClientMock,
+        );
+      } else {
+        expect(findUserByIdMock).not.toHaveBeenCalled();
+        expect(updateUserProfileMock).not.toHaveBeenCalled();
+        expect(createAdminAuditLogMock).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it("returns structured validation errors for missing or invalid student fields", async () => {
     const { createStudentAction } = await loadStudentActions();
@@ -360,8 +454,8 @@ describe("Admin student account actions", () => {
         role: "STUDENT",
         isActive: true,
       },
-      defaultPassword: "ChangeMe123!",
-      mustResetPassword: true,
+      temporaryPassword: "UniqueTemporary123_A",
+      mustChangePassword: true,
     });
 
     const { createStudentAction } = await loadStudentActions();
@@ -372,7 +466,8 @@ describe("Admin student account actions", () => {
       }),
     );
 
-    expect(redirectMock).toHaveBeenCalledWith(expect.stringContaining("studentMessage="));
+    expect(redirectMock).toHaveBeenCalledWith("/admin/students?studentMessage=Account%20created.");
+    expect(JSON.stringify(redirectMock.mock.calls)).not.toContain("UniqueTemporary123_A");
   });
 
   it("updates only allowed student fields and ignores any submitted role", async () => {
@@ -1348,8 +1443,8 @@ describe("Admin student account actions", () => {
             learningStatus: "ACTIVE",
             isActive: true,
           },
-          defaultPassword: "ChangeMe123!",
-          mustResetPassword: true,
+          temporaryPassword: "UniqueTemporary123_A",
+          mustChangePassword: true,
         });
       },
       run: async (actions: StudentActionsModule) =>

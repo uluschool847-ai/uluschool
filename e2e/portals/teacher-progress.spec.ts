@@ -1,3 +1,4 @@
+import { createSessionToken } from "@/e2e/helpers/session";
 import { type Page, expect, test } from "@playwright/test";
 import {
   ClassGroupStatus,
@@ -6,8 +7,6 @@ import {
   StudentLearningStatus,
   UserRole,
 } from "@prisma/client";
-
-const AUTH_SECRET = process.env.AUTH_SESSION_SECRET ?? "dev-only-auth-session-secret-please-change";
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 const COOKIE_DOMAIN = new URL(BASE_URL).hostname;
 const prisma = new PrismaClient();
@@ -32,49 +31,6 @@ type TeacherProgressFixture = {
 };
 
 let fixture: TeacherProgressFixture;
-
-function toBase64Url(input: string) {
-  return Buffer.from(input, "binary")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-async function signPayload(payloadBase64: string) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(AUTH_SECRET),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payloadBase64));
-  const signatureString = Array.from(new Uint8Array(signature))
-    .map((byte) => String.fromCharCode(byte))
-    .join("");
-  return toBase64Url(signatureString);
-}
-
-async function createSessionToken(input: {
-  email: string;
-  fullName: string;
-  role: UserRole;
-  uid: string;
-}) {
-  const payloadBase64 = toBase64Url(
-    JSON.stringify({
-      authMethod: "password",
-      email: input.email,
-      exp: Date.now() + 1000 * 60 * 60,
-      fullName: input.fullName,
-      mfaVerified: true,
-      role: input.role,
-      uid: input.uid,
-    }),
-  );
-  return `${payloadBase64}.${await signPayload(payloadBase64)}`;
-}
 
 async function setPortalSession(page: Page) {
   await page.context().clearCookies();
@@ -229,6 +185,7 @@ test.describe("Teacher progress portal", () => {
     await expect(page.getByText(/excellent work with functions/i)).toBeVisible();
 
     await page.getByRole("link", { name: /all progress|back to progress/i }).click();
+    await expect(page).toHaveURL(/\/portal\/teacher\/progress(?:\?|$)/);
     await page.getByLabel(/status/i).selectOption("archived");
     await page.getByRole("button", { name: /apply/i }).click();
     await expect(page.getByText(/excellent work with functions/i)).toBeVisible();

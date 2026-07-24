@@ -1,9 +1,20 @@
 import * as Sentry from "@sentry/nextjs";
 
-const sentryDsn = process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN ?? "";
+import {
+  parseSentrySampleRate,
+  sanitizeSentryBreadcrumb,
+  sanitizeSentryEvent,
+} from "@/lib/monitoring/sentry-sanitize";
+
+const sentryDsn = (process.env.SENTRY_DSN ?? "").trim();
+const sentryEnabled = (process.env.SENTRY_ENABLED ?? "false") === "true";
 
 Sentry.init({
   dsn: sentryDsn,
-  tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? "0.1"),
-  enabled: Boolean(sentryDsn),
+  enabled: sentryEnabled && sentryDsn.length > 0,
+  tracesSampleRate: parseSentrySampleRate(process.env.SENTRY_TRACES_SAMPLE_RATE ?? ""),
+  beforeSend: sanitizeSentryEvent,
+  beforeSendTransaction: sanitizeSentryEvent,
+  beforeBreadcrumb: sanitizeSentryBreadcrumb,
+  sendDefaultPii: false,
 });

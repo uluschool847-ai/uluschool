@@ -4,6 +4,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { storageUrlForKey } from "@/lib/storage/storage-url";
+
 const requireRoleMock = vi.hoisted(() => vi.fn());
 const getReportSnapshotForStudentMock = vi.hoisted(() => vi.fn());
 const notFoundMock = vi.hoisted(() =>
@@ -30,6 +32,7 @@ function loadStudentReportPage() {
 }
 
 describe("Student report snapshot page", () => {
+  const reportKey = "private/teachers/teacher-1/reports/snapshot-1.pdf";
   beforeEach(() => {
     cleanup();
     vi.clearAllMocks();
@@ -38,7 +41,7 @@ describe("Student report snapshot page", () => {
       generatedAt: new Date("2026-05-20T10:00:00.000Z"),
       id: "snapshot-1",
       pdfGeneratedAt: new Date("2026-05-21T10:00:00.000Z"),
-      pdfStorageKey: "reports/snapshot-1.pdf",
+      pdfStorageKey: reportKey,
       snapshotData: {
         academicTerm: { id: "term-1", name: "Spring 2026" },
         attendance: { absent: 1, late: 1, present: 8 },
@@ -108,9 +111,10 @@ describe("Student report snapshot page", () => {
     expect(screen.getByText(/algebra review/i)).toBeDefined();
     expect(screen.getByText(/strong progress/i)).toBeDefined();
     expect(screen.getByText(/keep practicing/i)).toBeDefined();
-    expect(
-      screen.getByRole("link", { name: /download pdf|open pdf/i }).getAttribute("href"),
-    ).toMatch(/^\/api\/reports\/snapshot-1\/pdf|^\/uploads\//);
+    expect(screen.getByRole("link", { name: /download pdf|open pdf/i })).toHaveAttribute(
+      "href",
+      storageUrlForKey(reportKey),
+    );
     expect(screen.getByRole("link", { name: /back to reports/i })).toHaveAttribute(
       "href",
       "/portal/student/reports",
@@ -137,6 +141,28 @@ describe("Student report snapshot page", () => {
 
     expect(screen.getByText(/pdf is not available yet/i)).toBeDefined();
     expect(screen.queryByRole("link", { name: /download pdf|open pdf/i })).toBeNull();
+  });
+
+  it.each([
+    ["canonical", storageUrlForKey(reportKey), storageUrlForKey(reportKey)],
+    ["legacy", "/uploads/reports/snapshot-1.pdf", "/uploads/reports/snapshot-1.pdf"],
+    [
+      "external",
+      "https://reports.example.com/snapshot%201.pdf?download=1",
+      "https://reports.example.com/snapshot%201.pdf?download=1",
+    ],
+  ])("preserves safe %s PDF values", async (_label, value, expected) => {
+    getReportSnapshotForStudentMock.mockResolvedValueOnce({
+      ...(await getReportSnapshotForStudentMock()),
+      pdfStorageKey: value,
+    });
+    const page = await loadStudentReportPage();
+    render(await page.default({ params: { snapshotId: "snapshot-1" } }));
+
+    expect(screen.getByRole("link", { name: /download pdf|open pdf/i })).toHaveAttribute(
+      "href",
+      expected,
+    );
   });
 
   it("returns notFound for another student's snapshot", async () => {

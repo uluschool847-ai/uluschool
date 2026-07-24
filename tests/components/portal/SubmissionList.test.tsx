@@ -3,6 +3,7 @@ import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SubmissionList } from "@/app/portal/teacher/components/SubmissionList";
+import { storageUrlForKey } from "@/lib/storage/storage-url";
 
 const SubmissionListContract = SubmissionList as unknown as ComponentType<Record<string, unknown>>;
 
@@ -190,6 +191,13 @@ describe("SubmissionList", () => {
       "href",
       "/portal/teacher/submissions/sub-1",
     );
+  });
+
+  it("renders a canonical private submission URL", () => {
+    const href = storageUrlForKey("private/students/student-1/submissions/work.pdf");
+    render(<SubmissionListContract submissions={[submission({ contentUrl: href })]} />);
+
+    expect(screen.getByRole("link", { name: /view submission/i })).toHaveAttribute("href", href);
   });
 
   it("links every row to the submission review workspace instead of a disabled review state", () => {

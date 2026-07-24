@@ -105,7 +105,7 @@ function PortalLink({
   if (role === "TEACHER") {
     return (
       <Button asChild variant="secondary" size="sm" className={className}>
-        <Link href="/portal/teacher" onClick={onClick}>
+        <Link href="/portal/teacher" onClick={onClick} prefetch={false}>
           Teacher Portal
         </Link>
       </Button>
@@ -115,7 +115,7 @@ function PortalLink({
   if (role === "STUDENT") {
     return (
       <Button asChild variant="secondary" size="sm" className={className}>
-        <Link href="/portal/student" onClick={onClick}>
+        <Link href="/portal/student" onClick={onClick} prefetch={false}>
           Student Portal
         </Link>
       </Button>
@@ -124,7 +124,7 @@ function PortalLink({
 
   return (
     <Button asChild variant="secondary" size="sm" className={className}>
-      <Link href="/portal" onClick={onClick}>
+      <Link href="/portal" onClick={onClick} prefetch={false}>
         My Portal
       </Link>
     </Button>

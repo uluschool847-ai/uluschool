@@ -8,12 +8,12 @@ Playwright specs under `e2e/portals/admin*.spec.ts` and the admin unit/action/co
 - Focused one-command QA smoke: `npm run qa:admin-smoke`
   - Allocates an isolated `localhost` port for the run and sets `PLAYWRIGHT_BASE_URL`/`PORT`.
   - Uses seeded admin credentials: `fixed.admin@uluglobalacademy.com` with `E2E_PORTAL_PASSWORD`,
-    `DEFAULT_PORTAL_PASSWORD`, or `ChangeMe123!`.
+    `SEED_PORTAL_PASSWORD`, or the local fixture fallback.
   - Runs route smoke, authenticated header checks, browser console/page error checks,
     failed-request and 5xx network checks, dashboard CRM search, reminder dry run, and sensitive
     admin RBAC.
 - Route smoke and RBAC matrix: `e2e/portals/admin-full-coverage.spec.ts`
-- Domain workflows: `e2e/portals/admin-{teachers,teacher-availability,students,parents,classes,lessons,subjects,crm,cms,billing,analytics,audit,security,tasks}.spec.ts`
+- Domain workflows: `e2e/portals/admin-{teachers,teacher-availability,students,parents,classes,lessons,subjects,crm,cms,billing,analytics,audit,tasks}.spec.ts`
 - Action/component/repository coverage: admin tests under `app/(admin)/admin/**/__tests__`,
   `components/admin/**/__tests__`, `tests/admin*`, and `lib/repositories/**/__tests__`.
 - Standalone admin materials/files workspace: intentionally unavailable. There is no
@@ -30,10 +30,10 @@ Playwright specs under `e2e/portals/admin*.spec.ts` and the admin unit/action/co
 
 Use the seeded admin `fixed.admin@uluglobalacademy.com` with `ChangeMe123!`.
 
-1. Login at `/portal/login`, confirm redirect to `/admin` or `/admin/security`.
-2. Open every primary workspace: dashboard, users, security, teachers, students, parents, classes,
-   subjects, CMS pages/blog/FAQ, analytics, billing, audit, tasks, AI drafts, reminders,
-   submissions, and leads.
+1. Login at `/portal/login` and confirm redirect to `/admin`.
+2. Open every primary workspace: dashboard, users, teachers, students, parents, classes, subjects,
+   CMS pages/blog/FAQ, analytics, billing, audit, tasks, AI drafts, reminders, submissions, and
+   leads.
    Confirm there is no separate Materials or Files admin workspace; use `/portal/teacher/materials`
    when verifying course material creation and file upload flows.
 3. For teacher, student, parent, subject, class group, lesson, and CMS content, create or update a
@@ -41,8 +41,8 @@ Use the seeded admin `fixed.admin@uluglobalacademy.com` with `ChangeMe123!`.
 4. Confirm cross-role visibility after admin mutations: schedules in teacher/student/parent portals,
    parent-student links, billing visibility, and public CMS publish/unpublish behavior.
 5. Submit invalid forms for each mutation area and confirm validation blocks the change.
-6. Login as teacher, student, and parent; confirm `/admin`, `/admin/users`, `/admin/security`,
-   `/admin/billing`, and `/admin/audit` redirect to unauthorized or login.
+6. Login as teacher, student, and parent; confirm `/admin`, `/admin/users`, `/admin/billing`, and
+   `/admin/audit` redirect to unauthorized or login.
 7. Review `/admin/audit` after successful mutations and confirm failed mutations did not write
    success audit records.
 

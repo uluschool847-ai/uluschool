@@ -30,6 +30,8 @@ type ReportActionResult =
   | { success: true; data: unknown }
   | { success: false; error: string | Record<string, string[] | undefined> };
 
+const REPORT_EXPORT_PUBLIC_ERROR = "Unable to export report PDF.";
+
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unable to process report.";
 }
@@ -158,26 +160,9 @@ export async function exportReportSnapshotPdfAction(
   const session = await requireRole([UserRole.TEACHER]);
   try {
     const exported = await exportReportSnapshotPdf(session.uid, snapshotId);
-    await createAdminAuditLog(
-      {
-        adminUserId: session.uid,
-        actorId: session.uid,
-        action: "REPORT_PDF_EXPORTED",
-        targetType: "reportSnapshot",
-        targetId: snapshotId,
-        meta: {
-          teacherId: session.uid,
-          reportSnapshotId: snapshotId,
-          storageKey: exported.storageKey,
-          pdfStorageKey: exported.snapshot.pdfStorageKey,
-          pdfGeneratedAt: exported.snapshot.pdfGeneratedAt,
-        },
-      } as Parameters<typeof createAdminAuditLog>[0] & { actorId: string },
-      prisma,
-    );
     revalidateReportSnapshotPaths(snapshotId, exported.snapshot.studentId);
     return { success: true, data: exported };
-  } catch (error) {
-    return { success: false, error: errorMessage(error) };
+  } catch {
+    return { success: false, error: REPORT_EXPORT_PUBLIC_ERROR };
   }
 }

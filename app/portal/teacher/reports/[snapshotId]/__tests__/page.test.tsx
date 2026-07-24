@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
+import SnapshotPage from "@/app/portal/teacher/reports/[snapshotId]/page";
 import { UserRole } from "@prisma/client";
 import { cleanup, render, screen } from "@testing-library/react";
-import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { storageUrlForKey } from "@/lib/storage/storage-url";
 
 const requireRoleMock = vi.hoisted(() => vi.fn());
 const getReportSnapshotForTeacherMock = vi.hoisted(() => vi.fn());
@@ -26,18 +28,7 @@ vi.mock("@/app/portal/teacher/actions/ai-draft-actions", () => ({
 }));
 vi.mock("next/navigation", () => ({ notFound: notFoundMock }));
 
-type SnapshotPageModule = {
-  default: (props: {
-    params: Promise<{ snapshotId: string }> | { snapshotId: string };
-  }) => Promise<ReactElement> | ReactElement;
-};
-
-function loadSnapshotPage() {
-  const specifier = "@/app/portal/teacher/reports/[snapshotId]/page";
-  return import(/* @vite-ignore */ specifier) as Promise<SnapshotPageModule>;
-}
-
-function savedSnapshot() {
+function savedSnapshot(overrides: Record<string, unknown> = {}) {
   return {
     generatedAt: new Date("2026-05-20T10:00:00.000Z"),
     generatedByTeacherId: "teacher-1",
@@ -52,6 +43,7 @@ function savedSnapshot() {
       teacherComment: "Saved teacher comment",
     },
     snapshotVersion: 1,
+    ...overrides,
   };
 }
 
@@ -81,8 +73,7 @@ describe("Teacher saved report page", () => {
   });
 
   it("renders immutable saved snapshot data and PDF export action", async () => {
-    const page = await loadSnapshotPage();
-    const element = await page.default({ params: { snapshotId: "snapshot-1" } });
+    const element = await SnapshotPage({ params: { snapshotId: "snapshot-1" } });
     render(element);
 
     expect(getReportSnapshotForTeacherMock).toHaveBeenCalledWith("teacher-1", "snapshot-1");
@@ -99,10 +90,20 @@ describe("Teacher saved report page", () => {
 
   it("returns notFound for foreign or missing snapshot", async () => {
     getReportSnapshotForTeacherMock.mockResolvedValueOnce(null);
-    const page = await loadSnapshotPage();
 
-    await expect(page.default({ params: { snapshotId: "foreign-snapshot" } })).rejects.toThrow(
+    await expect(SnapshotPage({ params: { snapshotId: "foreign-snapshot" } })).rejects.toThrow(
       "NEXT_NOT_FOUND",
+    );
+  });
+
+  it("links current report keys through the private application route", async () => {
+    const key = "private/teachers/teacher-1/reports/snapshot-1.pdf";
+    getReportSnapshotForTeacherMock.mockResolvedValueOnce(savedSnapshot({ pdfStorageKey: key }));
+    render(await SnapshotPage({ params: { snapshotId: "snapshot-1" } }));
+
+    expect(screen.getByRole("link", { name: /download pdf report/i })).toHaveAttribute(
+      "href",
+      storageUrlForKey(key),
     );
   });
 });

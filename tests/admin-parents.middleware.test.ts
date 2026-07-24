@@ -14,7 +14,7 @@ const redirectMock = vi.fn((url: string | URL) => ({ type: "redirect", url: url.
 vi.mock("next/server", () => ({
   NextResponse: {
     redirect: (...args: unknown[]) => redirectMock(...(args as [string | URL])),
-    next: () => ({ cookies: { set: vi.fn() } }),
+    next: () => ({ cookies: { set: vi.fn(), delete: vi.fn() } }),
   },
 }));
 
@@ -76,11 +76,12 @@ describe("middleware /admin/parents access control", () => {
     ["PARENT", "/admin/parents/parent-1/edit"],
   ])("redirects %s users away from %s", async (role, path) => {
     verifySessionTokenMock.mockResolvedValueOnce({
+      purpose: "SESSION",
+      version: 3,
       uid: `${role.toLowerCase()}-1`,
       role,
       email: `${role.toLowerCase()}@example.com`,
       exp: Date.now() + 60000,
-      mfaVerified: true,
       authMethod: "password",
     });
 

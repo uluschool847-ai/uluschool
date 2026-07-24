@@ -22,6 +22,7 @@ export default defineConfig({
       "app/**/__tests__/**/*.test.{ts,tsx}",
       "components/**/__tests__/**/*.test.{ts,tsx}",
       "prisma/**/__tests__/**/*.test.ts",
+      "scripts/**/__tests__/**/*.test.ts",
     ],
     clearMocks: true,
     restoreMocks: true,

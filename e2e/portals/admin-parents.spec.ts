@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 
 const ADMIN_EMAIL = "fixed.admin@uluglobalacademy.com";
 const PASSWORD =
-  process.env.E2E_PORTAL_PASSWORD ?? process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 const FIXED_STUDENT_NAME = "Fixed Student";
 const RESPONSIVE_VIEWPORTS = [
   { height: 844, name: "mobile", width: 390 },
@@ -19,6 +19,31 @@ const QA_EMAIL_PREFIXES = [
   "mark.shevchenko.",
   "unlinked.student.",
 ];
+
+async function fillInitialPasswordForm(page: Page, currentPassword: string, newPassword: string) {
+  await page.getByLabel(/current password/i).fill(currentPassword);
+  await page.getByLabel(/^new password/i).fill(newPassword);
+  await page.getByLabel(/confirm new password/i).fill(newPassword);
+  await page.getByRole("button", { name: /change password/i }).click();
+}
+
+async function completeParentPasswordSetup(
+  page: Page,
+  email: string,
+  temporaryPassword: string,
+  rotatedPassword: string,
+) {
+  await page.context().clearCookies();
+  await page.goto("/portal/login");
+  await page.getByLabel(/email/i).fill(email);
+  await page.getByLabel(/password/i).fill(temporaryPassword);
+  await page.getByRole("button", { name: /login|sign in/i }).click();
+  await expect(page).toHaveURL(/\/portal\/setup\/password$/);
+  await expect(page.getByRole("heading", { name: /change your password/i })).toBeVisible();
+
+  await fillInitialPasswordForm(page, temporaryPassword, rotatedPassword);
+  await expect(page).toHaveURL(/\/portal\/parent$/);
+}
 
 test.describe("Admin Parent Management", () => {
   test.describe.configure({ timeout: 300000, mode: "serial" });
@@ -60,10 +85,10 @@ test.describe("Admin Parent Management", () => {
     await page.waitForURL(/\/(admin|security)/);
   }
 
-  async function loginAsParent(page: Page, email: string) {
+  async function loginAsParent(page: Page, email: string, password: string) {
     await page.goto("/portal/login");
     await page.getByLabel(/email/i).fill(email);
-    await page.getByLabel(/password/i).fill(PASSWORD);
+    await page.getByLabel(/password/i).fill(password);
     await page.getByRole("button", { name: /login|sign in/i }).click();
     await page.waitForURL(/\/portal\/parent/);
   }
@@ -91,7 +116,19 @@ test.describe("Admin Parent Management", () => {
     await page.getByLabel(/phone|whatsapp/i).fill("+254701999000");
     await page.getByRole("button", { name: /create parent|create guardian/i }).click();
 
-    await page.waitForURL(/\/admin\/parents(?:\?.*parentMessage=Parent%20account%20created\.)?$/);
+    await expect(page).toHaveURL(/\/admin\/parents\/new$/);
+    const credentialsPanel = page.getByRole("region", { name: /^temporary credentials$/i });
+    await expect(credentialsPanel).toBeVisible();
+    const temporaryPasswordLocator = credentialsPanel
+      .locator("dt")
+      .filter({ hasText: /temporary password/i })
+      .locator("xpath=following-sibling::dd[1]/code");
+    await expect(temporaryPasswordLocator).toHaveCount(1);
+    const temporaryPassword = (await temporaryPasswordLocator.textContent())?.trim() ?? "";
+    expect(temporaryPassword).toMatch(/\S+/);
+
+    await page.goto(`/admin/parents?q=${encodeURIComponent(email)}`);
+    await expect(page.getByRole("heading", { name: /temporary credentials/i })).toHaveCount(0);
     const registryRow = await openParentRegistryByEmail(page, email);
     await expect(registryRow).toContainText(fullName);
 
@@ -105,6 +142,8 @@ test.describe("Admin Parent Management", () => {
       fullName,
       updatedFullName,
       email,
+      temporaryPassword,
+      rotatedPassword: `QA-Parent-Rotated-${crypto.randomUUID()}!`,
     };
   }
 
@@ -369,8 +408,12 @@ test.describe("Admin Parent Management", () => {
       page.getByRole("button", { name: /link student|add student/i }).click(),
     ]);
 
-    await page.context().clearCookies();
-    await loginAsParent(page, parent.email);
+    await completeParentPasswordSetup(
+      page,
+      parent.email,
+      parent.temporaryPassword,
+      parent.rotatedPassword,
+    );
     await expect(page.getByRole("main")).toBeVisible();
     await expect(page.getByText(sofia.fullName)).toBeVisible();
     await expect(page.getByText(mark.fullName)).toBeVisible();
@@ -396,7 +439,7 @@ test.describe("Admin Parent Management", () => {
     ]);
 
     await page.context().clearCookies();
-    await loginAsParent(page, parent.email);
+    await loginAsParent(page, parent.email, parent.rotatedPassword);
     await expect(page.getByText(sofia.fullName)).toHaveCount(0);
     await expect(page.getByText(mark.fullName)).toBeVisible();
     await expect(page.getByText(unlinkedStudent.fullName)).toHaveCount(0);
@@ -405,6 +448,14 @@ test.describe("Admin Parent Management", () => {
   test("inactive parent cannot log in to the parent portal", async ({ page }) => {
     await loginAsAdmin(page);
     const parent = await createParentThroughUi(page);
+    await completeParentPasswordSetup(
+      page,
+      parent.email,
+      parent.temporaryPassword,
+      parent.rotatedPassword,
+    );
+    await page.context().clearCookies();
+    await loginAsAdmin(page);
     const parentRow = await openParentRegistryByEmail(page, parent.email);
 
     await parentRow.getByRole("button", { name: /^deactivate$/i }).click();
@@ -419,7 +470,7 @@ test.describe("Admin Parent Management", () => {
     await page.context().clearCookies();
     await page.goto("/portal/login");
     await page.getByLabel(/email/i).fill(parent.email);
-    await page.getByLabel(/password/i).fill(PASSWORD);
+    await page.getByLabel(/password/i).fill(parent.rotatedPassword);
     await page.getByRole("button", { name: /login|sign in/i }).click();
 
     await expect(page.getByText(/invalid email or password/i)).toBeVisible();

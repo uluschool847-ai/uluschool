@@ -8,7 +8,7 @@ const ADMIN_EMAIL = "fixed.admin@uluglobalacademy.com";
 const TEACHER_EMAIL = "fixed.teacher@uluglobalacademy.com";
 const STUDENT_EMAIL = "fixed.admin-subject.student@uluglobalacademy.com";
 const PASSWORD =
-  process.env.E2E_PORTAL_PASSWORD ?? process.env.DEFAULT_PORTAL_PASSWORD ?? "ChangeMe123!";
+  process.env.E2E_PORTAL_PASSWORD ?? process.env.SEED_PORTAL_PASSWORD ?? "ChangeMe123!";
 const RUN_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const SUBJECT_PREFIX = `QA Subject ${RUN_ID}`;
 const CLASS_PREFIX = `QA Subject Class ${RUN_ID}`;

@@ -21,7 +21,9 @@ export default function UnauthorizedPage() {
         </CardHeader>
         <CardContent className="flex flex-wrap gap-3">
           <Button asChild>
-            <Link href="/portal">Back to portal</Link>
+            <Link href="/portal" prefetch={false}>
+              Back to portal
+            </Link>
           </Button>
           <Button asChild variant="outline">
             <Link href="/portal/login">Sign in with another account</Link>

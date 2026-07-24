@@ -5,6 +5,7 @@ import { MaterialList } from "@/app/portal/teacher/components/MaterialList";
 import { Button } from "@/components/ui/button";
 import { requireRole } from "@/lib/auth/session";
 import { listCourseMaterialsForTeacher } from "@/lib/repositories/course-material-repository";
+import { preferredStoredFileHref, storageHrefForKey } from "@/lib/security/storage-links";
 
 export const dynamic = "force-dynamic";
 
@@ -66,18 +67,23 @@ function formatLessonTitle(material: MaterialRecord) {
 function mapMaterial(material: MaterialRecord) {
   const lessonTitle = formatLessonTitle(material);
   const className = material.scheduledClass?.classGroup?.name ?? null;
+  const primaryStorageKey = material.attachments?.[0]?.storageKey;
 
   return {
     id: material.id,
     title: material.title,
     description: material.description ?? "",
-    fileUrl: material.fileUrl ?? null,
+    fileUrl: preferredStoredFileHref(primaryStorageKey, material.fileUrl),
     className: className && !lessonTitle.includes(className) ? className : null,
     lessonTitle,
     createdAt: material.createdAt ?? null,
     updatedAt: material.updatedAt ?? null,
     editHref: `/portal/teacher/materials/${material.id}/edit`,
-    attachments: material.attachments ?? [],
+    attachments: (material.attachments ?? []).map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename,
+      publicUrl: storageHrefForKey(attachment.storageKey),
+    })),
   };
 }
 

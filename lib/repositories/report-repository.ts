@@ -1,11 +1,25 @@
-import { type Prisma, UserRole } from "@prisma/client";
+import { Buffer } from "node:buffer";
+import { Prisma, UserRole } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { createAdminAuditLog } from "@/lib/repositories/admin-audit-repository";
 import { listAttendanceHistoryForStudent } from "@/lib/repositories/attendance-repository";
 import { getTeacherStudentGradebook } from "@/lib/repositories/gradebook-repository";
+import {
+  CONSERVATIVE_UNLEDGERED_STORAGE_BYTES,
+  PendingUploadError,
+  finalizePendingUploads,
+  queueStorageObjectForDeletion,
+  releasePendingUpload,
+  reservePendingUpload,
+} from "@/lib/repositories/pending-upload-repository";
 import { listProgressNotesForTeacherStudent } from "@/lib/repositories/student-progress-repository";
 import { renderReportSnapshotPdf } from "@/lib/services/report-pdf";
-import { createStorageService } from "@/lib/storage";
+import {
+  createStorageService,
+  normalizePersistedStorageReference,
+  teacherReportNamespace,
+} from "@/lib/storage";
 
 type ReportDatabase = typeof prisma | Prisma.TransactionClient;
 
@@ -406,24 +420,196 @@ export async function listReportSnapshotsForParentChild(
   );
 }
 
+function trustedPreviousReportStorageReference(value: unknown, teacherId: string) {
+  const reference = normalizePersistedStorageReference(value);
+  if (!reference) return null;
+  if (reference.kind === "legacy") return reference;
+
+  const namespace = teacherReportNamespace(teacherId);
+  return reference.storageKey.startsWith(`${namespace}/`) ? reference : null;
+}
+
+async function deleteUnreservedReportStorageKeyBestEffort(
+  storage: ReturnType<typeof createStorageService>,
+  storageKey: string,
+) {
+  try {
+    await storage.delete(storageKey);
+  } catch {
+    // The reservation error remains the public failure; the key is not referenced yet.
+  }
+}
+
+async function releaseReportStorageKeyBestEffort(input: {
+  ownerId: string;
+  storageKey: string;
+  storage: ReturnType<typeof createStorageService>;
+}) {
+  try {
+    await releasePendingUpload({
+      ownerId: input.ownerId,
+      storageKey: input.storageKey,
+      storage: input.storage,
+    });
+  } catch {
+    // The durable row remains available to cron if post-commit cleanup cannot run.
+  }
+}
+
+async function queuePreviousReportPdf(
+  input: {
+    persistedValue: unknown;
+    replacementStorageKey: string;
+    teacherId: string;
+  },
+  transaction: Prisma.TransactionClient,
+) {
+  const previousReference = trustedPreviousReportStorageReference(
+    input.persistedValue,
+    input.teacherId,
+  );
+  const replacementReference = normalizePersistedStorageReference(input.replacementStorageKey);
+  if (!previousReference || !replacementReference) return null;
+  if (previousReference.storageKey === replacementReference.storageKey) return null;
+
+  const filename = previousReference.storageKey.split("/").at(-1) ?? "report.pdf";
+  return queueStorageObjectForDeletion(
+    {
+      ownerId: input.teacherId,
+      purpose: "report-pdf",
+      storageKey: previousReference.storageKey,
+      filename,
+      mimeType: "application/pdf",
+      byteSize: CONSERVATIVE_UNLEDGERED_STORAGE_BYTES,
+    },
+    transaction,
+  );
+}
+
+function reportAuditTimestamp(value: Date | null) {
+  return value?.toISOString() ?? null;
+}
+
 export async function exportReportSnapshotPdf(teacherId: string, snapshotId: string) {
   const snapshot = await getReportSnapshotForTeacher(teacherId, snapshotId);
   if (!snapshot) {
     throw new Error("Report snapshot not found.");
   }
   const rendered = await renderReportSnapshotPdf(snapshot.snapshotData as Record<string, unknown>);
-  const storage = createStorageService({ runtimeRole: "TEACHER" });
-  const storageKey = await storage.upload(Buffer.from(rendered.bytes), rendered.filename);
-  const pdfGeneratedAt = new Date();
-  const updatedSnapshot = await prisma.reportSnapshot.update({
-    where: { id: snapshot.id },
-    data: { pdfGeneratedAt, pdfStorageKey: storageKey },
+  const storage = createStorageService();
+  const bytes = Buffer.from(rendered.bytes);
+  const storageKey = await storage.upload(bytes, {
+    filename: rendered.filename,
+    namespace: teacherReportNamespace(teacherId),
+    contentType: "application/pdf",
   });
+  const upload = {
+    storageKey,
+    filename: rendered.filename,
+    mimeType: "application/pdf",
+    byteSize: bytes.byteLength,
+  };
+  try {
+    await reservePendingUpload({
+      ownerId: teacherId,
+      purpose: "report-pdf",
+      storage,
+      ...upload,
+    });
+  } catch {
+    await deleteUnreservedReportStorageKeyBestEffort(storage, storageKey);
+    throw new PendingUploadError();
+  }
+
+  let exported: {
+    cleanup: Awaited<ReturnType<typeof queuePreviousReportPdf>>;
+    snapshot: typeof snapshot;
+  };
+  try {
+    exported = await prisma.$transaction(
+      async (transaction) => {
+        const currentSnapshot = await getReportSnapshotForTeacher(
+          teacherId,
+          snapshotId,
+          transaction,
+        );
+        if (!currentSnapshot) {
+          throw new Error("Report snapshot not found.");
+        }
+
+        const pdfGeneratedAt = new Date();
+        const updatedSnapshot = await transaction.reportSnapshot.update({
+          where: {
+            id: currentSnapshot.id,
+            generatedByTeacherId: teacherId,
+            updatedAt: currentSnapshot.updatedAt,
+          },
+          data: { pdfGeneratedAt, pdfStorageKey: storageKey },
+        });
+        await finalizePendingUploads(
+          {
+            ownerId: teacherId,
+            purpose: "report-pdf",
+            uploads: [upload],
+          },
+          transaction,
+        );
+        await createAdminAuditLog(
+          {
+            adminUserId: teacherId,
+            action: "REPORT_PDF_EXPORTED",
+            targetType: "reportSnapshot",
+            targetId: currentSnapshot.id,
+            before: {
+              pdfGeneratedAt: reportAuditTimestamp(currentSnapshot.pdfGeneratedAt),
+              pdfStorageKey: currentSnapshot.pdfStorageKey,
+            },
+            after: {
+              pdfGeneratedAt: reportAuditTimestamp(updatedSnapshot.pdfGeneratedAt),
+              pdfStorageKey: updatedSnapshot.pdfStorageKey,
+            },
+            meta: {
+              teacherId,
+              reportSnapshotId: currentSnapshot.id,
+              storageKey,
+              pdfStorageKey: updatedSnapshot.pdfStorageKey,
+              pdfGeneratedAt: reportAuditTimestamp(updatedSnapshot.pdfGeneratedAt),
+            },
+          },
+          transaction,
+        );
+
+        const cleanup = await queuePreviousReportPdf(
+          {
+            persistedValue: currentSnapshot.pdfStorageKey,
+            replacementStorageKey: storageKey,
+            teacherId,
+          },
+          transaction,
+        );
+
+        return {
+          cleanup,
+          snapshot: updatedSnapshot,
+        };
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      },
+    );
+  } catch (error) {
+    await releaseReportStorageKeyBestEffort({ ownerId: teacherId, storageKey, storage });
+    throw error;
+  }
+
+  if (exported.cleanup) {
+    await releaseReportStorageKeyBestEffort({ ...exported.cleanup, storage });
+  }
 
   return {
     ...rendered,
     publicUrl: storage.getURL(storageKey),
-    snapshot: updatedSnapshot,
+    snapshot: exported.snapshot,
     storageKey,
   };
 }

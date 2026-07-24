@@ -1,4 +1,6 @@
 import { generateRuleBasedAutomationTasks } from "@/lib/repositories/automation-repository";
+import { sweepExpiredPendingUploads } from "@/lib/repositories/pending-upload-repository";
+import { createStorageService } from "@/lib/storage";
 import { NextResponse } from "next/server";
 
 function isAuthorized(authHeader: string | null) {
@@ -15,7 +17,20 @@ export async function GET(request: Request) {
   }
 
   try {
-    const tasks = await generateRuleBasedAutomationTasks();
+    const storage = createStorageService();
+    const [tasks, sweep] = await Promise.all([
+      generateRuleBasedAutomationTasks(),
+      sweepExpiredPendingUploads({ storage }),
+    ]);
+    if (sweep.durabilityFailures > 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Storage cleanup could not preserve retry state.",
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({
       success: true,
       tasksCreated: tasks.length,

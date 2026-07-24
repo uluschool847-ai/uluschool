@@ -1,9 +1,8 @@
 import { type Page, expect, test } from "@playwright/test";
 import { UserRole } from "@prisma/client";
 
+import { createSessionToken } from "@/e2e/helpers/session";
 import { prisma } from "@/lib/prisma";
-
-const AUTH_SECRET = process.env.AUTH_SESSION_SECRET ?? "dev-only-auth-session-secret-please-change";
 const ADMIN_EMAIL = "fixed.admin@uluglobalacademy.com";
 const RUN_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const USER_EMAIL = `qa.users.${RUN_ID}@example.com`;
@@ -11,49 +10,6 @@ const USER_NAME = `QA Users ${RUN_ID}`;
 
 let adminUserId = "";
 let createdUserId = "";
-
-function toBase64Url(input: string) {
-  return Buffer.from(input, "binary")
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-async function signPayload(payloadBase64: string) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(AUTH_SECRET),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payloadBase64));
-  const signatureString = Array.from(new Uint8Array(signature))
-    .map((byte) => String.fromCharCode(byte))
-    .join("");
-  return toBase64Url(signatureString);
-}
-
-async function createSessionToken(input: {
-  uid: string;
-  role: UserRole;
-  email: string;
-  fullName: string;
-}) {
-  const payloadBase64 = toBase64Url(
-    JSON.stringify({
-      uid: input.uid,
-      role: input.role,
-      email: input.email,
-      fullName: input.fullName,
-      exp: Date.now() + 1000 * 60 * 60,
-      mfaVerified: true,
-      authMethod: "password",
-    }),
-  );
-  return `${payloadBase64}.${await signPayload(payloadBase64)}`;
-}
 
 async function setPortalSession(
   page: Page,
@@ -163,7 +119,11 @@ test.describe("Admin Users CRUD", () => {
     await createSection.getByLabel("Email").fill(USER_EMAIL);
     await createSection.getByLabel("Role").selectOption(UserRole.STUDENT);
     await createSection.getByRole("button", { name: "Create User" }).click();
-    await expect(createSection.getByText(/default password/i)).toBeVisible({ timeout: 15000 });
+    const credentialsPanel = page.getByRole("region", { name: /^temporary credentials$/i });
+    await expect(credentialsPanel).toBeVisible({ timeout: 15000 });
+    await expect(
+      credentialsPanel.getByText(/will not be shown after leaving this page/i),
+    ).toBeVisible();
 
     const createdUser = await prisma.appUser.findUniqueOrThrow({
       where: { email: USER_EMAIL },
@@ -176,6 +136,7 @@ test.describe("Admin Users CRUD", () => {
 
     await page.goto(`/admin/users?q=${encodeURIComponent(USER_EMAIL)}`);
     await expect(userRow(page, USER_EMAIL)).toBeVisible();
+    await expect(credentialsPanel).toHaveCount(0);
     await page.reload();
     await expect(userRow(page, USER_EMAIL)).toBeVisible();
 

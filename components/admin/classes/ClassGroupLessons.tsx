@@ -3,6 +3,7 @@ import Link from "next/link";
 import { deleteClassGroupLessonAction } from "@/app/(admin)/admin/classes/actions";
 import { ConfirmedSubmit } from "@/components/admin/ConfirmedSubmit";
 import { Button } from "@/components/ui/button";
+import { DEFAULT_AVAILABILITY_TIMEZONE } from "@/lib/scheduling/availability";
 
 type Lesson = {
   id: string;
@@ -28,6 +29,7 @@ function formatDateTime(value: Date | string) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: DEFAULT_AVAILABILITY_TIMEZONE,
   }).format(date);
 }
 

@@ -25,6 +25,30 @@ describe("availability timezone helpers", () => {
     expect(utc.toISOString()).not.toBe("2026-05-20T10:00:00.000Z");
   });
 
+  it("accepts optional seconds and fractional seconds in datetime-local values", async () => {
+    const { localDateTimeToUtc } = await loadAvailabilityTimezoneHelpers();
+
+    expect(
+      localDateTimeToUtc({
+        value: "2026-01-20T10:00:30.250",
+        timezone: "Africa/Nairobi",
+      }).toISOString(),
+    ).toBe("2026-01-20T07:00:30.250Z");
+  });
+
+  it.each([
+    "2026-01-20T10:00:00Z",
+    "2026-01-20T10:00:00+03:00",
+    "2026-02-30T10:00",
+    "2026-01-20T25:00",
+  ])("rejects non-local or impossible datetime-local value %s", async (value) => {
+    const { localDateTimeToUtc } = await loadAvailabilityTimezoneHelpers();
+
+    expect(() => localDateTimeToUtc({ value, timezone: "Africa/Nairobi" })).toThrow(
+      "Date and time must be valid.",
+    );
+  });
+
   it("round-trips UTC back to the displayed local datetime-local value", async () => {
     const { utcToLocalDateTime } = await loadAvailabilityTimezoneHelpers();
 

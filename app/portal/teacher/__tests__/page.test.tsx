@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { UserRole } from "@prisma/client";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { encodeStorageKey, storageUrlForKey } from "@/lib/storage/storage-url";
 
 const requireRoleMock = vi.hoisted(() => vi.fn());
 const getTeacherDashboardDataMock = vi.hoisted(() => vi.fn());
@@ -207,6 +209,61 @@ describe("Teacher Portal misleading UI safeguards", () => {
     expect(screen.queryByText("Other Teacher Class")).toBeNull();
     expect(screen.queryByText("Unassigned Student")).toBeNull();
     expect(screen.queryByText("Unrelated Group Lesson")).toBeNull();
+  });
+
+  it("renders canonical and exact external submission hrefs but rejects malformed values", async () => {
+    const defaultDashboard = await getTeacherDashboardDataMock("fixture-only");
+    getTeacherDashboardDataMock.mockClear();
+    const storageKey = "private/teachers/teacher-1/submissions/current-work.pdf";
+    const canonicalHref = storageUrlForKey(storageKey);
+    const externalHref =
+      "https://CDN.Example.com/Files/Submission%20One.pdf?download=1#teacher-copy";
+    const crossPurposeHref = `/api/public-files/${encodeStorageKey(storageKey)}`;
+    const submission = (id: string, fullName: string, contentUrl: string) => ({
+      id,
+      contentUrl,
+      submittedAt: new Date("2026-05-05T08:00:00.000Z"),
+      student: { id: `student-${id}`, fullName, email: `${id}@example.com` },
+      assignment: { id: "assignment-1", title: "Algebra Homework" },
+      classGroup: null,
+      classTitle: "IGCSE Mathematics - Group A",
+    });
+    getTeacherDashboardDataMock.mockResolvedValueOnce({
+      ...defaultDashboard,
+      pendingSubmissions: [
+        submission("canonical", "Canonical Student", canonicalHref),
+        submission("external", "External Student", externalHref),
+        submission("malformed", "Malformed Student", "/api/files/not+base64url"),
+        submission("cross-purpose", "Cross Purpose Student", crossPurposeHref),
+        submission("raw-key", "Raw Key Student", "private/teachers/teacher-1/file name.pdf"),
+      ],
+    });
+
+    await renderServerComponent(<TeacherPortalPage />);
+
+    const canonicalArticle = screen.getByText("Canonical Student").closest("article");
+    const externalArticle = screen.getByText("External Student").closest("article");
+    const malformedArticle = screen.getByText("Malformed Student").closest("article");
+    const crossPurposeArticle = screen.getByText("Cross Purpose Student").closest("article");
+    const rawKeyArticle = screen.getByText("Raw Key Student").closest("article");
+    expect(canonicalArticle).not.toBeNull();
+    expect(externalArticle).not.toBeNull();
+    expect(malformedArticle).not.toBeNull();
+    expect(crossPurposeArticle).not.toBeNull();
+    expect(rawKeyArticle).not.toBeNull();
+    expect(
+      within(canonicalArticle as HTMLElement).getByRole("link", { name: "Review" }),
+    ).toHaveAttribute("href", canonicalHref);
+    expect(
+      within(externalArticle as HTMLElement).getByRole("link", { name: "Review" }),
+    ).toHaveAttribute("href", externalHref);
+    expect(
+      within(malformedArticle as HTMLElement).queryByRole("link", { name: "Review" }),
+    ).toBeNull();
+    expect(
+      within(crossPurposeArticle as HTMLElement).queryByRole("link", { name: "Review" }),
+    ).toBeNull();
+    expect(within(rawKeyArticle as HTMLElement).queryByRole("link", { name: "Review" })).toBeNull();
   });
 
   it("shows teacher lesson lifecycle, roster count, detail links, and upcoming/past split", async () => {
@@ -475,7 +532,7 @@ describe("Teacher Portal misleading UI safeguards", () => {
     expect(screen.getByText(/^Upcoming lessons: 2$/i)).toBeDefined();
     expect(screen.getByText(/^Active assignments: 1$/i)).toBeDefined();
     expect(screen.getByText(/^Pending submissions: 1$/i)).toBeDefined();
-    expect(screen.getByText(/next lesson:.*Europe\/Kiev/i)).toBeDefined();
+    expect(screen.getByText(/next lesson:.*Africa\/Nairobi/i)).toBeDefined();
 
     expect(
       screen.getByRole("link", { name: /view class.*igcse geometry group a/i }),

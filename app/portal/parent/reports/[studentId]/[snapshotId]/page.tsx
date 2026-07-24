@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { requireRole } from "@/lib/auth/session";
 import { getReportSnapshotForParent } from "@/lib/repositories/report-repository";
+import { preferredStoredFileHref } from "@/lib/security/storage-links";
 
 type PageProps = {
   params:
@@ -45,11 +46,7 @@ function formatDate(date?: Date | string | null) {
 }
 
 function pdfHref(snapshot: { pdfStorageKey?: string | null }) {
-  const storageKey = snapshot.pdfStorageKey?.trim();
-  if (!storageKey) return null;
-  if (!storageKey.startsWith("/uploads/")) return null;
-  if (storageKey.includes("\\") || storageKey.includes("..")) return null;
-  return storageKey;
+  return preferredStoredFileHref(snapshot.pdfStorageKey, snapshot.pdfStorageKey);
 }
 
 function categoryRows(grades: Record<string, unknown>, data: Record<string, unknown>) {
