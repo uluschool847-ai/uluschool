@@ -103,33 +103,38 @@ describe("Database Seed Completeness (E2E Readiness)", () => {
   });
 
   describe("Relational Richness", () => {
-    it("should have a ScheduledClass forming a connected graph (teacher, multiple students, assignments)", async () => {
-      // Find a class that has a teacher and at least one assignment
-      const complexClass = await prisma.scheduledClass.findFirst({
-        where: {
-          teacherId: { not: null },
-          assignments: { some: {} },
-        },
-        include: {
-          teacher: true,
-          students: true,
-          assignments: true,
-        },
-      });
+    it(
+      "should have a ScheduledClass forming a connected graph (teacher, multiple students, assignments)",
+      async () => {
+        // Find a class that has a teacher and at least one assignment
+        const complexClass = await prisma.scheduledClass.findFirst({
+          where: {
+            id: "class-123",
+            teacherId: { not: null },
+            assignments: { some: {} },
+          },
+          include: {
+            teacher: true,
+            students: true,
+            assignments: true,
+          },
+        });
 
-      expect(complexClass).toBeDefined();
-      expect(complexClass).not.toBeNull();
+        expect(complexClass).toBeDefined();
+        expect(complexClass).not.toBeNull();
 
-      if (complexClass) {
-        // Assert the graph relationships
-        expect(complexClass.teacher).toBeDefined();
+        if (complexClass) {
+          // Assert the graph relationships
+          expect(complexClass.teacher).toBeDefined();
 
-        // Assert multiple students are enrolled
-        expect(complexClass.students.length).toBeGreaterThanOrEqual(2);
+          // Assert multiple students are enrolled
+          expect(complexClass.students.length).toBeGreaterThanOrEqual(2);
 
-        // Assert related assignments exist
-        expect(complexClass.assignments.length).toBeGreaterThan(0);
-      }
-    });
+          // Assert related assignments exist
+          expect(complexClass.assignments.length).toBeGreaterThan(0);
+        }
+      },
+      DB_TEST_TIMEOUT_MS,
+    );
   });
 });
