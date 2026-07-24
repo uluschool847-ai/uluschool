@@ -141,6 +141,48 @@ describe("Google Calendar environment and dependency readiness", () => {
     }
   });
 
+  it("contains no application 2FA schema", () => {
+    const schema = readFileSync(resolve(process.cwd(), "prisma/schema.prisma"), "utf8");
+
+    expect(schema).not.toMatch(/\btwoFactorEnabled\b/);
+    expect(schema).not.toMatch(/\btwoFactorSecret\b/);
+    expect(schema).not.toMatch(/\btwoFactorBackupCodes\b/);
+    expect(schema).not.toMatch(/\bAdminTwoFactorChallenge\b/);
+  });
+
+  it("contains no application 2FA compatibility code in active runtime modules", () => {
+    const historicalRedactionFiles = new Set([
+      "app/(admin)/admin/audit/page.tsx",
+      "lib/monitoring/sentry-sanitize.ts",
+      "lib/repositories/admin-audit-repository.ts",
+    ]);
+    const forbiddenPatterns = [
+      /\bADMIN_2FA_SECRET\b/,
+      /\bADMIN_REQUIRE_2FA\b/,
+      /\bAdminTwoFactorChallenge\b/,
+      /\bRETIRED_ADMIN_SECURITY_PATH\b/,
+      /\btwoFactorBackupCodes\b/,
+      /\btwoFactorEnabled\b/,
+      /\btwoFactorSecret\b/,
+      /\bulu_admin_2fa_pending\b/,
+      /\/portal\/login\/verify-2fa\b/,
+      /\/portal\/setup\/2fa\b/,
+    ] as const;
+    const offenders = sourceFiles().flatMap((filePath) => {
+      const relativePath = relative(ROOT, filePath).replaceAll("\\", "/");
+      if (historicalRedactionFiles.has(relativePath)) return [];
+
+      const content = readFileIfPresent(filePath);
+      if (content === null) return [];
+
+      return forbiddenPatterns
+        .filter((pattern) => pattern.test(content))
+        .map((pattern) => `${relativePath}: ${pattern.source}`);
+    });
+
+    expect(offenders, offenders.join("\n")).toEqual([]);
+  });
+
   it(".env.example declares every Google Calendar integration variable", () => {
     const envExample = readEnvExample();
     const missing = GOOGLE_CALENDAR_ENV_KEYS.filter(

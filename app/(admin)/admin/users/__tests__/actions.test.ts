@@ -114,9 +114,6 @@ describe("Admin user management actions audit coverage", () => {
         phoneWhatsapp: "+254700000000",
         mustChangePassword: true,
         learningStatus: null,
-        twoFactorEnabled: true,
-        twoFactorSecret: "sensitive-totp-secret",
-        twoFactorBackupCodes: ["sensitive-backup-code"],
         createdAt: new Date("2026-07-13T10:00:00.000Z"),
         updatedAt: new Date("2026-07-13T10:00:00.000Z"),
       },
@@ -156,9 +153,7 @@ describe("Admin user management actions audit coverage", () => {
         mustChangePassword: true,
       },
     });
-    expect(JSON.stringify(result)).not.toMatch(
-      /passwordHash|twoFactorSecret|twoFactorBackupCodes|sensitive-totp-secret|sensitive-backup-code/i,
-    );
+    expect(JSON.stringify(result)).not.toMatch(/passwordHash/i);
     expect(revalidatePathMock).toHaveBeenCalledWith("/admin/users");
     expectAppUserAuditTarget("APP_USER_CREATED");
     expect(auditPayloadFor("APP_USER_CREATED")).toEqual(

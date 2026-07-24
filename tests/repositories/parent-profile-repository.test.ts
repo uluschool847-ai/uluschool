@@ -125,8 +125,6 @@ describe("parent profile repository contract", () => {
         ],
         passwordHash: "hashed-password",
         sessionToken: "secret-session-token",
-        twoFactorBackupCodes: ["secret-backup-code"],
-        twoFactorSecret: "secret-2fa",
       }),
     );
 
@@ -138,11 +136,7 @@ describe("parent profile repository contract", () => {
     expect(serialized).not.toContain("Unlinked Child");
     expect(serialized).not.toContain("hashed-password");
     expect(serialized).not.toContain("secret-session-token");
-    expect(serialized).not.toContain("secret-backup-code");
-    expect(serialized).not.toContain("secret-2fa");
     expect(serialized).not.toContain("passwordHash");
-    expect(serialized).not.toContain("twoFactorSecret");
-    expect(serialized).not.toContain("twoFactorBackupCodes");
   });
 
   it("does not select authentication secret fields from the parent record", async () => {
@@ -154,8 +148,6 @@ describe("parent profile repository contract", () => {
         select: expect.not.objectContaining({
           passwordHash: expect.anything(),
           sessionToken: expect.anything(),
-          twoFactorBackupCodes: expect.anything(),
-          twoFactorSecret: expect.anything(),
         }),
       }),
     );
