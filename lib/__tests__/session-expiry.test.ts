@@ -305,19 +305,6 @@ describe("session validation and expiry handling", () => {
       );
     });
 
-    it.each(["/admin/security", "/admin/security/sessions"])(
-      "normalizes the retired admin security next path %s to the dashboard",
-      (nextPath) => {
-        expect(sessionModule.getPortalRedirectPath(UserRole.ADMIN, nextPath)).toBe("/admin");
-      },
-    );
-
-    it("does not treat a near-miss admin security sibling as retired", () => {
-      expect(sessionModule.getPortalRedirectPath(UserRole.ADMIN, "/admin/security-center")).toBe(
-        "/admin/security-center",
-      );
-    });
-
     it.each([
       ["deleted", null],
       ["inactive", makeDbUser({ isActive: false })],
@@ -365,21 +352,10 @@ describe("session validation and expiry handling", () => {
   });
 
   describe("signed auth payload purpose separation", () => {
-    it("expires the legacy pending 2FA cookie when creating a session", async () => {
-      await createSignedSessionToken({
-        uid: "admin-1",
-        role: UserRole.ADMIN,
-        email: "admin@example.com",
-      });
-
-      expect(cookieDeleteMock).toHaveBeenCalledWith("ulu_admin_2fa_pending");
-    });
-
-    it("expires the session and legacy pending 2FA cookies when clearing a session", async () => {
+    it("expires the session cookie when clearing a session", async () => {
       await sessionModule.clearSession();
 
       expect(cookieDeleteMock).toHaveBeenCalledWith("ulu_session");
-      expect(cookieDeleteMock).toHaveBeenCalledWith("ulu_admin_2fa_pending");
     });
 
     it("accepts version 3 password sessions without an MFA field", async () => {

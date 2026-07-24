@@ -5,13 +5,11 @@ import { redirect } from "next/navigation";
 import { findUserById } from "@/lib/repositories/user-repository";
 
 const SESSION_COOKIE = "ulu_session";
-const LEGACY_ADMIN_PENDING_2FA_COOKIE = "ulu_admin_2fa_pending";
 const INITIAL_SETUP_COOKIE = "ulu_initial_setup";
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7;
 const SESSION_SECURITY_VERSION = 3 as const;
 const INITIAL_SETUP_DURATION_MS = 1000 * 60 * 15;
 const MAX_INITIAL_SETUP_NEXT_PATH_LENGTH = 2048;
-const RETIRED_ADMIN_SECURITY_PATH = "/admin/security";
 
 export type AuthMethod = "password" | "sso";
 
@@ -185,14 +183,6 @@ function isSafePortalNextPath(nextPath: string, role: UserRole) {
   );
 }
 
-function isRetiredAdminSecurityPath(nextPath: string) {
-  const pathname = nextPath.split(/[?#]/, 1)[0];
-  return (
-    pathname === RETIRED_ADMIN_SECURITY_PATH ||
-    pathname.startsWith(`${RETIRED_ADMIN_SECURITY_PATH}/`)
-  );
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -295,10 +285,6 @@ export function getPortalLoginPath(nextPath?: string | null) {
 
 export function getPortalRedirectPath(role: UserRole, nextPath?: string | null) {
   const normalized = nextPath?.trim();
-  if (role === UserRole.ADMIN && normalized && isRetiredAdminSecurityPath(normalized)) {
-    return getPortalDashboardPath(role);
-  }
-
   if (normalized && isSafePortalNextPath(normalized, role)) {
     return normalized;
   }
@@ -335,13 +321,11 @@ export async function createSession(input: SessionInput) {
   const prepared = await prepareSessionCookie(input);
   const cookieStore = await cookies();
   cookieStore.set(prepared.name, prepared.value, prepared.options);
-  cookieStore.delete(LEGACY_ADMIN_PENDING_2FA_COOKIE);
 }
 
 export async function clearSession() {
   const cookieStore = await cookies();
   cookieStore.delete(SESSION_COOKIE);
-  cookieStore.delete(LEGACY_ADMIN_PENDING_2FA_COOKIE);
 }
 
 export async function createInitialSetupSession(

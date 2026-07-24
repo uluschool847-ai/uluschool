@@ -17,6 +17,18 @@ and never place credentials, student personal data, or webhook payloads in this 
 | Result | |
 | Evidence location | Private launch record only |
 
+## Application authentication schema cleanup backup
+
+| Field | Recorded value |
+| --- | --- |
+| Backup timestamp | 2026-07-24 12:58 UTC / 15:58 Africa/Nairobi |
+| Source Render database | `ulu-school-staging-db` (`ulu_school_staging`) |
+| Dump format | PostgreSQL custom |
+| Restore target | Disposable PostgreSQL 18 database |
+| Restore result | Pass; key table counts verified privately |
+| Migration rehearsal | Pass; removed columns absent and challenge table removed |
+| Verifier | Codex, under explicit user approval |
+
 For every row record: role, starting route, actions, expected visible result, actual result, created
 test record IDs, cleanup result, and issue reference. Do not record the one-time credential itself.
 

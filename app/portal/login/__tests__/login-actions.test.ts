@@ -53,7 +53,7 @@ vi.mock("@/lib/repositories/admin-audit-repository", () => ({
   logAuthEvent: logAuthEventMock,
 }));
 
-function makeLoginFormData(nextPath = "/admin/security") {
+function makeLoginFormData(nextPath = "/admin/users") {
   const formData = new FormData();
   formData.set("email", "admin@example.com");
   formData.set("password", "ChangeMe123!");
@@ -80,11 +80,11 @@ describe("portal login administrator actions", () => {
     });
   });
 
-  it("normalizes a retired admin security next path after valid password authentication", async () => {
+  it("preserves a safe admin next path after valid password authentication", async () => {
     const { loginAction } = await import("@/app/portal/login/actions");
 
     await expect(loginAction({ success: false, message: "" }, makeLoginFormData())).rejects.toThrow(
-      "REDIRECT:/admin",
+      "REDIRECT:/admin/users",
     );
 
     expect(createSessionMock).toHaveBeenCalledWith({
