@@ -364,6 +364,16 @@ describe("production environment startup contract", () => {
     expect(envExample).not.toMatch(/^DEFAULT_PORTAL_PASSWORD\s*=/m);
   });
 
+  it("declares an explicitly disposable loopback database for E2E", () => {
+    expect(envValue("E2E_DATABASE_URL")).toMatch(
+      /^"postgresql:\/\/[^"]+@localhost:\d+\/[^"?]+_e2e\?schema=public"$/,
+    );
+    expect(envValue("E2E_DIRECT_URL")).toMatch(
+      /^"postgresql:\/\/[^"]+@localhost:\d+\/[^"?]+_e2e\?schema=public"$/,
+    );
+    expect(envValue("E2E_DATABASE_RESET_ALLOWED")).toBe('"1"');
+  });
+
   it("does not contain real provider credentials or provider endpoints", () => {
     const envExample = readEnvExample();
     expect(envExample).not.toMatch(/\.r2\.cloudflarestorage\.com/i);
@@ -375,6 +385,11 @@ describe("production environment startup contract", () => {
     expect(envExample).not.toMatch(/-----BEGIN PRIVATE KEY-----/);
   });
 
+  it("keeps optional public phone contacts blank until verified", () => {
+    expect(envValue("NEXT_PUBLIC_CONTACT_PHONE")).toBe('""');
+    expect(envValue("NEXT_PUBLIC_CONTACT_WHATSAPP")).toBe('""');
+  });
+
   it("gates startup through env:check without changing start or introducing recursion", () => {
     const scripts = readPackageJson().scripts;
     expect(scripts?.["env:check"]).toBe("tsx scripts/check-production-env.ts");
@@ -382,6 +397,20 @@ describe("production environment startup contract", () => {
     expect(scripts?.start).toBe("next start");
     expect(scripts?.["env:check"]).not.toContain("npm run start");
     expect(scripts?.prestart).not.toContain("npm run start");
+  });
+
+  it("keeps local database setup migration-first without schema pushes", () => {
+    const scripts = readPackageJson().scripts;
+
+    expect(scripts?.["db:deploy"]).toBe("prisma migrate deploy");
+    expect(scripts?.["db:status"]).toBe("prisma migrate status");
+    expect(scripts?.["db:clean"]).toBe(
+      "npm run db:generate && npm run db:reset && npm run db:verify",
+    );
+    expect(scripts?.["db:setup"]).toBe(
+      "npm run db:generate && npm run db:deploy && npm run db:seed && npm run db:verify",
+    );
+    expect(JSON.stringify(scripts)).not.toContain("prisma db push");
   });
 
   it("keeps validation pure and process access isolated to the CLI adapter", () => {

@@ -1,5 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
+import {
+  loadProjectEnvironment,
+  resolveE2EDatabaseEnvironment,
+} from "./scripts/e2e-database-policy.mjs";
 
+loadProjectEnvironment(process.env, process.cwd());
+const e2eEnvironment = resolveE2EDatabaseEnvironment(process.env);
+Object.assign(process.env, e2eEnvironment);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 const reuseExistingServer = /^(1|true|yes)$/i.test(
   process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER ?? "",
@@ -50,6 +57,8 @@ export default defineConfig({
     stderr: "pipe",
     env: {
       ...process.env,
+      DATABASE_URL: e2eEnvironment.DATABASE_URL,
+      DIRECT_URL: e2eEnvironment.DIRECT_URL,
       ...(isStoragePartition ? { STORAGE_DRIVER: "local" } : {}),
     },
   },

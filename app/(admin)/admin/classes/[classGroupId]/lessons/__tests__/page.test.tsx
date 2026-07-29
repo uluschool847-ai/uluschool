@@ -22,13 +22,13 @@ vi.mock("@/components/admin/classes/LessonRowActions", () => ({
 
 type LessonsListPageModule = {
   default: (props: {
-    params: Promise<{ classGroupId: string }> | { classGroupId: string };
+    params: Promise<{ id: string }> | { id: string };
     searchParams?: Promise<Record<string, string | undefined>> | Record<string, string | undefined>;
   }) => Promise<JSX.Element> | JSX.Element;
 };
 
 async function loadLessonsListPage() {
-  const specifier = "@/app/(admin)/admin/classes/[classGroupId]/lessons/page";
+  const specifier = "@/app/(admin)/admin/classes/[id]/lessons/page";
   return import(/* @vite-ignore */ specifier) as Promise<LessonsListPageModule>;
 }
 
@@ -77,7 +77,7 @@ describe("Admin scheduled lessons list page", () => {
 
     const page = await loadLessonsListPage();
     const element = await page.default({
-      params: { classGroupId: "group-1" },
+      params: { id: "group-1" },
       searchParams: {
         teacherId: "teacher-1",
         classGroupId: "group-1",
@@ -118,6 +118,16 @@ describe("Admin scheduled lessons list page", () => {
     expect(screen.getByRole("link", { name: /create lesson|new lesson/i })).toHaveProperty(
       "href",
       expect.stringContaining("/admin/classes/group-1/lessons/new"),
+    );
+
+    const table = screen.getByRole("table");
+    expect(table.className).toContain("min-w-[1100px]");
+    expect(table.parentElement?.className).toContain("overflow-x-auto");
+    expect(screen.getByRole("columnheader", { name: "Start / End" }).className).toContain(
+      "whitespace-nowrap",
+    );
+    expect(screen.getByRole("columnheader", { name: "Actions" }).className).toContain(
+      "whitespace-nowrap",
     );
   });
 });

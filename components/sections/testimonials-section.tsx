@@ -16,6 +16,10 @@ function getInitials(name: string) {
 export async function TestimonialsSection() {
   const testimonials = await getPublishedTestimonials();
 
+  if (testimonials.length === 0) {
+    return null;
+  }
+
   return (
     <section className="section-shell bg-secondary/30 dark:bg-card/40">
       <div className="container">

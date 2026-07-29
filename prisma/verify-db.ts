@@ -6,20 +6,28 @@ async function verifyDatabase() {
   console.log("Verifying database state...");
 
   try {
-    // 1. Check if the database is reachable and contains lookup data
-    const subjectCount = await prisma.subject.count();
-    const levelCount = await prisma.level.count();
+    const [subjectCount, levelCount, adminCount] = await Promise.all([
+      prisma.subject.count(),
+      prisma.level.count(),
+      prisma.appUser.count({
+        where: { role: "ADMIN" },
+      }),
+    ]);
+
+    await Promise.all([
+      prisma.enquiry.findFirst({
+        select: { consentVersion: true },
+      }),
+      prisma.pendingUpload.findFirst({
+        select: { claimedAt: true },
+      }),
+    ]);
 
     if (subjectCount === 0 || levelCount === 0) {
       throw new Error(
         `Missing lookup data. Found ${subjectCount} Subjects and ${levelCount} Levels.`,
       );
     }
-
-    // 2. Check for minimal required demo state (e.g., an Admin user)
-    const adminCount = await prisma.appUser.count({
-      where: { role: "ADMIN" },
-    });
 
     if (adminCount === 0) {
       throw new Error("No ADMIN user found in the database.");
@@ -37,7 +45,6 @@ async function verifyDatabase() {
     } else {
       console.error(error);
     }
-    // Fail the script if the DB is empty, unreachable, or missing required state
     process.exit(1);
   } finally {
     await prisma.$disconnect();

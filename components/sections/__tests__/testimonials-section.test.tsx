@@ -8,7 +8,7 @@ vi.mock("@/lib/repositories/cms-repository", () => ({
 }));
 
 type TestimonialsSectionModule = {
-  TestimonialsSection: () => JSX.Element | Promise<JSX.Element>;
+  TestimonialsSection: () => JSX.Element | null | Promise<JSX.Element | null>;
 };
 
 async function loadTestimonialsSection() {
@@ -23,6 +23,14 @@ describe("TestimonialsSection CMS-backed public rendering", () => {
 
   afterEach(() => {
     cleanup();
+  });
+
+  it("renders nothing when there are no published testimonials", async () => {
+    getPublishedTestimonialsMock.mockResolvedValueOnce([]);
+
+    const { TestimonialsSection } = await loadTestimonialsSection();
+
+    expect(await TestimonialsSection()).toBeNull();
   });
 
   it("renders the correct number of published testimonials", async () => {

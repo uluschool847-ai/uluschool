@@ -11,6 +11,7 @@ const storagePostgresTest = readFileSync(
   join(root, "tests/repositories/file-access-repository.postgres.test.ts"),
   "utf8",
 );
+const verifyDatabaseSource = readFileSync(join(root, "prisma/verify-db.ts"), "utf8");
 const seedIntegrationFlag = "RUN_SEED_DB_INTEGRATION";
 const storagePostgresIntegrationFlag = "RUN_S3_POSTGRES_INTEGRATION";
 const retiredAdminTwoFactorPostgresIntegrationFlag = "RUN_ADMIN_TWO_FACTOR_CHALLENGE_POSTGRES";
@@ -27,7 +28,9 @@ const requiredRunCommands = [
   "npx prisma generate",
   "npx prisma validate",
   "npx prisma migrate deploy",
+  "npx prisma migrate status",
   "npm run db:seed",
+  "npm run db:verify",
   "npm run lint",
   "npm run typecheck",
   "npm run test",
@@ -213,6 +216,13 @@ function assertCiWorkflowContract(
 
   assertDatabaseUrl(environment.DATABASE_URL, "DATABASE_URL");
   assertDatabaseUrl(environment.DIRECT_URL, "DIRECT_URL");
+  assertDatabaseUrl(environment.E2E_DATABASE_URL, "E2E_DATABASE_URL");
+  assertDatabaseUrl(environment.E2E_DIRECT_URL, "E2E_DIRECT_URL");
+  assertEqual(
+    environment.E2E_DATABASE_RESET_ALLOWED,
+    "1",
+    "CI must set E2E_DATABASE_RESET_ALLOWED for its disposable E2E database",
+  );
 
   for (const integrationFlag of integrationFlags) {
     if (
@@ -402,6 +412,21 @@ describe("GitHub CI production-readiness contract", () => {
     expect(() => assertCiWorkflowContract(expressionBackedDatabaseUrl)).toThrow(/database url/i);
   });
 
+  it("requires explicit E2E URLs and reset opt-in for the disposable CI service", () => {
+    for (const key of [
+      "E2E_DATABASE_URL",
+      "E2E_DIRECT_URL",
+      "E2E_DATABASE_RESET_ALLOWED",
+    ] as const) {
+      const withoutKey = workflow.replace(new RegExp(`^      ${key}:.*\\r?\\n`, "m"), "");
+
+      expect(withoutKey).not.toBe(workflow);
+      expect(() => assertCiWorkflowContract(withoutKey)).toThrow(
+        new RegExp(key.replaceAll("_", ".*"), "i"),
+      );
+    }
+  });
+
   it("rejects migration and seed commands in the wrong order", () => {
     const reorderedCommands = workflow
       .replace("run: npx prisma migrate deploy", "run: __MIGRATE__")
@@ -410,6 +435,14 @@ describe("GitHub CI production-readiness contract", () => {
 
     expect(reorderedCommands).not.toBe(workflow);
     expect(() => assertCiWorkflowContract(reorderedCommands)).toThrow(/order/i);
+  });
+
+  it("keeps database verification schema-sensitive without running migration commands", () => {
+    expect(verifyDatabaseSource).toContain("prisma.enquiry.findFirst");
+    expect(verifyDatabaseSource).toContain("consentVersion: true");
+    expect(verifyDatabaseSource).toContain("prisma.pendingUpload.findFirst");
+    expect(verifyDatabaseSource).toContain("claimedAt: true");
+    expect(verifyDatabaseSource).not.toMatch(/migrate\s+(?:deploy|status)|child_process|execSync/);
   });
 
   it("rejects additional write permissions", () => {

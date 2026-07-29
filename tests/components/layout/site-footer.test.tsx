@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SiteFooter } from "../../../components/layout/site-footer";
 
 // Mock next/link to render standard <a> tags for testing hrefs
@@ -14,6 +14,12 @@ vi.mock("next/link", () => ({
     </a>
   ),
 }));
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
 
 describe("SiteFooter Navigation", () => {
   it("renders all footer links with correct non-broken paths", () => {
@@ -46,5 +52,19 @@ describe("SiteFooter Navigation", () => {
       expect(href).not.toBe("");
       expect(href).not.toBe("#");
     }
+  });
+
+  it("hides optional contact rows when local contact numbers are not configured", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CONTACT_EMAIL", "");
+    vi.stubEnv("NEXT_PUBLIC_CONTACT_PHONE", "");
+    vi.stubEnv("NEXT_PUBLIC_CONTACT_WHATSAPP", "");
+    vi.resetModules();
+    const { SiteFooter: LocalSiteFooter } = await import("../../../components/layout/site-footer");
+
+    render(<LocalSiteFooter />);
+
+    expect(screen.getByText("Email: info@uluglobalacademy.com")).toBeDefined();
+    expect(screen.queryByText(/^Phone:/i)).toBeNull();
+    expect(screen.queryByText(/^WhatsApp:/i)).toBeNull();
   });
 });

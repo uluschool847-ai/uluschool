@@ -114,6 +114,17 @@ describe("Admin teacher profiles page", () => {
       }),
     ).toBeDefined();
     expect(within(johnRow as HTMLElement).getByText(/inactive/i)).toBeDefined();
+
+    const table = screen.getByRole("table");
+    expect(table.className).toContain("min-w-[1080px]");
+    expect(table.parentElement?.className).toContain("overflow-x-auto");
+    expect(table.parentElement?.className).toContain("relative");
+    expect(screen.getByRole("columnheader", { name: "Status" }).className).toContain(
+      "whitespace-nowrap",
+    );
+    expect(screen.getByRole("columnheader", { name: "Actions" }).className).toContain(
+      "whitespace-nowrap",
+    );
   }, 15_000);
 
   it("renders an empty state when no teacher profiles exist yet", async () => {

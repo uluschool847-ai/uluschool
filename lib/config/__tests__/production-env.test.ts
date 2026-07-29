@@ -91,6 +91,9 @@ function validProductionEnv(): Record<string, string> {
     ADMIN_SSO_SHARED_SECRET: "",
     GOOGLE_TIMEZONE: "Africa/Nairobi",
     NEXT_PUBLIC_SITE_URL: PRODUCTION_ORIGIN,
+    NEXT_PUBLIC_CONTACT_EMAIL: "info@uluglobalacademy.com",
+    NEXT_PUBLIC_CONTACT_PHONE: "+254 712 345 678",
+    NEXT_PUBLIC_CONTACT_WHATSAPP: "+254 722 345 678",
     TURNSTILE_ENFORCE: "true",
     NEXT_PUBLIC_TURNSTILE_SITE_KEY: "turnstile-site-key-value",
     TURNSTILE_SECRET_KEY: "turnstile-secret-key-value",
@@ -173,6 +176,9 @@ describe("validateProductionEnv", () => {
     ["AUTH_SESSION_SECRET", "too-short"],
     ["GOOGLE_TIMEZONE", "UTC"],
     ["NEXT_PUBLIC_SITE_URL", "http://uluglobalacademy.com"],
+    ["NEXT_PUBLIC_CONTACT_EMAIL", undefined],
+    ["NEXT_PUBLIC_CONTACT_EMAIL", "not-an-email-address"],
+    ["NEXT_PUBLIC_CONTACT_EMAIL", "info@example.com"],
     ["TURNSTILE_ENFORCE", "false"],
     ["NEXT_PUBLIC_TURNSTILE_SITE_KEY", ""],
     ["TURNSTILE_SECRET_KEY", "change-this-turnstile-secret"],
@@ -195,6 +201,39 @@ describe("validateProductionEnv", () => {
     ["ALERT_TEST_TOKEN", "too-short"],
   ])("rejects an unsafe or missing %s", (key, value) => {
     expectInvalidKey(key, value);
+  });
+
+  it.each(["NEXT_PUBLIC_CONTACT_PHONE", "NEXT_PUBLIC_CONTACT_WHATSAPP"] as const)(
+    "allows %s to be omitted",
+    (key) => {
+      const env = validProductionEnv();
+      Reflect.deleteProperty(env, key);
+
+      expect(validateProductionEnv(env).ok).toBe(true);
+    },
+  );
+
+  it.each([
+    ["NEXT_PUBLIC_CONTACT_PHONE", "+254 XXX XXX XXX"],
+    ["NEXT_PUBLIC_CONTACT_PHONE", "0712 345 678"],
+    ["NEXT_PUBLIC_CONTACT_PHONE", "+254 000 000 000"],
+    ["NEXT_PUBLIC_CONTACT_PHONE", "+11111111111"],
+    ["NEXT_PUBLIC_CONTACT_WHATSAPP", "placeholder"],
+    ["NEXT_PUBLIC_CONTACT_WHATSAPP", "not-a-phone"],
+    ["NEXT_PUBLIC_CONTACT_WHATSAPP", "+1234567890"],
+    ["NEXT_PUBLIC_CONTACT_WHATSAPP", "+9876543210"],
+  ] as const)("rejects invalid or placeholder %s values", (key, value) => {
+    expectInvalidKey(key, value);
+  });
+
+  it.each([
+    ["NEXT_PUBLIC_CONTACT_PHONE", "+254 712 345 678"],
+    ["NEXT_PUBLIC_CONTACT_PHONE", "+1 (212) 555-0187"],
+    ["NEXT_PUBLIC_CONTACT_PHONE", "+1 (212) 777-7777"],
+    ["NEXT_PUBLIC_CONTACT_WHATSAPP", "+44 20 7946 0958"],
+    ["NEXT_PUBLIC_CONTACT_WHATSAPP", "+1 (234) 567-8901"],
+  ] as const)("accepts a legitimate international %s value", (key, value) => {
+    expect(validateProductionEnv({ ...validProductionEnv(), [key]: value }).ok).toBe(true);
   });
 
   it.each([undefined, "", "true", "TRUE", "1", "yes"])(
@@ -601,45 +640,69 @@ describe("validateProductionEnv", () => {
   });
 });
 
+const SUBPROCESS_TEST_TIMEOUT_MS = 30_000;
+
 describe("production environment CLI", () => {
-  it("exits 0 with deterministic output for intentionally skipped local development", () => {
-    const result = runCli({ NODE_ENV: "development" });
+  it(
+    "exits 0 with deterministic output for intentionally skipped local development",
+    () => {
+      const result = runCli({ NODE_ENV: "development" });
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe(
-      "Production environment validation skipped for local development.\n",
-    );
-    expect(result.stderr).toBe("");
-  });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe(
+        "Production environment validation skipped for local development.\n",
+      );
+      expect(result.stderr).toBe("");
+    },
+    SUBPROCESS_TEST_TIMEOUT_MS,
+  );
 
-  it("exits 0 for a valid production environment", () => {
-    const result = runCli(validProductionEnv());
+  it(
+    "exits 0 for a valid production environment",
+    () => {
+      const result = runCli(validProductionEnv());
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe("Production environment validation passed.\n");
-    expect(result.stderr).toBe("");
-  });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("Production environment validation passed.\n");
+      expect(result.stderr).toBe("");
+    },
+    SUBPROCESS_TEST_TIMEOUT_MS,
+  );
 
-  it("exits 1 with concise deterministic value-free errors", () => {
-    const rejectedSecret = "rejected-session-value";
-    const rejectedUrl = "https://operator:credential@private-host.invalid/path";
-    const env = {
-      ...validProductionEnv(),
-      AUTH_SESSION_SECRET: rejectedSecret,
-      ALERT_WEBHOOK_URL: rejectedUrl,
-    };
+  it(
+    "exits 1 with concise value-free errors",
+    () => {
+      const rejectedSecret = "rejected-session-value";
+      const rejectedUrl = "https://operator:credential@private-host.invalid/path";
+      const env = {
+        ...validProductionEnv(),
+        AUTH_SESSION_SECRET: rejectedSecret,
+        ALERT_WEBHOOK_URL: rejectedUrl,
+      };
 
-    const first = runCli(env);
-    const second = runCli(env);
-    expect(first.status).toBe(1);
-    expect(first.stdout).toBe("");
-    expect(first.stderr).toBe(second.stderr);
-    expect(first.stderr).toMatch(/^Production environment validation failed:\n/);
-    expect(first.stderr).toContain("- AUTH_SESSION_SECRET:");
-    expect(first.stderr).toContain("- ALERT_WEBHOOK_URL:");
-    expect(first.stderr).not.toContain(rejectedSecret);
-    expect(first.stderr).not.toContain(rejectedUrl);
-    expect(first.stderr).not.toContain("private-host.invalid");
-    expect(first.stderr).not.toContain("operator");
-  });
+      const result = runCli(env);
+      const expectedStderr = [
+        "Production environment validation failed:",
+        ...invalidResult(env).errors.map((error) => `- ${error.key}: ${error.message}`),
+        "",
+      ].join("\n");
+      const repeatedExpectedStderr = [
+        "Production environment validation failed:",
+        ...invalidResult(env).errors.map((error) => `- ${error.key}: ${error.message}`),
+        "",
+      ].join("\n");
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toBe(expectedStderr);
+      expect(repeatedExpectedStderr).toBe(expectedStderr);
+      expect(result.stderr).toContain("- AUTH_SESSION_SECRET:");
+      expect(result.stderr).toContain("- ALERT_WEBHOOK_URL:");
+      expect(result.stderr).not.toContain(rejectedSecret);
+      expect(result.stderr).not.toContain(rejectedUrl);
+      expect(result.stderr).not.toContain("private-host.invalid");
+      expect(result.stderr).not.toContain("operator");
+    },
+    SUBPROCESS_TEST_TIMEOUT_MS,
+  );
 });

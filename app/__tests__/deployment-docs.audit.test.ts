@@ -24,7 +24,7 @@ describe("deployment runbook contract", () => {
     const requiredText = [
       "Frankfurt",
       "npm ci --include=dev && npx prisma generate && npm run build",
-      "npm run env:check && npx prisma migrate deploy && npm run bootstrap:production",
+      "npm run env:check && npx prisma migrate deploy && npx prisma migrate status && npm run bootstrap:production && npm run db:verify",
       "default catalogue levels and subjects",
       "npm run start",
       "/api/health",
@@ -44,6 +44,38 @@ describe("deployment runbook contract", () => {
 
     const missing = requiredText.filter((value) => !docs.includes(value));
     expect(missing, `Missing deployment contract text: ${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("documents migration-first setup without a schema-push recovery path", () => {
+    const readme = read("README.md");
+    const localSetup = read("docs/local-setup.md");
+    const knownLimitations = read("docs/known-limitations.md");
+    const renderRunbook = read("docs/deployment/render-production.md");
+
+    expect(readme).toContain("npm run db:deploy");
+    expect(localSetup).toContain("npm run db:deploy");
+    for (const docs of [readme, localSetup, knownLimitations]) {
+      expect(docs).not.toContain("prisma db push");
+    }
+    expect(renderRunbook).toContain(
+      "npm run env:check && npx prisma migrate deploy && npx prisma migrate status && npm run bootstrap:production && npm run db:verify",
+    );
+  });
+
+  it("documents the destructive E2E database isolation contract", () => {
+    const readme = read("README.md");
+    const localSetup = read("docs/local-setup.md");
+
+    for (const docs of [readme, localSetup]) {
+      expect(docs).toContain("E2E_DATABASE_URL");
+      expect(docs).toContain("E2E_DIRECT_URL");
+      expect(docs).toContain("E2E_DATABASE_RESET_ALLOWED=1");
+      expect(docs).toContain("_test");
+      expect(docs).toContain("_e2e");
+      expect(docs).toContain("loopback");
+      expect(docs).toContain("reset");
+      expect(docs).toContain("remote");
+    }
   });
 
   it("covers the launch-critical browser workflows", () => {

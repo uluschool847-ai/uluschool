@@ -150,7 +150,7 @@ export default async function AdminClassGroupsPage({
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+              <table className="min-w-[1100px] w-full text-left text-sm">
                 <thead className="border-b text-xs uppercase text-muted-foreground">
                   <tr>
                     <th className="py-2 pr-4">Group</th>
@@ -159,9 +159,9 @@ export default async function AdminClassGroupsPage({
                     <th className="py-2 pr-4">Teacher</th>
                     <th className="py-2 pr-4">Students</th>
                     <th className="py-2 pr-4">Lessons</th>
-                    <th className="py-2 pr-4">Status</th>
-                    <th className="py-2 pr-4">Updated</th>
-                    <th className="py-2">Actions</th>
+                    <th className="whitespace-nowrap py-2 pr-4">Status</th>
+                    <th className="whitespace-nowrap py-2 pr-4">Updated</th>
+                    <th className="whitespace-nowrap py-2">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -176,14 +176,16 @@ export default async function AdminClassGroupsPage({
                       <td className="py-3 pr-4">{group.subject?.name ?? "General"}</td>
                       <td className="py-3 pr-4">{group.level?.name ?? "Any level"}</td>
                       <td className="py-3 pr-4">{group.teacher?.fullName ?? "Unassigned"}</td>
-                      <td className="py-3 pr-4">
+                      <td className="whitespace-nowrap py-3 pr-4">
                         {group.studentsCount} / {group.capacity ?? "No limit"}
                       </td>
-                      <td className="py-3 pr-4">{group.upcomingLessonsCount} upcoming</td>
-                      <td className="py-3 pr-4">{group.status.toLowerCase()}</td>
-                      <td className="py-3 pr-4">{formatDate(group.updatedAt)}</td>
-                      <td className="py-3">
-                        <div className="flex flex-wrap gap-2">
+                      <td className="whitespace-nowrap py-3 pr-4">
+                        {group.upcomingLessonsCount} upcoming
+                      </td>
+                      <td className="whitespace-nowrap py-3 pr-4">{group.status.toLowerCase()}</td>
+                      <td className="whitespace-nowrap py-3 pr-4">{formatDate(group.updatedAt)}</td>
+                      <td className="whitespace-nowrap py-3">
+                        <div className="flex flex-nowrap gap-2">
                           <Button asChild variant="secondary" size="sm">
                             <Link href={`/admin/classes/${group.id}`}>View</Link>
                           </Button>

@@ -36,15 +36,15 @@ Recommended local bootstrap:
 
 ```bash
 npm run db:generate
-npx prisma db push
+npm run db:deploy
 npm run db:seed
 npm run db:verify
 ```
 
-If you prefer a destructive reset that also reseeds the database:
+Or run the same non-destructive sequence with:
 
 ```bash
-npm run db:reset
+npm run db:setup
 ```
 
 #### 4. Start the development server
@@ -65,15 +65,22 @@ Open [http://localhost:3000](http://localhost:3000).
 | `npm run start` | Run the production server locally |
 | `npm run test` | Run the full Vitest suite once |
 | `npm run test:watch` | Run Vitest in watch mode |
+| `npm run test:e2e -- <specs>` | Build and run selected specs in their isolated release/storage partitions |
+| `npm run test:e2e:focused` | Reset the disposable E2E database and run focused Playwright specs |
+| `npm run test:e2e:release` | Reset and run all release Playwright partitions |
+| `npm run test:e2e:ui` | Reset the disposable E2E database and open Playwright UI mode |
 | `npm run lint` | Run Biome checks across the repo |
 | `npm run qa:admin-smoke` | Run the admin QA smoke suite on an isolated localhost port |
 | `npm run db:generate` | Generate the Prisma client |
 | `npm run db:migrate` | Run `prisma migrate dev` |
+| `npm run db:deploy` | Apply checked-in migrations without creating new ones |
+| `npm run db:status` | Confirm the database matches the checked-in migration history |
 | `npm run db:seed` | Seed the database with local demo/test data |
 | `npm run bootstrap:production` | Idempotently create the first production admin without demo data |
 | `npm run db:reset` | Destructively reset the database and rerun the seed |
-| `npm run db:verify` | Verify that required seed data exists |
-| `npm run db:setup` | Generate Prisma client, reset the DB, and verify seed state |
+| `npm run db:clean` | Destructively rebuild a disposable local database from migrations |
+| `npm run db:verify` | Verify required seed data and schema sentinel fields |
+| `npm run db:setup` | Generate Prisma client, deploy migrations, seed, and verify |
 | `npm run db:studio` | Open Prisma Studio |
 
 ### AI-Assisted Development
@@ -93,6 +100,18 @@ manual browser verification for UI flows, and a final implementation report.
 | `APP_ENV` | On Render | `staging` or `production`; controls the production environment gate and indexing |
 | `NODE_ENV` | No | Normally set by Next.js/hosting; `.env.example` defaults to `development` |
 | `NEXT_RUNTIME` | No | Normally set by Next.js runtime |
+
+#### E2E Database Safety
+
+Playwright requires a separate PostgreSQL database that you create before the first browser run.
+Set both `E2E_DATABASE_URL` and `E2E_DIRECT_URL` to that same disposable database and set
+`E2E_DATABASE_RESET_ALLOWED=1`. Both URLs must use the same loopback host and port, and the database
+name must end in `_test` or `_e2e`.
+
+Every real E2E or Playwright UI run performs a destructive reset, applies checked-in migrations,
+and seeds deterministic fixtures before Playwright starts. The guard rejects missing values,
+shared development database names, and every remote host even when `CI=true`. It never falls back
+to `DATABASE_URL` or `DIRECT_URL`.
 
 #### Auth & Portal
 
@@ -294,17 +313,17 @@ Not seeded by default:
 - A Gmail fallback exists via `EMAIL_USER` and `EMAIL_PASS`.
 
 ### Database Reset
-If migrations are in sync:
+Check and apply pending checked-in migrations without deleting local data:
 
 ```bash
-npm run db:reset
+npm run db:status
+npm run db:deploy
 ```
 
-If schema has drifted or you hit a local migration/table mismatch:
+If the database is disposable and must be rebuilt from migration history:
 
 ```bash
-npx prisma db push --force-reset
-npm run db:seed
+npm run db:clean
 ```
 
 Windows note:

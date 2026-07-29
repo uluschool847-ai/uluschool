@@ -28,8 +28,10 @@ export default function ContactPage() {
             <h2 className="text-xl font-semibold">Contact Details</h2>
             <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
               <li>Email: {siteConfig.contact.email}</li>
-              <li>Phone: {siteConfig.contact.phone}</li>
-              <li>WhatsApp: {siteConfig.contact.whatsapp}</li>
+              {siteConfig.contact.phone ? <li>Phone: {siteConfig.contact.phone}</li> : null}
+              {siteConfig.contact.whatsapp ? (
+                <li>WhatsApp: {siteConfig.contact.whatsapp}</li>
+              ) : null}
               <li>Response Time: Within 24 hours on business days</li>
             </ul>
             <div className="mt-6 flex flex-wrap gap-3">

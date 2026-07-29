@@ -58,7 +58,8 @@ Choose the smallest useful check first:
 3. `npm run lint`.
 4. `npm run typecheck`.
 5. `npm run test`.
-6. `npm run test:e2e` for critical browser workflows.
+6. `npm run test:e2e -- <specs>` for critical focused browser workflows, then
+   `npm run test:e2e:release` for the full release gate.
 7. `npm run build` before deployment-facing changes.
 
 For Prisma changes, also consider:

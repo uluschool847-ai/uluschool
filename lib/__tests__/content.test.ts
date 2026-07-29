@@ -18,6 +18,7 @@ const originalSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
 const originalAppEnv = process.env.APP_ENV;
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   if (originalSiteUrl === undefined) {
     Reflect.deleteProperty(process.env, "NEXT_PUBLIC_SITE_URL");
   } else {
@@ -29,6 +30,23 @@ afterEach(() => {
     process.env.APP_ENV = originalAppEnv;
   }
   vi.resetModules();
+});
+
+describe("site contact content", () => {
+  it("keeps the local email default and leaves missing optional contacts unset", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CONTACT_EMAIL", "");
+    vi.stubEnv("NEXT_PUBLIC_CONTACT_PHONE", "");
+    vi.stubEnv("NEXT_PUBLIC_CONTACT_WHATSAPP", "   ");
+    vi.resetModules();
+
+    const { siteConfig } = await import("@/lib/content");
+
+    expect(siteConfig.contact).toEqual({
+      email: "info@uluglobalacademy.com",
+      phone: null,
+      whatsapp: null,
+    });
+  });
 });
 
 describe("lib/content placeholder and claims guards", () => {

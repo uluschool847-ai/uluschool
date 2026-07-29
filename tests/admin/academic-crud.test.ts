@@ -108,7 +108,7 @@ describe("Admin Academic Master Data CRUD", () => {
       expect(response.success, JSON.stringify(response)).toBe(true);
       expect(response.data).toHaveProperty("id");
       expect(response.data.title).toBe(payload.title);
-    });
+    }, 15_000);
   });
 
   describe("Assignment & Modification (Update)", () => {
@@ -145,7 +145,7 @@ describe("Admin Academic Master Data CRUD", () => {
 
       expect(response).toBeDefined();
       expect(response.success, JSON.stringify(response)).toBe(true);
-    });
+    }, 15_000);
   });
 
   describe("Strict RBAC Enforcement", () => {

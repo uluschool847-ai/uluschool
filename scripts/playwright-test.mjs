@@ -3,6 +3,11 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  loadProjectEnvironment,
+  prepareE2EDatabase,
+  resolveE2EDatabaseEnvironment,
+} from "./e2e-database-policy.mjs";
 
 function escapeRegExp(value) {
   return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
@@ -56,6 +61,7 @@ const playwrightOptionsWithRequiredValues = new Set([
   "--output",
   "--project",
   "--repeat-each",
+  "--reporter",
   "--retries",
   "--run-agents",
   "--shard",
@@ -82,6 +88,34 @@ function isPlaywrightConfigOption(arg) {
   );
 }
 
+function assertNoPlaywrightConfigOverride(args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--") return;
+    if (isPlaywrightConfigOption(arg)) {
+      throw new Error("Playwright E2E runs do not accept caller --config/-c overrides.");
+    }
+    if (playwrightOptionsWithRequiredValues.has(arg) && args[index + 1] !== undefined) {
+      index += 1;
+    }
+  }
+}
+
+function isDiscoveryOnlyInvocation(args) {
+  const discoveryFlags = new Set(["--help", "--list", "--version", "-h", "-V"]);
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--") return false;
+    if (discoveryFlags.has(arg)) return true;
+    if (playwrightOptionsWithRequiredValues.has(arg) && args[index + 1] !== undefined) {
+      index += 1;
+    }
+  }
+
+  return false;
+}
+
 function withReleaseReporter(args, reporterPath) {
   const forwardedArgs = [];
   const releaseReporterArg = `--reporter=${reporterPath}`;
@@ -92,7 +126,7 @@ function withReleaseReporter(args, reporterPath) {
       return [...forwardedArgs, releaseReporterArg, ...args.slice(index)];
     }
     if (isPlaywrightConfigOption(arg)) {
-      throw new Error("Release Playwright partitions do not accept caller --config/-c overrides.");
+      throw new Error("Playwright E2E runs do not accept caller --config/-c overrides.");
     }
     if (arg === "--reporter") {
       const value = args[index + 1];
@@ -196,6 +230,9 @@ if (testPlaywrightCliFlag && (!testPlaywrightCli || !path.isAbsolute(testPlaywri
   throw new Error("--test-playwright-cli requires an absolute CLI path.");
 }
 
+loadProjectEnvironment(process.env, process.cwd());
+Object.assign(process.env, resolveE2EDatabaseEnvironment(process.env));
+
 const selectedPartitions = rawArgs
   .filter((arg) => partitionFlags.has(arg))
   .map((arg) => partitionFlags.get(arg));
@@ -253,8 +290,17 @@ if (usesNextStart) process.env.E2E_PLAYWRIGHT_SERVER_COMMAND = "npx next start";
 const playwrightCli = testPlaywrightCli
   ? path.resolve(testPlaywrightCli)
   : path.resolve("node_modules", "@playwright", "test", "cli.js");
+assertNoPlaywrightConfigOverride(expandedArgs);
 const playwrightArgs =
   partition === "focused" ? expandedArgs : withReleaseReporter(expandedArgs, releaseReporterPath);
+const skipsDatabasePreparation =
+  Boolean(testPlaywrightCli) || isDiscoveryOnlyInvocation(playwrightArgs);
+
+if (!skipsDatabasePreparation) {
+  console.log("Preparing isolated Playwright database.");
+  prepareE2EDatabase(process.env);
+}
+
 const child = spawn(process.execPath, [playwrightCli, "test", ...playwrightArgs], {
   shell: false,
   stdio: "inherit",

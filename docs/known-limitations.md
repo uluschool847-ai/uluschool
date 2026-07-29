@@ -75,6 +75,6 @@
 
 ## Migration History
 - Local migration history can drift from the current Prisma schema if models are renamed or reshaped without a matching migration update.
-- If `npm run db:reset` fails with a missing-table error such as `public.Submission does not exist`, use `npx prisma db push --force-reset && npm run db:seed` as the local recovery path.
-- `npm run db:clean` wraps the same push-based recovery flow after regenerating Prisma Client.
-- This note applies to local development only; production migration discipline still requires explicit reviewed migrations.
+- If `npm run db:reset` fails with a missing-table error such as `public.Submission does not exist`, recreate the disposable local database and run `npm run db:setup`.
+- `npm run db:clean` regenerates Prisma Client, performs a migration reset, and verifies the resulting schema.
+- Local and production recovery remain migration-first so the database always records the reviewed migration history.

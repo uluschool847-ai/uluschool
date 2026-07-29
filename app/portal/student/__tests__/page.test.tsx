@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { UserRole } from "@prisma/client";
 import { cleanup, render, screen } from "@testing-library/react";
-import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireRoleMock = vi.hoisted(() => vi.fn());
@@ -52,16 +51,9 @@ vi.mock("@/app/portal/actions", () => ({
   submitHomeworkAction: submitHomeworkActionMock,
 }));
 
-type StudentDashboardPageModule = {
-  default: () => Promise<ReactElement> | ReactElement;
-};
+import StudentDashboardPage from "@/app/portal/student/page";
 
 const PAGE_SOURCE_PATH = "app/portal/student/page.tsx";
-
-async function loadDashboardPage() {
-  const specifier = "@/app/portal/student/page";
-  return import(/* @vite-ignore */ specifier) as Promise<StudentDashboardPageModule>;
-}
 
 function assignmentPreview(overrides: Record<string, unknown> = {}) {
   return {
@@ -248,8 +240,7 @@ describe("Student dashboard assignment preview cleanup", () => {
   });
 
   it("loads the final dashboard hub through the dedicated student dashboard API using session.uid", async () => {
-    const page = await loadDashboardPage();
-    const element = await page.default();
+    const element = await StudentDashboardPage();
     render(element);
 
     expect(requireRoleMock).toHaveBeenCalledWith([UserRole.STUDENT]);
@@ -261,8 +252,7 @@ describe("Student dashboard assignment preview cleanup", () => {
   });
 
   it("renders the finalized student dashboard hub cards with concise summaries and section links", async () => {
-    const page = await loadDashboardPage();
-    const element = await page.default();
+    const element = await StudentDashboardPage();
     render(element);
 
     for (const section of [
@@ -339,8 +329,7 @@ describe("Student dashboard assignment preview cleanup", () => {
       }),
     );
 
-    const page = await loadDashboardPage();
-    const element = await page.default();
+    const element = await StudentDashboardPage();
     const { container } = render(element);
 
     expect(screen.getByRole("heading", { name: /^profile$/i })).toBeDefined();
@@ -368,8 +357,7 @@ describe("Student dashboard assignment preview cleanup", () => {
       }),
     );
 
-    const page = await loadDashboardPage();
-    const element = await page.default();
+    const element = await StudentDashboardPage();
     render(element);
 
     expect(screen.getByRole("status", { name: /schedule/i })).toHaveTextContent(
@@ -406,8 +394,7 @@ describe("Student dashboard assignment preview cleanup", () => {
       }),
     );
 
-    const page = await loadDashboardPage();
-    const element = await page.default();
+    const element = await StudentDashboardPage();
     render(element);
 
     expect(screen.getByText(/active work/i)).toBeDefined();
@@ -436,8 +423,7 @@ describe("Student dashboard assignment preview cleanup", () => {
       }),
     );
 
-    const page = await loadDashboardPage();
-    const element = await page.default();
+    const element = await StudentDashboardPage();
     render(element);
 
     expect(screen.getByRole("heading", { name: /^assignments$/i })).toBeDefined();
@@ -468,8 +454,7 @@ describe("Student dashboard assignment preview cleanup", () => {
       }),
     );
 
-    const page = await loadDashboardPage();
-    const element = await page.default();
+    const element = await StudentDashboardPage();
     render(element);
 
     expect(screen.queryByText(/overdue assignment/i)).toBeNull();
@@ -477,8 +462,7 @@ describe("Student dashboard assignment preview cleanup", () => {
   });
 
   it("renders quick links to student workflows", async () => {
-    const page = await loadDashboardPage();
-    const element = await page.default();
+    const element = await StudentDashboardPage();
     render(element);
 
     expect(screen.getByRole("link", { name: /assignments/i })).toHaveAttribute(
@@ -514,8 +498,7 @@ describe("Student dashboard assignment preview cleanup", () => {
   it("links the pending assignment summary to detail instead of rendering legacy inline submit forms", async () => {
     listStudentHomeworkMock.mockResolvedValueOnce([legacyHomework()]);
 
-    const page = await loadDashboardPage();
-    const element = await page.default();
+    const element = await StudentDashboardPage();
     render(element);
 
     expect(screen.getByText(/quadratic equations/i)).toBeDefined();
@@ -530,8 +513,7 @@ describe("Student dashboard assignment preview cleanup", () => {
   });
 
   it("links progress preview to the dedicated student progress page", async () => {
-    const page = await loadDashboardPage();
-    const element = await page.default();
+    const element = await StudentDashboardPage();
     render(element);
 
     expect(screen.getByText(/strong algebra progress/i)).toBeDefined();
@@ -550,8 +532,7 @@ describe("Student dashboard assignment preview cleanup", () => {
     listAssignmentsForStudentMock.mockResolvedValueOnce([]);
     listStudentHomeworkMock.mockResolvedValueOnce([]);
 
-    const page = await loadDashboardPage();
-    const element = await page.default();
+    const element = await StudentDashboardPage();
     render(element);
 
     expect(screen.getByRole("status", { name: /assignments|homework/i })).toBeDefined();
@@ -563,9 +544,7 @@ describe("Student dashboard assignment preview cleanup", () => {
   it("rejects wrong roles before loading dashboard assignment previews", async () => {
     requireRoleMock.mockRejectedValueOnce(new Error("NEXT_REDIRECT"));
 
-    const page = await loadDashboardPage();
-
-    await expect(page.default()).rejects.toThrow("NEXT_REDIRECT");
+    await expect(StudentDashboardPage()).rejects.toThrow("NEXT_REDIRECT");
     expect(requireRoleMock).toHaveBeenCalledWith([UserRole.STUDENT]);
     expect(getStudentDashboardDataMock).not.toHaveBeenCalled();
     expect(listAssignmentsForStudentMock).not.toHaveBeenCalled();

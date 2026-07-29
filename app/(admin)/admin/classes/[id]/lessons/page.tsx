@@ -132,18 +132,18 @@ export default async function AdminClassGroupLessonsPage({
             <p className="text-sm text-muted-foreground">No lessons scheduled.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+              <table className="min-w-[1100px] w-full text-left text-sm">
                 <thead>
                   <tr className="border-b">
                     <th className="py-2 pr-3">Title</th>
                     <th className="py-2 pr-3">Class group</th>
                     <th className="py-2 pr-3">Teacher</th>
                     <th className="py-2 pr-3">Subject</th>
-                    <th className="py-2 pr-3">Start / End</th>
-                    <th className="py-2 pr-3">Status</th>
+                    <th className="whitespace-nowrap py-2 pr-3">Start / End</th>
+                    <th className="whitespace-nowrap py-2 pr-3">Status</th>
                     <th className="py-2 pr-3">Live URL</th>
-                    <th className="py-2 pr-3">Reminders</th>
-                    <th className="py-2 pr-3">Actions</th>
+                    <th className="whitespace-nowrap py-2 pr-3">Reminders</th>
+                    <th className="whitespace-nowrap py-2 pr-3">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -168,10 +168,10 @@ export default async function AdminClassGroupLessonsPage({
                         <td className="py-3 pr-3">{showGroup ? groupName : "Same group"}</td>
                         <td className="py-3 pr-3">{showTeacher ? teacherName : "Same teacher"}</td>
                         <td className="py-3 pr-3">{showSubject ? subjectName : "Same subject"}</td>
-                        <td className="py-3 pr-3">
+                        <td className="whitespace-nowrap py-3 pr-3">
                           {formatDateTime(lesson.startAt)} - {formatDateTime(lesson.endAt)}
                         </td>
-                        <td className="py-3 pr-3">
+                        <td className="whitespace-nowrap py-3 pr-3">
                           {lesson.status === "CANCELLED" ? "Canceled state" : lesson.status}
                         </td>
                         <td className="py-3 pr-3">
@@ -179,8 +179,10 @@ export default async function AdminClassGroupLessonsPage({
                             ? "Hidden for canceled lesson"
                             : lesson.liveLessonUrl}
                         </td>
-                        <td className="py-3 pr-3">{lesson.remindersCount} reminders</td>
-                        <td className="py-3 pr-3">
+                        <td className="whitespace-nowrap py-3 pr-3">
+                          {lesson.remindersCount} reminders
+                        </td>
+                        <td className="whitespace-nowrap py-3 pr-3">
                           <LessonRowActions
                             showStatus={false}
                             lesson={{

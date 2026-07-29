@@ -23,7 +23,7 @@ feature, and point-in-time recovery is not available for a free Render PostgreSQ
 | Region | Frankfurt | Frankfurt |
 | Root directory | repository root | repository root |
 | Build command | `npm ci --include=dev && npx prisma generate && npm run build` | `npm ci --include=dev && npx prisma generate && npm run build` |
-| Pre-deploy command | `npm run env:check && npx prisma migrate deploy && npm run bootstrap:production` | `npm run env:check && npx prisma migrate deploy && npm run bootstrap:production` |
+| Pre-deploy command | `npm run env:check && npx prisma migrate deploy && npx prisma migrate status && npm run bootstrap:production && npm run db:verify` | `npm run env:check && npx prisma migrate deploy && npx prisma migrate status && npm run bootstrap:production && npm run db:verify` |
 | Start command | `npm run start` | `npm run start` |
 | Health check path | `/api/health` | `/api/health` |
 | Auto-deploy | after required GitHub checks pass | after required GitHub checks pass |
@@ -149,9 +149,12 @@ older regular session redirects to login and that a fresh password-only login cr
 
 ## First administrator bootstrap
 
-The pre-deploy command is idempotent. It ensures the default catalogue levels and subjects required
-by the public enrolment form, using slug-based upserts that leave existing catalogue records
-unchanged. It does not create demo users, classes, or submissions.
+The build completes before Render runs the pre-deploy command. Pre-deploy validates the
+environment, applies migrations, confirms migration status, bootstraps required production data,
+and verifies schema/data readiness before the service starts. The bootstrap step is idempotent. It
+ensures the default catalogue levels and subjects required by the public enrolment form, using
+slug-based upserts that leave existing catalogue records unchanged. It does not create demo users,
+classes, or submissions.
 
 For a new database with no active administrator, set all three variables in Render:
 
@@ -222,7 +225,8 @@ without object URLs, keys, credentials, or personal data.
 ## Deploy and service verification
 
 1. Confirm the GitHub commit and environment-specific resources before clicking deploy.
-2. Watch the build, environment check, migration, bootstrap, start, and health-check phases.
+2. Watch the build, environment check, migration, migration-status, bootstrap, database
+   verification, start, and health-check phases.
 3. A build or pre-deploy failure must leave the previously healthy service serving traffic.
 4. Open `/api/health`; require a successful response without configuration values or credentials.
 5. Run the deployment smoke against the service's HTTPS `onrender.com` origin.

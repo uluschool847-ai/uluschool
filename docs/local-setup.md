@@ -48,15 +48,15 @@ npm run db:generate
 For a first-time local setup, the least surprising workflow is:
 
 ```bash
-npx prisma db push
+npm run db:deploy
 npm run db:seed
 npm run db:verify
 ```
 
 What each step does:
-- `npx prisma db push` syncs the current schema to your database without creating a new migration.
+- `npm run db:deploy` applies the checked-in migration history without creating a new migration.
 - `npm run db:seed` loads lookup tables, portal users, schedule data, CRM fixtures, and billing fixtures.
-- `npm run db:verify` confirms that the DB contains at least one admin, plus subject and level lookup data.
+- `npm run db:verify` confirms required lookup/admin data and schema sentinel fields.
 
 ### 5. Start the app
 ```bash
@@ -91,6 +91,31 @@ There is no SQLite fallback in this project.
 | `DATABASE_URL` | `postgresql://...` | Used by Prisma for normal database access |
 | `DIRECT_URL` | `postgresql://...` | Used for direct Prisma operations/migrations |
 | `NEXT_PUBLIC_SITE_URL` | `http://localhost:3000` | Public origin used in site config/metadata |
+
+### Isolated Playwright database
+
+Create a second local PostgreSQL database before running Playwright. It is intentionally separate
+from the development database because every real E2E run resets it:
+
+```env
+E2E_DATABASE_URL="postgresql://postgres:postgres@localhost:6543/ulu_school_e2e?schema=public"
+E2E_DIRECT_URL="postgresql://postgres:postgres@localhost:6543/ulu_school_e2e?schema=public"
+E2E_DATABASE_RESET_ALLOWED=1
+```
+
+Both URLs are required and must target the same pre-created database through the same loopback host
+and port (`localhost`, `127.0.0.1`, or `[::1]`). The database name must end in `_test` or `_e2e`.
+The wrapper rejects mismatched endpoints and every remote host, including in CI, and never inherits
+the regular `DATABASE_URL` or `DIRECT_URL`.
+
+`npm run test:e2e -- <specs>`, `npm run test:e2e:focused`, `npm run test:e2e:release`, and
+`npm run test:e2e:ui` all pass through the same guard. Before a real browser run, the wrapper
+performs reset, migration deployment, and deterministic seed in that disposable database.
+Test-only CLI contract mode and discovery commands do not mutate it.
+
+The `test:e2e` entrypoint builds first and partitions selected specs automatically. Standard and
+signed-delivery specs use `next start`; local-storage specs use their isolated storage partition
+and dev server. Use `test:e2e:focused` when iterating against a single dev-server workflow.
 
 ### Auth and portal
 | Variable | Example | Why it matters |
@@ -225,18 +250,22 @@ npx next dev -p 3001
 ```
 
 ### Prisma migration or schema conflicts
-If the local schema drifts and you do not care about preserving local data:
+Inspect migration state before changing the database:
 
 ```bash
-npm run db:reset
+npm run db:status
 ```
 
-If `migrate` is blocked but you just need a working local DB:
+Apply pending checked-in migrations while preserving data:
 
 ```bash
-npx prisma db push --force-reset
-npm run db:seed
-npm run db:verify
+npm run db:deploy
+```
+
+If the local database is disposable and must be rebuilt from migration history:
+
+```bash
+npm run db:clean
 ```
 
 ### Auth session is not persisting

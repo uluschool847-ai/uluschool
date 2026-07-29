@@ -38,18 +38,20 @@ export default async function ResultsPage() {
             </CardContent>
           </Card>
 
-          <div className="grid gap-4 md:grid-cols-3">
-            {testimonials.map((testimonial) => (
-              <Card key={testimonial.id}>
-                <CardHeader>
-                  <CardTitle className="text-lg">{testimonial.studentName}</CardTitle>
-                </CardHeader>
-                <CardContent className="text-sm text-muted-foreground">
-                  &quot;{testimonial.quote}&quot;
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          {testimonials.length > 0 ? (
+            <div className="grid gap-4 md:grid-cols-3">
+              {testimonials.map((testimonial) => (
+                <Card key={testimonial.id}>
+                  <CardHeader>
+                    <CardTitle className="text-lg">{testimonial.studentName}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-sm text-muted-foreground">
+                    &quot;{testimonial.quote}&quot;
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : null}
         </div>
       </section>
     </>

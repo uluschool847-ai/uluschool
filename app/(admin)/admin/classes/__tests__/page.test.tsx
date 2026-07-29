@@ -98,6 +98,16 @@ describe("Admin class groups page", () => {
         "href",
         expect.stringContaining("/admin/classes/group-1/edit"),
       );
+
+      const table = screen.getByRole("table");
+      expect(table.className).toContain("min-w-[1100px]");
+      expect(table.parentElement?.className).toContain("overflow-x-auto");
+      expect(screen.getByRole("columnheader", { name: "Status" }).className).toContain(
+        "whitespace-nowrap",
+      );
+      expect(screen.getByRole("columnheader", { name: "Actions" }).className).toContain(
+        "whitespace-nowrap",
+      );
     },
     SERVER_COMPONENT_TEST_TIMEOUT_MS,
   );

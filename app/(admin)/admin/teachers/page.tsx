@@ -86,17 +86,17 @@ export default async function AdminTeachersPage({ searchParams }: AdminTeachersP
               team.
             </p>
           ) : (
-            <div className="rounded-md border">
-              <table className="w-full text-left text-sm">
+            <div className="relative overflow-x-auto rounded-md border">
+              <table className="min-w-[1080px] w-full text-left text-sm">
                 <thead className="bg-muted/50 text-muted-foreground">
                   <tr>
                     <th className="px-4 py-3 font-medium">Teacher</th>
                     <th className="px-4 py-3 font-medium">Title</th>
                     <th className="px-4 py-3 font-medium">Subjects</th>
-                    <th className="px-4 py-3 font-medium">Cabinet access</th>
-                    <th className="px-4 py-3 font-medium">Updated</th>
-                    <th className="px-4 py-3 font-medium">Status</th>
-                    <th className="px-4 py-3 font-medium text-right">Actions</th>
+                    <th className="whitespace-nowrap px-4 py-3 font-medium">Cabinet access</th>
+                    <th className="whitespace-nowrap px-4 py-3 font-medium">Updated</th>
+                    <th className="whitespace-nowrap px-4 py-3 font-medium">Status</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-right font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -142,13 +142,13 @@ export default async function AdminTeachersPage({ searchParams }: AdminTeachersP
                           </fieldset>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                      <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
                         {teacher.cabinetUserId ? "Linked account" : "No linked account"}
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                      <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
                         {formatUpdatedAt(teacher.updatedAt)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="whitespace-nowrap px-4 py-3">
                         <span
                           className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
                             teacher.isActive
@@ -159,7 +159,7 @@ export default async function AdminTeachersPage({ searchParams }: AdminTeachersP
                           {teacher.isActive ? "Active" : "Inactive"}
                         </span>
                       </td>
-                      <td className="space-x-2 px-4 py-3 text-right">
+                      <td className="space-x-2 whitespace-nowrap px-4 py-3 text-right">
                         <Button asChild size="sm" variant="outline">
                           <Link href={`/admin/teachers/${teacher.id}/edit`}>Edit</Link>
                         </Button>

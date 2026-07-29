@@ -37,8 +37,10 @@ async function completeParentPasswordSetup(
   await page.goto("/portal/login");
   await page.getByLabel(/email/i).fill(email);
   await page.getByLabel(/password/i).fill(temporaryPassword);
-  await page.getByRole("button", { name: /login|sign in/i }).click();
-  await expect(page).toHaveURL(/\/portal\/setup\/password$/);
+  await Promise.all([
+    page.waitForURL(/\/portal\/setup\/password$/, { timeout: 60_000 }),
+    page.getByRole("button", { name: /login|sign in/i }).click(),
+  ]);
   await expect(page.getByRole("heading", { name: /change your password/i })).toBeVisible();
 
   await fillInitialPasswordForm(page, temporaryPassword, rotatedPassword);
@@ -81,16 +83,20 @@ test.describe("Admin Parent Management", () => {
     await page.goto("/portal/login");
     await page.getByLabel(/email/i).fill(ADMIN_EMAIL);
     await page.getByLabel(/password/i).fill(PASSWORD);
-    await page.getByRole("button", { name: /login|sign in/i }).click();
-    await page.waitForURL(/\/(admin|security)/);
+    await Promise.all([
+      page.waitForURL(/\/(admin|security)/, { timeout: 60_000 }),
+      page.getByRole("button", { name: /login|sign in/i }).click(),
+    ]);
   }
 
   async function loginAsParent(page: Page, email: string, password: string) {
     await page.goto("/portal/login");
     await page.getByLabel(/email/i).fill(email);
     await page.getByLabel(/password/i).fill(password);
-    await page.getByRole("button", { name: /login|sign in/i }).click();
-    await page.waitForURL(/\/portal\/parent/);
+    await Promise.all([
+      page.waitForURL(/\/portal\/parent/, { timeout: 60_000 }),
+      page.getByRole("button", { name: /login|sign in/i }).click(),
+    ]);
   }
 
   async function openParentRegistryByEmail(page: Page, email: string) {

@@ -16,6 +16,8 @@ const R2_ENDPOINT_PATTERN =
   /^https:\/\/[a-f0-9]{32}(?:\.(?:eu|fedramp))?\.r2\.cloudflarestorage\.com\/?$/;
 const R2_BUCKET_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])$/;
 const RESERVED_MONITORING_HOST_SUFFIXES = ["invalid", "example", "test"] as const;
+const RESERVED_PUBLIC_CONTACT_DOMAINS = ["example.com", "example.net", "example.org"] as const;
+const KNOWN_SYNTHETIC_CONTACT_NUMBERS = new Set(["+1234567890", "+9876543210"]);
 const EXTENDED_PLACEHOLDER_PREFIXES = ["dummy", "example", "placeholder"] as const;
 const CHANGE_PLACEHOLDER_PREFIXES = [
   "changethis",
@@ -119,6 +121,9 @@ const productionEnvironmentSchema = z
     ADMIN_SSO_SHARED_SECRET: z.string().optional(),
     GOOGLE_TIMEZONE: z.string().optional(),
     NEXT_PUBLIC_SITE_URL: z.string().optional(),
+    NEXT_PUBLIC_CONTACT_EMAIL: z.string().optional(),
+    NEXT_PUBLIC_CONTACT_PHONE: z.string().optional(),
+    NEXT_PUBLIC_CONTACT_WHATSAPP: z.string().optional(),
     TURNSTILE_ENFORCE: z.string().optional(),
     NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().optional(),
     TURNSTILE_SECRET_KEY: z.string().optional(),
@@ -164,6 +169,23 @@ const productionEnvironmentSchema = z
     requireEmpty(context, env.ADMIN_SSO_SHARED_SECRET, "ADMIN_SSO_SHARED_SECRET");
     requireLiteral(context, env.GOOGLE_TIMEZONE, "GOOGLE_TIMEZONE", "Africa/Nairobi");
     requireSiteOrigin(context, env.NEXT_PUBLIC_SITE_URL, appEnv);
+    if (appEnv === "production") {
+      requirePublicContactEmail(
+        context,
+        env.NEXT_PUBLIC_CONTACT_EMAIL,
+        "NEXT_PUBLIC_CONTACT_EMAIL",
+      );
+      requireOptionalContactNumber(
+        context,
+        env.NEXT_PUBLIC_CONTACT_PHONE,
+        "NEXT_PUBLIC_CONTACT_PHONE",
+      );
+      requireOptionalContactNumber(
+        context,
+        env.NEXT_PUBLIC_CONTACT_WHATSAPP,
+        "NEXT_PUBLIC_CONTACT_WHATSAPP",
+      );
+    }
     requireLiteral(context, env.TURNSTILE_ENFORCE, "TURNSTILE_ENFORCE", "true");
     requireProviderValue(
       context,
@@ -377,6 +399,53 @@ function requireSingleMailbox(context: z.RefinementCtx, value: string | undefine
   if (!parseSingleMailbox(value)) {
     addIssue(context, key, "must be a valid email address");
   }
+}
+
+function requirePublicContactEmail(
+  context: z.RefinementCtx,
+  value: string | undefined,
+  key: string,
+) {
+  const mailbox = parseSingleMailbox(value);
+  const domain = mailbox?.address.split("@").at(-1)?.toLowerCase();
+  if (
+    !domain ||
+    RESERVED_PUBLIC_CONTACT_DOMAINS.some(
+      (reservedDomain) => domain === reservedDomain || domain.endsWith(`.${reservedDomain}`),
+    ) ||
+    RESERVED_MONITORING_HOST_SUFFIXES.some(
+      (suffix) => domain === suffix || domain.endsWith(`.${suffix}`),
+    )
+  ) {
+    addIssue(context, key, "must be a valid email address outside reserved domains");
+  }
+}
+
+function requireOptionalContactNumber(
+  context: z.RefinementCtx,
+  value: string | undefined,
+  key: string,
+) {
+  const normalized = value?.trim();
+  if (!normalized) return;
+
+  const compact = normalized.replace(/[\s().-]/g, "");
+  if (
+    isPlaceholder(normalized) ||
+    !/^\+[1-9]\d{7,14}$/.test(compact) ||
+    isSyntheticPhoneNumber(compact)
+  ) {
+    addIssue(context, key, "must be a valid international phone number when configured");
+  }
+}
+
+function isSyntheticPhoneNumber(compact: string) {
+  const digits = compact.slice(1);
+  return (
+    /^(\d)\1+$/.test(digits) ||
+    /0{7,}$/.test(digits) ||
+    KNOWN_SYNTHETIC_CONTACT_NUMBERS.has(compact)
+  );
 }
 
 function requireR2Endpoint(context: z.RefinementCtx, value: string | undefined) {

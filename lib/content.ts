@@ -1,12 +1,18 @@
+function optionalContactValue(value: string | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
 export const siteConfig = {
   name: "ULU Online School",
   url: process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
   description:
     "ULU Online School delivers structured, interactive, and exam-focused Cambridge education to students anywhere in the world.",
   contact: {
-    email: process.env.NEXT_PUBLIC_CONTACT_EMAIL || "info@uluglobalacademy.com",
-    phone: process.env.NEXT_PUBLIC_CONTACT_PHONE || "+254 XXX XXX XXX",
-    whatsapp: process.env.NEXT_PUBLIC_CONTACT_WHATSAPP || "+254 XXX XXX XXX",
+    email:
+      optionalContactValue(process.env.NEXT_PUBLIC_CONTACT_EMAIL) ?? "info@uluglobalacademy.com",
+    phone: optionalContactValue(process.env.NEXT_PUBLIC_CONTACT_PHONE ?? ""),
+    whatsapp: optionalContactValue(process.env.NEXT_PUBLIC_CONTACT_WHATSAPP ?? ""),
   },
 };
 

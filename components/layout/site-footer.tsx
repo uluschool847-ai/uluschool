@@ -19,8 +19,8 @@ export function SiteFooter() {
           </h3>
           <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
             <li>Email: {siteConfig.contact.email}</li>
-            <li>Phone: {siteConfig.contact.phone}</li>
-            <li>WhatsApp: {siteConfig.contact.whatsapp}</li>
+            {siteConfig.contact.phone ? <li>Phone: {siteConfig.contact.phone}</li> : null}
+            {siteConfig.contact.whatsapp ? <li>WhatsApp: {siteConfig.contact.whatsapp}</li> : null}
           </ul>
         </div>
 

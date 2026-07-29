@@ -74,5 +74,6 @@ describe("Results page misleading content safeguards", () => {
     expect(
       container.querySelector("button[disabled], [role='button'][aria-disabled='true']"),
     ).toBeNull();
+    expect(container.querySelector("div.grid.gap-4.md\\:grid-cols-3:empty")).toBeNull();
   });
 });

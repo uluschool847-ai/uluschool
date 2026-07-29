@@ -51,13 +51,21 @@ function getInitials(user: HeaderUser) {
   return user.email.slice(0, 2).toUpperCase();
 }
 
-function HeaderUserInfo({ user }: { user: HeaderUser }) {
+function HeaderUserInfo({
+  user,
+  className = "flex",
+}: {
+  user: HeaderUser;
+  className?: string;
+}) {
   const displayName = getDisplayName(user);
   const initials = getInitials(user);
   const hasName = Boolean(user.fullName?.trim());
 
   return (
-    <div className="flex items-center gap-2 rounded-md border border-secondary bg-secondary/30 px-2 py-1.5">
+    <div
+      className={`${className} items-center gap-2 rounded-md border border-secondary bg-secondary/30 px-2 py-1.5`}
+    >
       <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
         {initials}
       </span>
@@ -133,7 +141,7 @@ function PortalLink({
 
 function UluLogo() {
   return (
-    <Link href="/" className="flex items-center gap-3" aria-label="ULU Online School Home">
+    <Link href="/" className="flex shrink-0 items-center gap-3" aria-label="ULU Online School Home">
       <Image
         src="/ulu-logo.png"
         alt="ULU Online School logo"
@@ -142,7 +150,9 @@ function UluLogo() {
         className="h-11 w-11 object-contain"
         priority
       />
-      <span className="font-heading text-xl font-semibold tracking-wide">ULU Online School</span>
+      <span className="hidden whitespace-nowrap font-heading text-xl font-semibold tracking-wide sm:inline">
+        ULU Online School
+      </span>
     </Link>
   );
 }
@@ -155,6 +165,13 @@ export function SiteHeader() {
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const mobileMenuRef = useRef<HTMLDialogElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const isAuthenticated = session.authenticated;
+  const isAdminPath = pathname?.startsWith("/admin") ?? false;
+  const showAuthenticatedActions = sessionLoaded && isAuthenticated;
+  const showGuestActions = !isAdminPath && (!sessionLoaded || !isAuthenticated);
+  const useCompactDesktopNavigation = isAdminPath || showAuthenticatedActions;
+  const desktopNavigationBreakpoint = useCompactDesktopNavigation ? 1536 : 1024;
+  const mobileNavigationVisibility = useCompactDesktopNavigation ? "2xl:hidden" : "lg:hidden";
 
   const focusMenuButton = useCallback(() => {
     window.setTimeout(() => {
@@ -209,7 +226,7 @@ export function SiteHeader() {
 
   useEffect(() => {
     function handleResize() {
-      if (window.innerWidth >= 1024) {
+      if (window.innerWidth >= desktopNavigationBreakpoint) {
         closeMobileMenu();
       }
     }
@@ -218,7 +235,7 @@ export function SiteHeader() {
     return () => {
       window.removeEventListener("resize", handleResize);
     };
-  }, [closeMobileMenu]);
+  }, [closeMobileMenu, desktopNavigationBreakpoint]);
 
   useEffect(() => {
     if (!open || !mobileMenuRef.current) return;
@@ -285,11 +302,6 @@ export function SiteHeader() {
     };
   }, [pathname]);
 
-  const isAuthenticated = session.authenticated;
-  const isAdminPath = pathname?.startsWith("/admin") ?? false;
-  const showAuthenticatedActions = sessionLoaded && isAuthenticated;
-  const showGuestActions = !isAdminPath && (!sessionLoaded || !isAuthenticated);
-
   return (
     <>
       <header className="sticky top-0 z-40 border-b border-secondary bg-background/95 backdrop-blur-xl">
@@ -302,7 +314,12 @@ export function SiteHeader() {
         <div className="container flex min-h-20 items-center justify-between gap-4">
           <UluLogo />
 
-          <nav aria-label="Main navigation" className="hidden items-center gap-8 lg:flex">
+          <nav
+            aria-label="Main navigation"
+            className={`hidden items-center ${
+              useCompactDesktopNavigation ? "gap-4 2xl:flex" : "gap-8 lg:flex"
+            }`}
+          >
             {mainNavItems.map((item) => (
               <Link
                 key={item.href}
@@ -317,7 +334,7 @@ export function SiteHeader() {
           <div className="hidden items-center gap-2 md:flex">
             {showAuthenticatedActions ? (
               <>
-                <HeaderUserInfo user={session.user} />
+                <HeaderUserInfo user={session.user} className="hidden xl:flex" />
                 <PortalLink role={session.user.role} />
                 <form action={logoutPortal}>
                   <Button
@@ -342,7 +359,7 @@ export function SiteHeader() {
             <ThemeToggle />
           </div>
 
-          <div className="flex items-center gap-2 md:hidden">
+          <div className={`flex items-center gap-2 ${mobileNavigationVisibility}`}>
             <ThemeToggle />
             <Button
               ref={menuButtonRef}
@@ -362,7 +379,7 @@ export function SiteHeader() {
 
       {renderMobileMenu ? (
         <div
-          className={`fixed inset-x-0 bottom-0 top-20 z-50 transition-opacity duration-200 md:hidden ${
+          className={`fixed inset-x-0 bottom-0 top-20 z-50 transition-opacity duration-200 ${mobileNavigationVisibility} ${
             open ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
         >

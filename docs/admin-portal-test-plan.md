@@ -71,7 +71,7 @@ Then run regression gates when the target environment is ready:
 npm run lint
 npm run typecheck
 npm run test
-npm run test:e2e
+npm run test:e2e:release
 ```
 
 ## Acceptance Criteria

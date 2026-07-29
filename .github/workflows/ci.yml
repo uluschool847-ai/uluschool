@@ -31,6 +31,9 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ulu_school_test?schema=public
       DIRECT_URL: postgresql://postgres:postgres@localhost:5432/ulu_school_test?schema=public
+      E2E_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ulu_school_test?schema=public
+      E2E_DIRECT_URL: postgresql://postgres:postgres@localhost:5432/ulu_school_test?schema=public
+      E2E_DATABASE_RESET_ALLOWED: "1"
       AUTH_SESSION_SECRET: ci-only-session-secret-with-at-least-32-characters
       SEED_PORTAL_PASSWORD: CiOnlyPortalPassword123!
       GOOGLE_TIMEZONE: Africa/Nairobi
@@ -61,8 +64,12 @@ jobs:
         run: npx prisma validate
       - name: Apply test database migrations
         run: npx prisma migrate deploy
+      - name: Verify migration status
+        run: npx prisma migrate status
       - name: Seed deterministic test fixtures
         run: npm run db:seed
+      - name: Verify database readiness
+        run: npm run db:verify
       - name: Lint
         run: npm run lint
       - name: Typecheck

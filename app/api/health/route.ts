@@ -6,6 +6,12 @@ import { prisma } from "@/lib/prisma";
 export async function GET() {
   try {
     await prisma.$queryRaw`SELECT 1`;
+    await prisma.enquiry.findFirst({
+      select: { consentVersion: true },
+    });
+    await prisma.pendingUpload.findFirst({
+      select: { claimedAt: true },
+    });
     return NextResponse.json({
       status: "ok",
       timestamp: new Date().toISOString(),

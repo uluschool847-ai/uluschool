@@ -101,7 +101,47 @@ describe("SiteHeader responsive and accessibility behavior", () => {
 
     const navigation = await screen.findByRole("navigation", { name: /main navigation/i });
     expect(navigation).not.toBeNull();
+    expect(navigation.className).toContain("lg:flex");
+    expect(navigation.className).not.toContain("2xl:flex");
     expect(within(navigation).getAllByRole("link").length).toBeGreaterThan(0);
+  });
+
+  it("keeps the narrow header compact and exposes navigation until authenticated desktop links appear", async () => {
+    mockSession({
+      authenticated: true,
+      user: {
+        uid: "admin-1",
+        email: "admin@example.com",
+        fullName: "Admin One",
+        role: "ADMIN",
+      },
+    });
+
+    render(<SiteHeader />);
+
+    const logo = screen.getByRole("link", { name: /ulu online school home/i });
+    expect(logo.className).toContain("shrink-0");
+    const wordmark = within(logo).getByText("ULU Online School");
+    expect(wordmark.className).toContain("hidden");
+    expect(wordmark.className).toContain("sm:inline");
+    expect(wordmark.className).toContain("whitespace-nowrap");
+
+    const desktopIdentity = (await screen.findByText("Admin One")).parentElement?.parentElement;
+    expect(desktopIdentity?.className).toContain("hidden");
+    expect(desktopIdentity?.className).toContain("xl:flex");
+
+    const navigation = await screen.findByRole("navigation", { name: /main navigation/i });
+    expect(navigation.className).toContain("2xl:flex");
+    expect(navigation.className).not.toContain("lg:flex");
+
+    const menuToggle = screen.getByRole("button", { name: /open menu/i });
+    expect(menuToggle.parentElement?.className).toContain("2xl:hidden");
+    expect(menuToggle.parentElement?.className).not.toContain("md:hidden");
+
+    fireEvent.click(menuToggle);
+    const menuDialog = screen.getByRole("dialog", { name: /mobile navigation menu/i });
+    expect(menuDialog.parentElement?.className).toContain("2xl:hidden");
+    expect(menuDialog.parentElement?.className).not.toContain("md:hidden");
   });
 
   it("renders a mobile menu toggle for small screens", async () => {
@@ -188,6 +228,33 @@ describe("SiteHeader responsive and accessibility behavior", () => {
 
     await openMobileMenu();
     setViewport(1280);
+    fireEvent(window, new Event("resize"));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("navigation", { name: /mobile navigation/i })).toBeNull();
+    });
+  });
+
+  it("keeps authenticated navigation open below 2xl and closes it at 2xl", async () => {
+    mockSession({
+      authenticated: true,
+      user: {
+        uid: "admin-1",
+        email: "admin@example.com",
+        fullName: "Admin One",
+        role: "ADMIN",
+      },
+    });
+    setViewport(1280);
+    render(<SiteHeader />);
+
+    await screen.findByText("Admin One");
+    const menuToggle = await openMobileMenu();
+    fireEvent(window, new Event("resize"));
+    expect(menuToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("navigation", { name: /mobile navigation/i })).not.toBeNull();
+
+    setViewport(1536);
     fireEvent(window, new Event("resize"));
 
     await waitFor(() => {

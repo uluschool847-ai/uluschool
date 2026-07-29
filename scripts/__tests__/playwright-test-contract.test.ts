@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,10 +9,16 @@ const RUNNER = join(ROOT, "scripts", "playwright-test.mjs");
 const ADMIN_SMOKE = join(ROOT, "scripts", "admin-smoke.mjs");
 const RELEASE_REPORTER = join(ROOT, "scripts", "playwright-release-reporter.mjs");
 const HOSTILE_REPORTER_MARKER = "Hostile status reporter restored passed status.";
-const RELEASE_CONFIG_ERROR =
-  "Release Playwright partitions do not accept caller --config/-c overrides.";
-const SUBPROCESS_TEST_TIMEOUT_MS = 30_000;
+const CONFIG_OVERRIDE_ERROR = "Playwright E2E runs do not accept caller --config/-c overrides.";
+const SUBPROCESS_TEST_TIMEOUT_MS = 90_000;
 const temporaryDirectories: string[] = [];
+const safeE2EDatabaseEnvironment = {
+  E2E_DATABASE_RESET_ALLOWED: "1",
+  E2E_DATABASE_URL:
+    "postgresql://runtime-user:runtime-secret@localhost:5432/ulu_school_e2e?schema=public",
+  E2E_DIRECT_URL:
+    "postgresql://migration-user:migration-secret@localhost:5432/ulu_school_e2e?schema=public",
+};
 
 type Capture = {
   args: string[];
@@ -81,6 +87,11 @@ const environmentKeys = [
   "PLAYWRIGHT_SERVER_COMMAND",
   "E2E_PLAYWRIGHT_SERVER_COMMAND",
   "E2E_PARTITION",
+  "E2E_DATABASE_URL",
+  "E2E_DIRECT_URL",
+  "E2E_DATABASE_RESET_ALLOWED",
+  "DATABASE_URL",
+  "DIRECT_URL",
   "STORAGE_DRIVER",
   "RUN_S4_SIGNED_DELIVERY_E2E",
   "R2_ENDPOINT",
@@ -153,6 +164,11 @@ const environmentKeys = [
   "PLAYWRIGHT_SERVER_COMMAND",
   "E2E_PLAYWRIGHT_SERVER_COMMAND",
   "E2E_PARTITION",
+  "E2E_DATABASE_URL",
+  "E2E_DIRECT_URL",
+  "E2E_DATABASE_RESET_ALLOWED",
+  "DATABASE_URL",
+  "DIRECT_URL",
   "STORAGE_DRIVER",
   "RUN_S4_SIGNED_DELIVERY_E2E",
   "R2_ENDPOINT",
@@ -186,12 +202,31 @@ process.exit(Number(process.env.PLAYWRIGHT_TEST_EXIT_CODE ?? "0"));
   return cli;
 }
 
-function invokeRunner(args: string[], environment: Record<string, string> = {}) {
+type RunnerOptions = {
+  envFile?: string;
+  envLocalFile?: string;
+  includeSafeDatabaseEnvironment?: boolean;
+};
+
+function invokeRunner(
+  args: string[],
+  environment: Record<string, string> = {},
+  options: RunnerOptions = {},
+) {
   const directory = mkdtempSync(join(tmpdir(), "ulu-playwright-runner-"));
   temporaryDirectories.push(directory);
   const captureFile = join(directory, "capture.json");
   const explicitCli = writeCaptureCli(directory, "explicit");
   const ambientCli = writeCaptureCli(directory, "ambient");
+  if (options.envFile) writeFileSync(join(directory, ".env"), options.envFile);
+  if (options.envLocalFile) writeFileSync(join(directory, ".env.local"), options.envLocalFile);
+  const inheritedEnvironment = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key]) =>
+        options.includeSafeDatabaseEnvironment !== false ||
+        !["E2E_DATABASE_URL", "E2E_DIRECT_URL", "E2E_DATABASE_RESET_ALLOWED"].includes(key),
+    ),
+  );
   const result = spawnSync(
     process.execPath,
     [RUNNER, `--test-playwright-cli=${explicitCli}`, ...args],
@@ -199,8 +234,9 @@ function invokeRunner(args: string[], environment: Record<string, string> = {}) 
       cwd: directory,
       encoding: "utf8",
       env: {
-        ...process.env,
+        ...inheritedEnvironment,
         ...hostileEnvironment,
+        ...(options.includeSafeDatabaseEnvironment === false ? {} : safeE2EDatabaseEnvironment),
         ...environment,
         NODE_ENV: "test",
         PLAYWRIGHT_TEST_CAPTURE_FILE: captureFile,
@@ -211,6 +247,35 @@ function invokeRunner(args: string[], environment: Record<string, string> = {}) 
   );
 
   return { captureFile, result };
+}
+
+function invokeRealRunnerUntilDatabasePreparation(args: string[]) {
+  const directory = mkdtempSync(join(tmpdir(), "ulu-playwright-preparation-"));
+  temporaryDirectories.push(directory);
+  const marker = join(directory, "database-preparation-ran.txt");
+  const fakeNpm = join(directory, "fake-npm.mjs");
+  writeFileSync(
+    fakeNpm,
+    `import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(marker)}, JSON.stringify(process.argv.slice(2)));
+process.exit(1);
+`,
+  );
+
+  const result = spawnSync(process.execPath, [RUNNER, ...args], {
+    cwd: ROOT,
+    encoding: "utf8",
+    env: {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "npm_execpath"),
+      ),
+      ...safeE2EDatabaseEnvironment,
+      NODE_ENV: "test",
+      npm_execpath: fakeNpm,
+    },
+  });
+
+  return { marker, result };
 }
 
 function runRunner(
@@ -242,6 +307,7 @@ function runProductionRunner(useExplicitHook: boolean) {
     env: {
       ...process.env,
       ...hostileEnvironment,
+      ...safeE2EDatabaseEnvironment,
       NODE_ENV: "production",
       PLAYWRIGHT_TEST_CAPTURE_FILE: captureFile,
       PLAYWRIGHT_TEST_CONFIG_FILE: join(ROOT, "playwright.config.ts"),
@@ -269,8 +335,13 @@ function runActualPlaywrightFixture(
   output: string;
   status: number | null;
 } {
-  const directory = mkdtempSync(join(ROOT, ".playwright-release-contract-"));
+  const directory = mkdtempSync(join(tmpdir(), "ulu-playwright-release-contract-"));
   temporaryDirectories.push(directory);
+  symlinkSync(
+    join(ROOT, "node_modules"),
+    join(directory, "node_modules"),
+    process.platform === "win32" ? "junction" : "dir",
+  );
   const configFile = join(directory, "playwright.config.mjs");
   const bridgeFile = join(directory, "fixture-playwright-cli.mjs");
   const bridgeMarkerFile = join(directory, "fixture-playwright-cli-ran.txt");
@@ -376,6 +447,7 @@ process.exit(result.status ?? 1);
       encoding: "utf8",
       env: {
         ...process.env,
+        ...safeE2EDatabaseEnvironment,
         CI: "1",
         FORCE_COLOR: "0",
         NODE_ENV: "test",
@@ -457,11 +529,37 @@ function readPackageScripts() {
   };
 }
 
+function loadProjectPlaywrightConfig(environment: Record<string, string> = {}) {
+  const directory = mkdtempSync(join(tmpdir(), "ulu-playwright-config-"));
+  temporaryDirectories.push(directory);
+  const loader = join(directory, "load-config.mts");
+  const tsxCliPath = join(ROOT, "node_modules", "tsx", "dist", "cli.mjs");
+
+  writeFileSync(
+    loader,
+    `import { pathToFileURL } from "node:url";
+await import(pathToFileURL(${JSON.stringify(join(ROOT, "playwright.config.ts"))}).href);
+`,
+  );
+
+  return spawnSync(process.execPath, [tsxCliPath, loader], {
+    cwd: ROOT,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      ...safeE2EDatabaseEnvironment,
+      ...environment,
+      NODE_ENV: "test",
+    },
+  });
+}
+
 function cliIt(name: string, callback: () => void) {
   it(name, callback, SUBPROCESS_TEST_TIMEOUT_MS);
 }
 
-const releaseConfigOverrideCases = [
+const configOverrideCases = [
+  ["focused", undefined],
   ["standard", "--standard-partition"],
   ["signed delivery", "--signed-delivery-partition"],
   ["storage", "--storage-partition"],
@@ -498,26 +596,175 @@ const releaseConfigOverrideCases = [
   },
 ]);
 
+const partitionConfigCases = [
+  {
+    expectedEnvironmentReporter: hostileEnvironment.PW_TEST_REPORTER,
+    expectedForbidOnly: false,
+    expectedReporters: [],
+    expectedRetries: 1,
+    partition: "focused",
+  },
+  {
+    expectedEnvironmentReporter: null,
+    expectedForbidOnly: true,
+    expectedReporters: ["./scripts/playwright-release-reporter.mjs"],
+    expectedRetries: 0,
+    partition: "standard",
+  },
+  {
+    expectedEnvironmentReporter: null,
+    expectedForbidOnly: true,
+    expectedReporters: ["./scripts/playwright-release-reporter.mjs"],
+    expectedRetries: 0,
+    partition: "signed-delivery",
+  },
+  {
+    expectedEnvironmentReporter: null,
+    expectedForbidOnly: true,
+    expectedReporters: ["./scripts/playwright-release-reporter.mjs"],
+    expectedRetries: 0,
+    partition: "storage",
+  },
+] as const;
+
 describe("Playwright E2E partition contract", () => {
-  cliIt("forbids focused tests only in release partitions", () => {
-    expect(configFor("focused").forbidOnly).toBe(false);
-    for (const partition of ["standard", "signed-delivery", "storage"] as const) {
-      expect(configFor(partition).forbidOnly).toBe(true);
-    }
+  cliIt("does not treat --list consumed by --grep as discovery mode", () => {
+    const { marker, result } = invokeRealRunnerUntilDatabasePreparation(["--grep", "--list"]);
+
+    expect(result.status).toBe(1);
+    expect(existsSync(marker), `${result.stdout}\n${result.stderr}`).toBe(true);
+    expect(result.stderr).toContain("E2E database preparation failed during reset");
   });
 
-  cliIt("retries only focused browser tests", () => {
-    const focusedConfig = configFor("focused");
-    expect(focusedConfig.environment.PW_TEST_REPORTER).toBe(hostileEnvironment.PW_TEST_REPORTER);
-    expect(focusedConfig.reporters).toEqual([]);
-    expect(focusedConfig.retries).toBe(1);
-    for (const partition of ["standard", "signed-delivery", "storage"] as const) {
-      const releaseConfig = configFor(partition);
-      expect(releaseConfig.environment.PW_TEST_REPORTER).toBeNull();
-      expect(releaseConfig.reporters).toEqual(["./scripts/playwright-release-reporter.mjs"]);
-      expect(releaseConfig.retries).toBe(0);
-    }
+  cliIt("does not treat --list after the option terminator as discovery mode", () => {
+    const { marker, result } = invokeRealRunnerUntilDatabasePreparation(["--", "--list"]);
+
+    expect(result.status).toBe(1);
+    expect(existsSync(marker), `${result.stdout}\n${result.stderr}`).toBe(true);
+    expect(result.stderr).toContain("E2E database preparation failed during reset");
   });
+
+  cliIt("rejects missing E2E database configuration before the Playwright CLI runs", () => {
+    const { captureFile, result } = invokeRunner(["--list"], {
+      E2E_DIRECT_URL: "",
+    });
+
+    expect(result.status).toBe(1);
+    expect(existsSync(captureFile)).toBe(false);
+    expect(result.stderr).toContain("E2E_DIRECT_URL is required");
+    expect(result.stderr).not.toContain("runtime-secret");
+    expect(result.stderr).not.toContain("schema=public");
+  });
+
+  cliIt("rejects a remote E2E database even when CI is enabled", () => {
+    const { captureFile, result } = invokeRunner(["--list"], {
+      CI: "true",
+      E2E_DATABASE_URL:
+        "postgresql://runtime-user:remote-secret@db.example.com:5432/ulu_school_e2e?schema=public",
+    });
+
+    expect(result.status).toBe(1);
+    expect(existsSync(captureFile)).toBe(false);
+    expect(result.stderr).toContain("E2E_DATABASE_URL");
+    expect(result.stderr).not.toContain("remote-secret");
+    expect(result.stderr).not.toContain("db.example.com");
+  });
+
+  cliIt("loads the project config only with the guarded E2E database environment", () => {
+    const rejected = loadProjectPlaywrightConfig({ E2E_DATABASE_URL: "" });
+    const accepted = loadProjectPlaywrightConfig();
+
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain("E2E_DATABASE_URL is required");
+    expect(rejected.stderr).not.toContain("runtime-secret");
+    expect(accepted.status, accepted.stderr).toBe(0);
+  });
+
+  cliIt("loads .env.local before policy while preserving explicit shell precedence", () => {
+    const envFile = [
+      "E2E_DATABASE_URL=postgresql://base:base-secret@localhost:5432/base_e2e?schema=public",
+      "E2E_DIRECT_URL=postgresql://base:base-secret@localhost:5432/base_e2e?schema=public",
+      "E2E_DATABASE_RESET_ALLOWED=1",
+    ].join("\n");
+    const envLocalFile = [
+      "E2E_DATABASE_URL=postgresql://local:local-secret@localhost:5432/local_e2e?schema=public",
+      "E2E_DIRECT_URL=postgresql://local:local-secret@localhost:5432/local_e2e?schema=public",
+    ].join("\n");
+    const fromFiles = invokeRunner(
+      ["--list"],
+      {},
+      { envFile, envLocalFile, includeSafeDatabaseEnvironment: false },
+    );
+    const shellEnvironment = {
+      E2E_DATABASE_RESET_ALLOWED: "1",
+      E2E_DATABASE_URL: "postgresql://shell:shell-secret@localhost:5432/shell_e2e?schema=public",
+      E2E_DIRECT_URL: "postgresql://shell:shell-secret@localhost:5432/shell_e2e?schema=public",
+    };
+    const fromShell = invokeRunner(["--list"], shellEnvironment, {
+      envFile,
+      envLocalFile,
+      includeSafeDatabaseEnvironment: false,
+    });
+
+    expect(fromFiles.result.status, fromFiles.result.stderr).toBe(0);
+    expect(fromShell.result.status, fromShell.result.stderr).toBe(0);
+    const fileCapture = JSON.parse(readFileSync(fromFiles.captureFile, "utf8")) as Capture;
+    const shellCapture = JSON.parse(readFileSync(fromShell.captureFile, "utf8")) as Capture;
+    expect(fileCapture.environment.DATABASE_URL).toContain("/local_e2e?");
+    expect(fileCapture.environment.DIRECT_URL).toContain("/local_e2e?");
+    expect(shellCapture.environment.DATABASE_URL).toBe(shellEnvironment.E2E_DATABASE_URL);
+    expect(shellCapture.environment.DIRECT_URL).toBe(shellEnvironment.E2E_DIRECT_URL);
+    const output = [
+      fromFiles.result.stdout,
+      fromFiles.result.stderr,
+      fromShell.result.stdout,
+      fromShell.result.stderr,
+    ].join("\n");
+    expect(output).not.toMatch(/(?:base|local|shell)-secret|schema=public/);
+  });
+
+  cliIt("does not prepare the database when the explicit fake CLI hook is active", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ulu-playwright-fake-npm-"));
+    temporaryDirectories.push(directory);
+    const marker = join(directory, "database-preparation-ran.txt");
+    const fakeNpm = join(directory, "fake-npm.mjs");
+    writeFileSync(
+      fakeNpm,
+      `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "ran");\n`,
+    );
+
+    const { capture, status } = runRunner(["--isolated-server", "--list"], {
+      npm_execpath: fakeNpm,
+    });
+
+    expect(status).toBe(0);
+    expect(capture.environment.DATABASE_URL).toBe(safeE2EDatabaseEnvironment.E2E_DATABASE_URL);
+    expect(capture.environment.DIRECT_URL).toBe(safeE2EDatabaseEnvironment.E2E_DIRECT_URL);
+    expect(capture.webServerEnvironment.DATABASE_URL).toBe(
+      safeE2EDatabaseEnvironment.E2E_DATABASE_URL,
+    );
+    expect(capture.webServerEnvironment.DIRECT_URL).toBe(safeE2EDatabaseEnvironment.E2E_DIRECT_URL);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it.each(partitionConfigCases)(
+    "configures the $partition partition focus and retry policy",
+    ({
+      expectedEnvironmentReporter,
+      expectedForbidOnly,
+      expectedReporters,
+      expectedRetries,
+      partition,
+    }) => {
+      const config = configFor(partition);
+
+      expect(config.forbidOnly).toBe(expectedForbidOnly);
+      expect(config.environment.PW_TEST_REPORTER).toBe(expectedEnvironmentReporter);
+      expect(config.reporters).toEqual(expectedReporters);
+      expect(config.retries).toBe(expectedRetries);
+    },
+    SUBPROCESS_TEST_TIMEOUT_MS,
+  );
 
   cliIt("rejects a release run containing an actual test.only", () => {
     const result = runActualPlaywrightFixture(
@@ -726,7 +973,7 @@ test("hostile config ordinary release failure", () => {
     expect(result.status, result.output).toBe(1);
     expect(result.bridgeRan).toBe(false);
     expect(result.hostileConfigRan).toBe(false);
-    expect(result.output).toContain(RELEASE_CONFIG_ERROR);
+    expect(result.output).toContain(CONFIG_OVERRIDE_ERROR);
     expect(result.output).not.toContain(HOSTILE_REPORTER_MARKER);
   });
 
@@ -742,7 +989,7 @@ test.skip("hostile config skipped release test", () => {});
     expect(result.status, result.output).toBe(1);
     expect(result.bridgeRan).toBe(false);
     expect(result.hostileConfigRan).toBe(false);
-    expect(result.output).toContain(RELEASE_CONFIG_ERROR);
+    expect(result.output).toContain(CONFIG_OVERRIDE_ERROR);
     expect(result.output).not.toContain(HOSTILE_REPORTER_MARKER);
   });
 
@@ -760,7 +1007,7 @@ test("hostile attached short config release failure", () => {
     expect(result.status, result.output).toBe(1);
     expect(result.bridgeRan).toBe(false);
     expect(result.hostileConfigRan).toBe(false);
-    expect(result.output).toContain(RELEASE_CONFIG_ERROR);
+    expect(result.output).toContain(CONFIG_OVERRIDE_ERROR);
     expect(result.output).not.toContain(HOSTILE_REPORTER_MARKER);
   });
 
@@ -776,7 +1023,7 @@ test("controlled unmatched grep release test", () => {});
 
     expect(result.status, result.output).toBe(0);
     expect(result.bridgeRan).toBe(true);
-    expect(result.output).not.toContain(RELEASE_CONFIG_ERROR);
+    expect(result.output).not.toContain(CONFIG_OVERRIDE_ERROR);
     expect(playwrightSummaryCounts(result.output)).toEqual(["1 passed"]);
   });
 
@@ -791,7 +1038,7 @@ test("controlled positional release test", () => {});
 
     expect(result.status, result.output).toBe(0);
     expect(result.bridgeRan).toBe(true);
-    expect(result.output).not.toContain(RELEASE_CONFIG_ERROR);
+    expect(result.output).not.toContain(CONFIG_OVERRIDE_ERROR);
     expect(playwrightSummaryCounts(result.output)).toEqual(["1 passed"]);
   });
 
@@ -853,9 +1100,7 @@ test.skip("controlled focused skipped test", () => {});
   it("runs the production release partitions without application 2FA", () => {
     const scripts = readPackageScripts().scripts;
 
-    expect(scripts["test:e2e"]).toBe(
-      "npm run test:e2e:standard && npm run test:e2e:signed-delivery && npm run test:e2e:storage",
-    );
+    expect(scripts["test:e2e"]).toBe("npm run build && node scripts/filtered-playwright-test.mjs");
     expect(scripts["test:e2e:release"]).toBe(
       "npm run test:e2e:standard && npm run test:e2e:signed-delivery && npm run test:e2e:storage",
     );
@@ -866,6 +1111,7 @@ test.skip("controlled focused skipped test", () => {});
     expect(scripts["test:e2e:admin-2fa"]).toBeUndefined();
     expect(scripts["test:e2e:initial-admin-2fa"]).toBeUndefined();
     expect(scripts["test:e2e:focused"]).toBe("node scripts/playwright-test.mjs --isolated-server");
+    expect(scripts["test:e2e:ui"]).toBe("node scripts/playwright-test.mjs --isolated-server --ui");
 
     const source = readFileSync(RUNNER, "utf8");
     const adminSmokeSource = readFileSync(ADMIN_SMOKE, "utf8");
@@ -890,7 +1136,7 @@ test.skip("controlled focused skipped test", () => {});
       {
         cwd: ROOT,
         encoding: "utf8",
-        env: { ...process.env, NODE_ENV: "test" },
+        env: { ...process.env, ...safeE2EDatabaseEnvironment, NODE_ENV: "test" },
       },
     );
     const output = `${result.stdout}\n${result.stderr}`.replaceAll("\\", "/");
@@ -1001,14 +1247,18 @@ test.skip("controlled focused skipped test", () => {});
     expectWrapperFlagsRemoved(capture);
   });
 
-  it.each(releaseConfigOverrideCases)(
-    "rejects the $partitionName release partition $formName config form before Playwright spawn",
+  it.each(configOverrideCases)(
+    "rejects the $partitionName partition $formName config form before Playwright spawn",
     ({ configArgs, partitionFlag }) => {
-      const { captureFile, result } = invokeRunner([partitionFlag, ...configArgs, "--list"]);
+      const { captureFile, result } = invokeRunner([
+        ...(partitionFlag ? [partitionFlag] : []),
+        ...configArgs,
+        "--list",
+      ]);
 
       expect(result.status).toBe(1);
       expect(existsSync(captureFile)).toBe(false);
-      expect(result.stderr).toContain(RELEASE_CONFIG_ERROR);
+      expect(result.stderr).toContain(CONFIG_OVERRIDE_ERROR);
       expect(result.stderr).not.toContain("hostile-release-config.mjs");
     },
     SUBPROCESS_TEST_TIMEOUT_MS,
@@ -1036,13 +1286,10 @@ test.skip("controlled focused skipped test", () => {});
   });
 
   it.each([
-    ["long separate config", ["--config", "focused-config.mjs"]],
-    ["long equals config", ["--config=focused-config.mjs"]],
-    ["short separate config", ["-c", "focused-config.mjs"]],
-    ["short equals config", ["-c=focused-config.mjs"]],
-    ["short attached config", ["-cfocused-config.mjs"]],
     ["dash-prefixed grep value", ["--grep", "-critical"]],
+    ["config-like grep value", ["--grep", "--config=positional-pattern"]],
     ["dash-prefixed positional filter", ["--", "-critical"]],
+    ["config-like positional filter", ["--", "--config=positional-filter"]],
   ])(
     "forwards focused $0 arguments unchanged",
     (_formName, configArgs) => {

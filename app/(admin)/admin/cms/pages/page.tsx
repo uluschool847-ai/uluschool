@@ -61,33 +61,35 @@ export default async function CMSPagesList({ searchParams = {} }: CmsPagesListPr
               No pages found. Create one to get started.
             </p>
           ) : (
-            <div className="rounded-md border">
-              <table className="w-full text-sm text-left">
+            <div className="overflow-x-auto rounded-md border">
+              <table className="min-w-[760px] w-full text-left text-sm">
                 <thead className="bg-muted/50 text-muted-foreground">
                   <tr>
                     <th className="px-4 py-3 font-medium">Title</th>
                     <th className="px-4 py-3 font-medium">Public URL</th>
-                    <th className="px-4 py-3 font-medium">Status</th>
-                    <th className="px-4 py-3 font-medium">Last Updated</th>
-                    <th className="px-4 py-3 font-medium text-right">Actions</th>
+                    <th className="whitespace-nowrap px-4 py-3 font-medium">Status</th>
+                    <th className="whitespace-nowrap px-4 py-3 font-medium">Last Updated</th>
+                    <th className="whitespace-nowrap px-4 py-3 text-right font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {pages.map((page) => (
                     <tr key={page.id} className="hover:bg-muted/50">
                       <td className="px-4 py-3 font-medium">{page.title}</td>
-                      <td className="px-4 py-3 text-muted-foreground">/pages/{page.slug}</td>
-                      <td className="px-4 py-3">
+                      <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                        /pages/{page.slug}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
                         <span
                           className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${page.isPublished ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-800"}`}
                         >
                           {page.isPublished ? "Published" : "Draft"}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                      <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
                         {formatDate(page.updatedAt)}
                       </td>
-                      <td className="px-4 py-3 text-right space-x-2">
+                      <td className="space-x-2 whitespace-nowrap px-4 py-3 text-right">
                         {page.isPublished ? (
                           <Button asChild variant="secondary" size="sm">
                             <Link href={`/pages/${page.slug}`} target="_blank" rel="noreferrer">
