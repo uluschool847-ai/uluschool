@@ -106,7 +106,8 @@ describe("SiteHeader responsive and accessibility behavior", () => {
     expect(within(navigation).getAllByRole("link").length).toBeGreaterThan(0);
   });
 
-  it("keeps the narrow header compact and exposes navigation until authenticated desktop links appear", async () => {
+  it("keeps the school name visible in the narrow header until authenticated desktop links appear", async () => {
+    setViewport(375);
     mockSession({
       authenticated: true,
       user: {
@@ -122,8 +123,9 @@ describe("SiteHeader responsive and accessibility behavior", () => {
     const logo = screen.getByRole("link", { name: /ulu online school home/i });
     expect(logo.className).toContain("shrink-0");
     const wordmark = within(logo).getByText("ULU Online School");
-    expect(wordmark.className).toContain("hidden");
-    expect(wordmark.className).toContain("sm:inline");
+    expect(wordmark.className).not.toContain("hidden");
+    expect(wordmark.className).toContain("inline");
+    expect(wordmark.className).toContain("text-base");
     expect(wordmark.className).toContain("whitespace-nowrap");
 
     const desktopIdentity = (await screen.findByText("Admin One")).parentElement?.parentElement;

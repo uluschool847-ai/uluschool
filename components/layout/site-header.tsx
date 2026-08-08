@@ -141,16 +141,20 @@ function PortalLink({
 
 function UluLogo() {
   return (
-    <Link href="/" className="flex shrink-0 items-center gap-3" aria-label="ULU Online School Home">
+    <Link
+      href="/"
+      className="flex shrink-0 items-center gap-2 sm:gap-3"
+      aria-label="ULU Online School Home"
+    >
       <Image
         src="/ulu-logo.png"
         alt="ULU Online School logo"
         width={44}
         height={44}
-        className="h-11 w-11 object-contain"
+        className="h-10 w-10 object-contain sm:h-11 sm:w-11"
         priority
       />
-      <span className="hidden whitespace-nowrap font-heading text-xl font-semibold tracking-wide sm:inline">
+      <span className="inline whitespace-nowrap font-heading text-base font-semibold tracking-normal sm:text-xl">
         ULU Online School
       </span>
     </Link>
@@ -311,7 +315,7 @@ export function SiteHeader() {
         >
           Skip to main content
         </a>
-        <div className="container flex min-h-20 items-center justify-between gap-4">
+        <div className="container flex min-h-20 items-center justify-between gap-2 sm:gap-4">
           <UluLogo />
 
           <nav
