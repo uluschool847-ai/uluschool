@@ -67,6 +67,13 @@ test.describe("Site header responsive controls", () => {
     await page.setViewportSize({ width: 1024, height: 800 });
 
     await expect(page.getByRole("button", { name: "Toggle theme" })).toHaveCount(1);
+    await expect(menuButton).toBeVisible();
+    await expect(loginLink).toBeVisible();
+    await expectHeaderToFitViewport(page);
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+
+    await expect(page.getByRole("button", { name: "Toggle theme" })).toHaveCount(1);
     await expect(menuButton).toBeHidden();
     await expect(loginLink).toBeVisible();
     await expectHeaderToFitViewport(page);

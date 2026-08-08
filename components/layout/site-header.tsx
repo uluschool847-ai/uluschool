@@ -170,8 +170,8 @@ export function SiteHeader() {
   const showAuthenticatedActions = sessionLoaded && isAuthenticated;
   const showGuestActions = !isAdminPath && (!sessionLoaded || !isAuthenticated);
   const useCompactDesktopNavigation = isAdminPath || showAuthenticatedActions;
-  const desktopNavigationBreakpoint = useCompactDesktopNavigation ? 1536 : 1024;
-  const mobileNavigationVisibility = useCompactDesktopNavigation ? "2xl:hidden" : "lg:hidden";
+  const desktopNavigationBreakpoint = useCompactDesktopNavigation ? 1536 : 1280;
+  const mobileNavigationVisibility = useCompactDesktopNavigation ? "2xl:hidden" : "xl:hidden";
 
   const focusMenuButton = useCallback(() => {
     window.setTimeout(() => {
@@ -317,7 +317,7 @@ export function SiteHeader() {
           <nav
             aria-label="Main navigation"
             className={`hidden items-center ${
-              useCompactDesktopNavigation ? "gap-4 2xl:flex" : "gap-8 lg:flex"
+              useCompactDesktopNavigation ? "gap-4 2xl:flex" : "gap-8 xl:flex"
             }`}
           >
             {mainNavItems.map((item) => (

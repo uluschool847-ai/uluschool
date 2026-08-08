@@ -101,7 +101,7 @@ describe("SiteHeader responsive and accessibility behavior", () => {
 
     const navigation = await screen.findByRole("navigation", { name: /main navigation/i });
     expect(navigation).not.toBeNull();
-    expect(navigation.className).toContain("lg:flex");
+    expect(navigation.className).toContain("xl:flex");
     expect(navigation.className).not.toContain("2xl:flex");
     expect(within(navigation).getAllByRole("link").length).toBeGreaterThan(0);
   });
@@ -175,7 +175,7 @@ describe("SiteHeader responsive and accessibility behavior", () => {
     expect(loginLink.parentElement?.className).toContain("md:flex");
 
     const menuToggle = screen.getByRole("button", { name: /open menu/i });
-    expect(menuToggle.parentElement?.className).toContain("lg:hidden");
+    expect(menuToggle.parentElement?.className).toContain("xl:hidden");
   });
 
   it("renders a mobile menu toggle for small screens", async () => {
