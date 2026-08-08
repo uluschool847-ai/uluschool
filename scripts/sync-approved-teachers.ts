@@ -4,11 +4,11 @@ import { prisma } from "../lib/prisma";
 import { syncApprovedTeachers } from "../lib/services/sync-approved-teachers";
 
 async function main() {
-  if (process.env.APP_ENV !== "production") {
+  if ((process.env.APP_ENV ?? "") !== "production") {
     throw new Error("Approved teacher synchronization requires APP_ENV=production.");
   }
 
-  const adminEmail = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();
+  const adminEmail = (process.env.BOOTSTRAP_ADMIN_EMAIL ?? "").trim().toLowerCase();
   if (!adminEmail) {
     throw new Error("BOOTSTRAP_ADMIN_EMAIL is required to identify the audit actor.");
   }
