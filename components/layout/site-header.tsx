@@ -171,7 +171,6 @@ export function SiteHeader() {
   const showGuestActions = !isAdminPath && (!sessionLoaded || !isAuthenticated);
   const useCompactDesktopNavigation = isAdminPath || showAuthenticatedActions;
   const desktopNavigationBreakpoint = useCompactDesktopNavigation ? 1536 : 1024;
-  const desktopActionsVisibility = useCompactDesktopNavigation ? "2xl:flex" : "lg:flex";
   const mobileNavigationVisibility = useCompactDesktopNavigation ? "2xl:hidden" : "lg:hidden";
 
   const focusMenuButton = useCallback(() => {
@@ -333,7 +332,7 @@ export function SiteHeader() {
           </nav>
 
           <div className="flex items-center gap-2">
-            <div className={`hidden items-center gap-2 ${desktopActionsVisibility}`}>
+            <div className="hidden items-center gap-2 md:flex">
               {showAuthenticatedActions ? (
                 <>
                   <HeaderUserInfo user={session.user} className="hidden xl:flex" />

@@ -23,18 +23,33 @@ async function setAdminSession(page: Page) {
   ]);
 }
 
-async function expectNoGlobalOverflow(page: Page) {
+async function expectHeaderToFitViewport(page: Page) {
   await expect
     .poll(() =>
-      page.evaluate(
-        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
-      ),
+      page
+        .locator("header")
+        .first()
+        .evaluate((header) => {
+          const tolerance = 1;
+          const visibleElements = [header, ...header.querySelectorAll<HTMLElement>("*")].filter(
+            (element) => {
+              const style = window.getComputedStyle(element);
+              const bounds = element.getBoundingClientRect();
+              return style.display !== "none" && style.visibility !== "hidden" && bounds.width > 0;
+            },
+          );
+
+          return visibleElements.every((element) => {
+            const bounds = element.getBoundingClientRect();
+            return bounds.left >= -tolerance && bounds.right <= window.innerWidth + tolerance;
+          });
+        }),
     )
     .toBe(true);
 }
 
 test.describe("Site header responsive controls", () => {
-  test("landing page hands controls from mobile to desktop without duplicates", async ({
+  test("landing page keeps responsive controls without duplicate theme buttons", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 900, height: 800 });
@@ -46,18 +61,20 @@ test.describe("Site header responsive controls", () => {
     await expect(menuButton).toHaveCount(1);
     await expect(menuButton).toBeVisible();
     await expect(loginLink).toHaveCount(1);
-    await expect(loginLink).toBeHidden();
-    await expectNoGlobalOverflow(page);
+    await expect(loginLink).toBeVisible();
+    await expectHeaderToFitViewport(page);
 
     await page.setViewportSize({ width: 1024, height: 800 });
 
     await expect(page.getByRole("button", { name: "Toggle theme" })).toHaveCount(1);
     await expect(menuButton).toBeHidden();
     await expect(loginLink).toBeVisible();
-    await expectNoGlobalOverflow(page);
+    await expectHeaderToFitViewport(page);
   });
 
-  test("authenticated header hands controls to desktop only at 2xl", async ({ page }) => {
+  test("authenticated header keeps actions visible while the compact menu hands off at 2xl", async ({
+    page,
+  }) => {
     await setAdminSession(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/admin");
@@ -68,8 +85,9 @@ test.describe("Site header responsive controls", () => {
     await expect(menuButton).toHaveCount(1);
     await expect(menuButton).toBeVisible();
     await expect(portalLink).toHaveCount(1);
-    await expect(portalLink).toBeHidden();
-    await expectNoGlobalOverflow(page);
+    await expect(portalLink).toBeVisible();
+    await expect(page.getByRole("button", { name: "Log Out" })).toBeVisible();
+    await expectHeaderToFitViewport(page);
 
     await page.setViewportSize({ width: 1600, height: 900 });
 
@@ -77,6 +95,6 @@ test.describe("Site header responsive controls", () => {
     await expect(menuButton).toBeHidden();
     await expect(portalLink).toBeVisible();
     await expect(page.getByRole("button", { name: "Log Out" })).toBeVisible();
-    await expectNoGlobalOverflow(page);
+    await expectHeaderToFitViewport(page);
   });
 });

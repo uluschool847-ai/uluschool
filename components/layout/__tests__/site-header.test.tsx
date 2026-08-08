@@ -144,7 +144,7 @@ describe("SiteHeader responsive and accessibility behavior", () => {
     expect(menuDialog.parentElement?.className).not.toContain("md:hidden");
   });
 
-  it("uses one theme control and the same 2xl handoff for authenticated header actions", async () => {
+  it("uses one theme control while keeping authenticated actions beside compact navigation", async () => {
     mockSession({
       authenticated: true,
       user: {
@@ -160,21 +160,19 @@ describe("SiteHeader responsive and accessibility behavior", () => {
     expect(await screen.findAllByRole("button", { name: "Theme" })).toHaveLength(1);
     const portalLink = screen.getByRole("link", { name: "Admin Dashboard" });
     expect(portalLink.parentElement?.className).toContain("hidden");
-    expect(portalLink.parentElement?.className).toContain("2xl:flex");
-    expect(portalLink.parentElement?.className).not.toContain("md:flex");
+    expect(portalLink.parentElement?.className).toContain("md:flex");
 
     const menuToggle = screen.getByRole("button", { name: /open menu/i });
     expect(menuToggle.parentElement?.className).toContain("2xl:hidden");
   });
 
-  it("uses one theme control and the same lg handoff for guest header actions", async () => {
+  it("uses one theme control while keeping guest actions available from md", async () => {
     render(<SiteHeader />);
 
     expect(await screen.findAllByRole("button", { name: "Theme" })).toHaveLength(1);
     const loginLink = screen.getByRole("link", { name: "Log In" });
     expect(loginLink.parentElement?.className).toContain("hidden");
-    expect(loginLink.parentElement?.className).toContain("lg:flex");
-    expect(loginLink.parentElement?.className).not.toContain("md:flex");
+    expect(loginLink.parentElement?.className).toContain("md:flex");
 
     const menuToggle = screen.getByRole("button", { name: /open menu/i });
     expect(menuToggle.parentElement?.className).toContain("lg:hidden");
