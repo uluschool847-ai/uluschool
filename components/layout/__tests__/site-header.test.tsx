@@ -144,6 +144,42 @@ describe("SiteHeader responsive and accessibility behavior", () => {
     expect(menuDialog.parentElement?.className).not.toContain("md:hidden");
   });
 
+  it("uses one theme control and the same 2xl handoff for authenticated header actions", async () => {
+    mockSession({
+      authenticated: true,
+      user: {
+        uid: "admin-1",
+        email: "admin@example.com",
+        fullName: "Admin One",
+        role: "ADMIN",
+      },
+    });
+
+    render(<SiteHeader />);
+
+    expect(await screen.findAllByRole("button", { name: "Theme" })).toHaveLength(1);
+    const portalLink = screen.getByRole("link", { name: "Admin Dashboard" });
+    expect(portalLink.parentElement?.className).toContain("hidden");
+    expect(portalLink.parentElement?.className).toContain("2xl:flex");
+    expect(portalLink.parentElement?.className).not.toContain("md:flex");
+
+    const menuToggle = screen.getByRole("button", { name: /open menu/i });
+    expect(menuToggle.parentElement?.className).toContain("2xl:hidden");
+  });
+
+  it("uses one theme control and the same lg handoff for guest header actions", async () => {
+    render(<SiteHeader />);
+
+    expect(await screen.findAllByRole("button", { name: "Theme" })).toHaveLength(1);
+    const loginLink = screen.getByRole("link", { name: "Log In" });
+    expect(loginLink.parentElement?.className).toContain("hidden");
+    expect(loginLink.parentElement?.className).toContain("lg:flex");
+    expect(loginLink.parentElement?.className).not.toContain("md:flex");
+
+    const menuToggle = screen.getByRole("button", { name: /open menu/i });
+    expect(menuToggle.parentElement?.className).toContain("lg:hidden");
+  });
+
   it("renders a mobile menu toggle for small screens", async () => {
     setViewport(375);
     render(<SiteHeader />);

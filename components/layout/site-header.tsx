@@ -171,6 +171,7 @@ export function SiteHeader() {
   const showGuestActions = !isAdminPath && (!sessionLoaded || !isAuthenticated);
   const useCompactDesktopNavigation = isAdminPath || showAuthenticatedActions;
   const desktopNavigationBreakpoint = useCompactDesktopNavigation ? 1536 : 1024;
+  const desktopActionsVisibility = useCompactDesktopNavigation ? "2xl:flex" : "lg:flex";
   const mobileNavigationVisibility = useCompactDesktopNavigation ? "2xl:hidden" : "lg:hidden";
 
   const focusMenuButton = useCallback(() => {
@@ -331,48 +332,48 @@ export function SiteHeader() {
             ))}
           </nav>
 
-          <div className="hidden items-center gap-2 md:flex">
-            {showAuthenticatedActions ? (
-              <>
-                <HeaderUserInfo user={session.user} className="hidden xl:flex" />
-                <PortalLink role={session.user.role} />
-                <form action={logoutPortal}>
-                  <Button
-                    type="submit"
-                    variant="ghost"
-                    className="text-foreground/80 hover:text-primary"
-                  >
-                    Log Out
+          <div className="flex items-center gap-2">
+            <div className={`hidden items-center gap-2 ${desktopActionsVisibility}`}>
+              {showAuthenticatedActions ? (
+                <>
+                  <HeaderUserInfo user={session.user} className="hidden xl:flex" />
+                  <PortalLink role={session.user.role} />
+                  <form action={logoutPortal}>
+                    <Button
+                      type="submit"
+                      variant="ghost"
+                      className="text-foreground/80 hover:text-primary"
+                    >
+                      Log Out
+                    </Button>
+                  </form>
+                </>
+              ) : showGuestActions ? (
+                <>
+                  <Button asChild variant="ghost" className="text-foreground/80 hover:text-primary">
+                    <Link href="/portal/login">Log In</Link>
                   </Button>
-                </form>
-              </>
-            ) : showGuestActions ? (
-              <>
-                <Button asChild variant="ghost" className="text-foreground/80 hover:text-primary">
-                  <Link href="/portal/login">Log In</Link>
-                </Button>
-                <Button asChild>
-                  <Link href="/admissions">Sign Up</Link>
-                </Button>
-              </>
-            ) : null}
+                  <Button asChild>
+                    <Link href="/admissions">Sign Up</Link>
+                  </Button>
+                </>
+              ) : null}
+            </div>
             <ThemeToggle />
-          </div>
-
-          <div className={`flex items-center gap-2 ${mobileNavigationVisibility}`}>
-            <ThemeToggle />
-            <Button
-              ref={menuButtonRef}
-              variant="secondary"
-              size="icon"
-              onClick={() => setOpen((value) => !value)}
-              aria-label={open ? "Close menu" : "Open menu"}
-              aria-expanded={open}
-              aria-controls="mobile-nav-panel"
-              aria-haspopup="dialog"
-            >
-              {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-            </Button>
+            <div className={mobileNavigationVisibility}>
+              <Button
+                ref={menuButtonRef}
+                variant="secondary"
+                size="icon"
+                onClick={() => setOpen((value) => !value)}
+                aria-label={open ? "Close menu" : "Open menu"}
+                aria-expanded={open}
+                aria-controls="mobile-nav-panel"
+                aria-haspopup="dialog"
+              >
+                {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              </Button>
+            </div>
           </div>
         </div>
       </header>

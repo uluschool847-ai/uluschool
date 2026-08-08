@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 const ROOT = process.cwd();
 const E2E_ROOT = join(ROOT, "e2e");
 const SHARED_HELPER_IMPORT = "@/e2e/helpers/session";
-const EXPECTED_SIGNER_SPECS = 38;
-const EXPECTED_COOKIE_WRITES = 39;
+const EXPECTED_SIGNER_SPECS = 39;
+const EXPECTED_COOKIE_WRITES = 40;
 const OUTLIERS = [
   "e2e/portals/parent-billing.spec.ts",
   "e2e/portals/parent-dashboard.spec.ts",
