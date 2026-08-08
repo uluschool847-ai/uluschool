@@ -195,6 +195,18 @@ describe("Section components misleading UI safeguards", () => {
     expect(screen.queryByText(/live class dashboard/i)).toBeNull();
   });
 
+  it("renders the hero lion as theme-coloured line art at the enlarged aspect ratio", () => {
+    render(<HeroSection />);
+
+    const lion = screen.getByRole("img", { name: /geometric lion illustration/i });
+    expect(lion.className.split(/\s+/)).toContain("bg-secondary-foreground");
+    expect(lion.style.aspectRatio).toBe("10 / 9");
+    expect(lion.style.maskImage).toContain("/lion-hero-lineart.png");
+    expect(lion.style.maskRepeat).toBe("no-repeat");
+    expect(lion.style.maskSize).toBe("contain");
+    expect(document.querySelector('img[src="/lion-hero.png"]')).toBeNull();
+  });
+
   it("renders either real section content or nothing", async () => {
     const { container } = render(<FreeTrialCtaSection />);
     expect(textFrom(container).length).toBeGreaterThan(25);

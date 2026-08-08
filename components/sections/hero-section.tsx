@@ -35,31 +35,24 @@ export function HeroSection() {
           </div>
         </div>
 
-        <article className="prestige-surface relative overflow-hidden p-5">
-          <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-accent/20" />
-          <div className="relative rounded-lg border border-secondary bg-background p-4">
-            <div className="rounded-md border border-secondary bg-secondary/35 p-4">
-              <p className="text-sm font-medium text-primary">Structured Online Learning</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Students join scheduled live lessons, access class resources, and receive clear
-                academic guidance from their teachers.
-              </p>
-              <div className="mt-4 grid grid-cols-3 gap-2">
-                <div className="h-10 rounded bg-background" aria-hidden="true" />
-                <div className="h-10 rounded bg-background" aria-hidden="true" />
-                <div className="h-10 rounded bg-background" aria-hidden="true" />
-              </div>
-            </div>
-            <div className="mt-4 h-52 rounded-md bg-gradient-to-br from-secondary to-background p-4">
-              <div className="h-full rounded-md border border-secondary bg-background/75 p-4">
-                <p className="text-sm text-muted-foreground">
-                  Students learn through live classes, recorded lessons, downloadable materials, and
-                  clear progress reporting.
-                </p>
-              </div>
-            </div>
-          </div>
-        </article>
+        <figure className="flex min-h-[18rem] items-center justify-center sm:min-h-[24rem]">
+          <div
+            role="img"
+            aria-label="Geometric lion illustration representing ULU Online School"
+            className="w-full bg-secondary-foreground"
+            style={{
+              aspectRatio: "10 / 9",
+              WebkitMaskImage: "url('/lion-hero-lineart.png')",
+              maskImage: "url('/lion-hero-lineart.png')",
+              WebkitMaskPosition: "center",
+              maskPosition: "center",
+              WebkitMaskRepeat: "no-repeat",
+              maskRepeat: "no-repeat",
+              WebkitMaskSize: "contain",
+              maskSize: "contain",
+            }}
+          />
+        </figure>
       </div>
     </section>
   );
