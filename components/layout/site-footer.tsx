@@ -19,8 +19,18 @@ export function SiteFooter() {
           </h3>
           <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
             <li>Email: {siteConfig.contact.email}</li>
-            {siteConfig.contact.phone ? <li>Phone: {siteConfig.contact.phone}</li> : null}
-            {siteConfig.contact.whatsapp ? <li>WhatsApp: {siteConfig.contact.whatsapp}</li> : null}
+            <li>
+              Phone:{" "}
+              <a className="hover:text-primary" href={siteConfig.contact.phoneHref}>
+                {siteConfig.contact.phone}
+              </a>
+            </li>
+            <li>
+              WhatsApp:{" "}
+              <a className="hover:text-primary" href={siteConfig.contact.whatsappHref}>
+                {siteConfig.contact.whatsapp}
+              </a>
+            </li>
           </ul>
         </div>
 

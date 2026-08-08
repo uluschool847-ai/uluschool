@@ -15,7 +15,7 @@ suite("Seed data - Teacher records", () => {
     await prisma.$disconnect();
   });
 
-  it("creates at least 2 active Teacher records for the public /teachers page", async () => {
+  it("creates exactly the approved active Teacher records for the public /teachers page", async () => {
     const teachers = await prisma.teacher.findMany({
       where: { isActive: true },
       include: {
@@ -33,7 +33,7 @@ suite("Seed data - Teacher records", () => {
       },
     });
 
-    expect(teachers.length).toBeGreaterThanOrEqual(2);
+    expect(teachers).toHaveLength(4);
   });
 
   it("seeds the public teacher profiles expected by marketing pages", async () => {
@@ -57,19 +57,20 @@ suite("Seed data - Teacher records", () => {
 
     const names = teachers.map((teacher) => teacher.fullName);
 
-    expect(names).toEqual(expect.arrayContaining(["Alice Brown", "Jane Doe", "John Smith"]));
+    expect(names).toEqual(["Ms. Cholette", "Sir Alphonse", "Sir Bernard", "Sir Nickson Onyango"]);
 
     for (const teacher of teachers) {
       expect(teacher.fullName).toBeTruthy();
       expect(teacher.fullName.length).toBeGreaterThan(2);
       expect(teacher.title).toBeTruthy();
       expect(teacher.bio).toBeTruthy();
-      expect(teacher.teacherSubjects.length).toBeGreaterThan(0);
+      expect(teacher.photoUrl).toMatch(/^\/(nick|alphonse|cholette)\.jpg$|^\/bernard\.png$/);
     }
 
-    const linkedTeacher = teachers.find(
-      (teacher) => (teacher as { cabinetUserId?: string | null }).cabinetUserId,
-    );
-    expect(linkedTeacher).toBeDefined();
+    expect(
+      teachers
+        .filter((teacher) => teacher.fullName !== "Ms. Cholette")
+        .every((teacher) => teacher.teacherSubjects.length > 0),
+    ).toBe(true);
   });
 });

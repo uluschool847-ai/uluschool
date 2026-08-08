@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Publish the three approved teacher profiles, identify the founder, show two verified contact links, and start new visitors in light mode.
+**Goal:** Publish the four approved teacher profiles, identify the founder, show two verified contact links, and start new visitors in light mode.
 
 **Architecture:** Keep public profile copy in one typed content module shared by deterministic seeding and the production synchronization service. Continue rendering teachers from PostgreSQL through `cms-repository`; synchronize only `Teacher` profile rows in a serializable transaction and record every create, update, and delete in `AdminAuditLog`.
 
@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- The public teaching team contains exactly Sir Nickson Onyango, Sir Alphonse, and Ms. Cholette in that order.
+- The public teaching team contains exactly Sir Nickson Onyango, Sir Alphonse, Ms. Cholette, and Sir Bernard in that order.
 - Removing an extra `Teacher` profile must not delete its linked `AppUser` or cabinet data.
 - Production mutations require an existing active admin actor and write audit logs in the same transaction.
 - Phone is `+254 701 256 095`; WhatsApp is `+254 706 359 133`.
@@ -33,7 +33,7 @@
 
 - [ ] **Step 1: Write the failing content-contract test**
 
-Assert the exact three names, `/nick.jpg`, `/alphonse.jpg`, `/cholette.jpg`, corrected biographies, active status, and display orders 1-3.
+Assert the exact four names, `/nick.jpg`, `/alphonse.jpg`, `/cholette.jpg`, `/bernard.png`, corrected biographies, active status, and display orders 1-4.
 
 - [ ] **Step 2: Run the test and verify RED**
 
@@ -114,7 +114,7 @@ Run the Task 2 command and expect PASS.
 
 - [ ] **Step 1: Write failing synchronization tests**
 
-Cover creating three missing profiles, updating a matching name, deleting an extra `Teacher`, preserving its linked `AppUser`, idempotent second execution, and create/update/delete audit events.
+Cover creating four missing profiles, updating a matching name, deleting an extra `Teacher`, preserving its linked `AppUser`, idempotent second execution, and create/update/delete audit events.
 
 - [ ] **Step 2: Run the test and verify RED**
 
@@ -147,7 +147,7 @@ Expected: PASS.
 
 - [ ] **Step 1: Reset deterministic local data and inspect `/teachers`**
 
-Run the approved synchronization against the local database, then verify exactly three cards and working local images at `http://localhost:3100/teachers`.
+Run the approved synchronization against the local database, then verify exactly four cards and working local images at `http://localhost:3100/teachers`.
 
 - [ ] **Step 2: Run the verification ladder**
 
@@ -163,7 +163,7 @@ Require the `verify` job and browser release gate to complete successfully for t
 
 - [ ] **Step 5: Synchronize production teacher data**
 
-Use the Render Postgres external connection only in process memory, run `npm run db:sync-approved-teachers`, and verify the result reports exactly three approved active profiles. Never print credentials.
+Use the Render Postgres external connection only in process memory, run `npm run db:sync-approved-teachers`, and verify the result reports exactly four approved active profiles. Never print credentials.
 
 - [ ] **Step 6: Update Render contacts and deploy**
 
@@ -171,4 +171,4 @@ Set `NEXT_PUBLIC_CONTACT_PHONE=+254 701 256 095` and `NEXT_PUBLIC_CONTACT_WHATSA
 
 - [ ] **Step 7: Verify production**
 
-Run deployment smoke and Chromium checks on `/teachers`, `/about`, `/contact`, and the footer. Require three correct teacher cards, all three local photos returning HTTP 200, the founder identity, both clickable contacts, one theme toggle, and light initial rendering with dark mode still switchable.
+Run deployment smoke and Chromium checks on `/teachers`, `/about`, `/contact`, and the footer. Require four correct teacher cards, all four local photos returning HTTP 200, the founder identity, both clickable contacts, one theme toggle, and light initial rendering with dark mode still switchable.

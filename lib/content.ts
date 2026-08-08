@@ -3,6 +3,19 @@ function optionalContactValue(value: string | undefined) {
   return normalized ? normalized : null;
 }
 
+function phoneHref(value: string) {
+  return `tel:${value.replace(/[^\d+]/g, "")}`;
+}
+
+function whatsappHref(value: string) {
+  return `https://wa.me/${value.replace(/\D/g, "")}`;
+}
+
+const contactPhone =
+  optionalContactValue(process.env.NEXT_PUBLIC_CONTACT_PHONE) ?? "+254 701 256 095";
+const contactWhatsapp =
+  optionalContactValue(process.env.NEXT_PUBLIC_CONTACT_WHATSAPP) ?? "+254 706 359 133";
+
 export const siteConfig = {
   name: "ULU Online School",
   url: process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
@@ -11,8 +24,10 @@ export const siteConfig = {
   contact: {
     email:
       optionalContactValue(process.env.NEXT_PUBLIC_CONTACT_EMAIL) ?? "info@uluglobalacademy.com",
-    phone: optionalContactValue(process.env.NEXT_PUBLIC_CONTACT_PHONE ?? ""),
-    whatsapp: optionalContactValue(process.env.NEXT_PUBLIC_CONTACT_WHATSAPP ?? ""),
+    phone: contactPhone,
+    phoneHref: phoneHref(contactPhone),
+    whatsapp: contactWhatsapp,
+    whatsappHref: whatsappHref(contactWhatsapp),
   },
 };
 

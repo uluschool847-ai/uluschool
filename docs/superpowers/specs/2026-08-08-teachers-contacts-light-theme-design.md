@@ -8,7 +8,7 @@ while retaining manual theme switching.
 
 ## Teacher Profiles
 
-The public teaching team contains exactly these three active `Teacher` profiles in this order:
+The public teaching team contains exactly these four active `Teacher` profiles in this order:
 
 1. **Sir Nickson Onyango**
    - Title: `Founder and Mathematics & Science Teacher`
@@ -22,13 +22,17 @@ The public teaching team contains exactly these three active `Teacher` profiles 
    - Title: `Lower Primary Teacher`
    - Photo: `/cholette.jpg`
    - Bio: `Ms. Cholette holds a Bachelor's Degree in Education, specialising in Psychology. She is committed to fostering student development through a supportive, learner-centred approach and a strong foundation in educational practice.`
+4. **Sir Bernard**
+   - Title: `Chemistry and Biology Teacher`
+   - Photo: `/bernard.png`
+   - Bio: `Sir Bernard holds a Bachelor's Degree in Education, specialising in Biology and Chemistry.`
 
 The production synchronization is idempotent. It updates matching approved profiles, creates
 missing profiles, and removes other `Teacher` profile rows. It does not delete `AppUser` accounts,
 classes, lessons, submissions, or other teacher-cabinet data. Each production profile change is
 recorded in the existing admin audit log.
 
-The three static image files already under `public/` remain the source for these public photos.
+The four static image files under `public/` remain the source for these public photos.
 
 ## Founder's Message
 
@@ -61,7 +65,7 @@ stored choice continues to take precedence on subsequent visits.
   `Teacher` profiles, preservation of `AppUser` records, and audit logging.
 - Typecheck, lint, focused tests, production build, and relevant Playwright flows must pass.
 - After deployment, `/teachers`, `/about`, `/contact`, and the footer are checked in Chromium on
-  desktop and mobile. Production data must show exactly three active teacher cards with the correct
+  desktop and mobile. Production data must show exactly four active teacher cards with the correct
   images and text.
 
 ## Deployment

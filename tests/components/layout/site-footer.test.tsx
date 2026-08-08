@@ -54,7 +54,7 @@ describe("SiteFooter Navigation", () => {
     }
   });
 
-  it("hides optional contact rows when local contact numbers are not configured", async () => {
+  it("renders verified fallback phone and WhatsApp links when env values are empty", async () => {
     vi.stubEnv("NEXT_PUBLIC_CONTACT_EMAIL", "");
     vi.stubEnv("NEXT_PUBLIC_CONTACT_PHONE", "");
     vi.stubEnv("NEXT_PUBLIC_CONTACT_WHATSAPP", "");
@@ -64,7 +64,13 @@ describe("SiteFooter Navigation", () => {
     render(<LocalSiteFooter />);
 
     expect(screen.getByText("Email: info@uluglobalacademy.com")).toBeDefined();
-    expect(screen.queryByText(/^Phone:/i)).toBeNull();
-    expect(screen.queryByText(/^WhatsApp:/i)).toBeNull();
+    expect(screen.getByRole("link", { name: "+254 701 256 095" })).toHaveAttribute(
+      "href",
+      "tel:+254701256095",
+    );
+    expect(screen.getByRole("link", { name: "+254 706 359 133" })).toHaveAttribute(
+      "href",
+      "https://wa.me/254706359133",
+    );
   });
 });

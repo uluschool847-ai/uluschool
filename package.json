@@ -34,6 +34,7 @@
     "db:reset": "prisma migrate reset --force",
     "db:clean": "npm run db:generate && npm run db:reset && npm run db:verify",
     "db:verify": "tsx prisma/verify-db.ts",
+    "db:sync-approved-teachers": "tsx scripts/sync-approved-teachers.ts",
     "db:setup": "npm run db:generate && npm run db:deploy && npm run db:seed && npm run db:verify",
     "db:studio": "prisma studio"
   },

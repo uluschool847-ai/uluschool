@@ -1,4 +1,7 @@
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const themeProviderMock = vi.hoisted(() => vi.fn(() => null));
 
 vi.mock("next/font/google", () => ({
   Inter: () => ({ variable: "--font-body" }),
@@ -6,7 +9,7 @@ vi.mock("next/font/google", () => ({
 }));
 vi.mock("@/components/layout/site-footer", () => ({ SiteFooter: () => null }));
 vi.mock("@/components/layout/site-header", () => ({ SiteHeader: () => null }));
-vi.mock("@/components/providers/theme-provider", () => ({ ThemeProvider: () => null }));
+vi.mock("@/components/providers/theme-provider", () => ({ ThemeProvider: themeProviderMock }));
 
 const originalAppEnv = process.env.APP_ENV;
 
@@ -20,8 +23,26 @@ function setAppEnv(value: string | undefined) {
 }
 
 afterEach(() => {
+  vi.clearAllMocks();
   setAppEnv(originalAppEnv);
   vi.resetModules();
+});
+
+describe("root theme defaults", () => {
+  it("starts new visitors in light mode while leaving explicit theme selection enabled", async () => {
+    const { default: RootLayout } = await import("@/app/layout");
+
+    renderToStaticMarkup(RootLayout({ children: null }));
+
+    expect(themeProviderMock.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        attribute: "class",
+        defaultTheme: "light",
+        enableSystem: false,
+        disableTransitionOnChange: true,
+      }),
+    );
+  });
 });
 
 describe("root metadata crawler policy", () => {

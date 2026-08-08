@@ -28,10 +28,26 @@ export default function ContactPage() {
             <h2 className="text-xl font-semibold">Contact Details</h2>
             <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
               <li>Email: {siteConfig.contact.email}</li>
-              {siteConfig.contact.phone ? <li>Phone: {siteConfig.contact.phone}</li> : null}
-              {siteConfig.contact.whatsapp ? (
-                <li>WhatsApp: {siteConfig.contact.whatsapp}</li>
-              ) : null}
+              <li>
+                Phone:{" "}
+                <a
+                  className="font-medium text-primary hover:underline"
+                  href={siteConfig.contact.phoneHref}
+                >
+                  {siteConfig.contact.phone}
+                </a>
+              </li>
+              <li>
+                WhatsApp:{" "}
+                <a
+                  className="font-medium text-primary hover:underline"
+                  href={siteConfig.contact.whatsappHref}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {siteConfig.contact.whatsapp}
+                </a>
+              </li>
               <li>Response Time: Within 24 hours on business days</li>
             </ul>
             <div className="mt-6 flex flex-wrap gap-3">

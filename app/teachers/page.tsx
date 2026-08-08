@@ -33,9 +33,9 @@ export default async function TeachersPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="flex flex-wrap justify-center gap-8">
+            <div className="grid gap-8 sm:grid-cols-2 xl:grid-cols-4">
               {teachers.map((teacher) => (
-                <Card key={teacher.id} className="w-full max-w-[300px] overflow-hidden">
+                <Card key={teacher.id} className="w-full overflow-hidden">
                   {teacher.photoUrl ? (
                     <img
                       src={teacher.photoUrl}

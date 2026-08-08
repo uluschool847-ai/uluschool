@@ -65,8 +65,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
-          enableSystem
+          defaultTheme="light"
+          enableSystem={false}
           disableTransitionOnChange
         >
           <div className="flex min-h-screen flex-col">

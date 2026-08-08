@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 describe("site contact content", () => {
-  it("keeps the local email default and leaves missing optional contacts unset", async () => {
+  it("uses verified contact defaults with normalized link targets", async () => {
     vi.stubEnv("NEXT_PUBLIC_CONTACT_EMAIL", "");
     vi.stubEnv("NEXT_PUBLIC_CONTACT_PHONE", "");
     vi.stubEnv("NEXT_PUBLIC_CONTACT_WHATSAPP", "   ");
@@ -43,8 +43,10 @@ describe("site contact content", () => {
 
     expect(siteConfig.contact).toEqual({
       email: "info@uluglobalacademy.com",
-      phone: null,
-      whatsapp: null,
+      phone: "+254 701 256 095",
+      phoneHref: "tel:+254701256095",
+      whatsapp: "+254 706 359 133",
+      whatsappHref: "https://wa.me/254706359133",
     });
   });
 });

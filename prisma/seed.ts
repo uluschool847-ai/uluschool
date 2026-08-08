@@ -5,6 +5,7 @@ import {
   DEFAULT_CATALOGUE_LEVELS,
   DEFAULT_CATALOGUE_SUBJECTS,
 } from "../lib/catalogue/default-catalogue";
+import { APPROVED_PUBLIC_TEACHERS } from "../lib/content/approved-teachers";
 
 const prisma = new PrismaClient();
 
@@ -238,49 +239,15 @@ async function main() {
     });
   }
 
-  const teacherData = [
-    {
-      fullName: "Jane Doe",
-      title: "Mathematics Teacher",
-      bio: "Cambridge mathematics specialist with over 8 years of online teaching experience. Passionate about helping students master IGCSE and A-Level Mathematics.",
-      photoUrl: null,
-      displayOrder: 1,
-      yearsExperience: 8,
-      isActive: true,
-      cabinetUserId: "teacher-123",
-      subjectSlugs: ["mathematics"],
-    },
-    {
-      fullName: "John Smith",
-      title: "Physics & Science Teacher",
-      bio: "Experienced Cambridge Physics and Combined Science educator. Focuses on building strong conceptual understanding through live interactive lessons.",
-      photoUrl: null,
-      displayOrder: 2,
-      yearsExperience: 10,
-      isActive: true,
-      subjectSlugs: ["physics", "science"],
-    },
-    {
-      fullName: "Alice Brown",
-      title: "English Language Teacher",
-      bio: "Cambridge English Language specialist with a focus on developing strong writing and comprehension skills for IGCSE and A-Level students.",
-      photoUrl: null,
-      displayOrder: 3,
-      yearsExperience: 6,
-      isActive: true,
-      subjectSlugs: ["english-language"],
-    },
-  ];
-
   await prisma.teacher.deleteMany();
-  for (const teacherProfile of teacherData) {
+  for (const teacherProfile of APPROVED_PUBLIC_TEACHERS) {
     const { subjectSlugs, ...teacherDataRecord } = teacherProfile;
     const teacher = await prisma.teacher.create({
       data: teacherDataRecord,
     });
     if (subjectSlugs.length > 0) {
       const subjectRecords = await prisma.subject.findMany({
-        where: { slug: { in: subjectSlugs } },
+        where: { slug: { in: [...subjectSlugs] } },
         select: { id: true, slug: true },
       });
       await prisma.teacherSubject.createMany({
@@ -291,7 +258,7 @@ async function main() {
       });
     }
   }
-  console.log(`Seeded ${teacherData.length} teachers`);
+  console.log(`Seeded ${APPROVED_PUBLIC_TEACHERS.length} teachers`);
 
   const teacher = await prisma.appUser.findUniqueOrThrow({
     where: { id: "teacher-123" },

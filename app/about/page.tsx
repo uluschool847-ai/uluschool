@@ -80,8 +80,16 @@ export default function AboutPage() {
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle>Founder&apos;s Message</CardTitle>
+            <CardHeader className="gap-4">
+              <img
+                src="/nick.jpg"
+                alt="Sir Nickson Onyango"
+                className="aspect-[4/3] w-full rounded-md object-cover object-top"
+              />
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-primary">Sir Nickson Onyango</p>
+                <CardTitle>Founder&apos;s Message</CardTitle>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4 text-sm text-muted-foreground">
               <p>
