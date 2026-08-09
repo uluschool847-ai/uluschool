@@ -55,9 +55,9 @@
     "fflate": "^0.8.2",
     "googleapis": "^171.4.0",
     "lucide-react": "^0.469.0",
-    "next": "15.5.20",
+    "next": "15.5.23",
     "next-themes": "^0.4.4",
-    "nodemailer": "^7.0.13",
+    "nodemailer": "9.0.5",
     "prisma": "^5.22.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
@@ -78,11 +78,26 @@
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.4.20",
     "jsdom": "^29.1.0",
-    "postcss": "^8.4.49",
+    "postcss": "^8.5.23",
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.7.2",
     "vitest": "^4.1.5",
     "yaml": "^2.9.0"
+  },
+  "overrides": {
+    "anymatch": {
+      "picomatch": "2.3.2"
+    },
+    "micromatch": {
+      "picomatch": "2.3.2"
+    },
+    "next": {
+      "sharp": "0.35.0"
+    },
+    "postcss": "$postcss",
+    "readdirp": {
+      "picomatch": "2.3.2"
+    }
   }
 }
