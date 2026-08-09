@@ -7,4 +7,3 @@
 ## Evidence
 
 Codex Security scan/report link or scan ID:
-
