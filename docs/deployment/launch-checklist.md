@@ -37,7 +37,11 @@ accounts remain protected with provider-level 2FA.
 
 ## 3. Deploy the production origin
 
-- [ ] Merge the approved branch to `main` only after CI and staging evidence are complete.
+- [ ] Run a Codex Security diff scan for the exact pull request and stop the merge if any confirmed
+      Critical or High finding remains.
+- [ ] Confirm the `verify` CI job passes, including `npm audit --audit-level=high`.
+- [ ] Merge the approved branch to `main` only after the security scan, CI, and staging evidence are
+      complete.
 - [ ] Verify Render deploys that exact `main` commit with `APP_ENV=production`.
 - [ ] Notify users that the regular-session version 3 cutover logs out every existing user once,
       including users holding older password or SSO sessions.

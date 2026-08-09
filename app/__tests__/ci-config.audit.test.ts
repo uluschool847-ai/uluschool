@@ -6,6 +6,7 @@ import { parse } from "yaml";
 const root = process.cwd();
 const workflowPath = join(root, ".github/workflows/ci.yml");
 const workflow = readFileSync(workflowPath, "utf8");
+const pullRequestTemplate = readFileSync(join(root, ".github/pull_request_template.md"), "utf8");
 const seedTest = readFileSync(join(root, "prisma/__tests__/seed.test.ts"), "utf8");
 const storagePostgresTest = readFileSync(
   join(root, "tests/repositories/file-access-repository.postgres.test.ts"),
@@ -24,6 +25,7 @@ const integrationFlags = [
 const verifyJobTimeoutMinutes = 180;
 const requiredRunCommands = [
   "npm ci",
+  "npm audit --audit-level=high",
   "npx playwright install --with-deps chromium",
   "npx prisma generate",
   "npx prisma validate",
@@ -305,6 +307,16 @@ describe("GitHub CI production-readiness contract", () => {
     );
     expect(shortenedTimeout).not.toBe(workflow);
     expect(() => assertCiWorkflowContract(shortenedTimeout)).toThrow(/180 minutes/i);
+  });
+
+  it("runs the security gate for pull requests and records the Codex Security review", () => {
+    const parsedWorkflow = asRecord(parse(workflow), "workflow");
+    const triggers = asRecord(parsedWorkflow.on, "workflow triggers");
+
+    expect(triggers).toHaveProperty("pull_request");
+    expect(pullRequestTemplate).toContain("npm audit --audit-level=high");
+    expect(pullRequestTemplate).toContain("Codex Security diff scan");
+    expect(pullRequestTemplate).toContain("Critical and High security findings");
   });
 
   it.each([task3PostgresIntegrationFlag])(
