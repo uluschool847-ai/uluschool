@@ -43,6 +43,7 @@ export default async function AdminUsersPage({ searchParams = {} }: UsersPagePro
   const role = parseRole(resolvedSearchParams.role);
   const searchQuery = resolvedSearchParams.q?.trim() || undefined;
   const sort = parseSort(resolvedSearchParams.sort);
+  const createRole = parseRole(resolvedSearchParams.createRole) ?? UserRole.STUDENT;
   const result = await findAllUsers({
     page,
     limit: PAGE_SIZE,
@@ -109,7 +110,7 @@ export default async function AdminUsersPage({ searchParams = {} }: UsersPagePro
         </form>
       </section>
 
-      <UserCreateForm />
+      <UserCreateForm defaultRole={createRole} />
 
       {users.length === 0 ? (
         <div className="rounded-lg border border-slate-200 bg-white p-8 text-sm text-slate-600">

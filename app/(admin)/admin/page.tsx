@@ -186,19 +186,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                 </Button>
               ))}
               <Button asChild variant="secondary" size="sm">
-                <Link href="/admin/teachers">Teachers</Link>
-              </Button>
-              <Button asChild variant="secondary" size="sm">
-                <Link href="/admin/students">Students</Link>
-              </Button>
-              <Button asChild variant="secondary" size="sm">
                 <Link href="/admin/parents">Parents</Link>
-              </Button>
-              <Button asChild variant="secondary" size="sm">
-                <Link href="/admin/classes">Classes</Link>
-              </Button>
-              <Button asChild variant="secondary" size="sm">
-                <Link href="/admin/subjects">Subjects</Link>
               </Button>
               <Button asChild variant="secondary" size="sm">
                 <Link href="/admin/cms">Content (CMS)</Link>
@@ -225,6 +213,39 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               <ReminderDispatchControls />
               <Button asChild className="mt-2" size="sm" variant="secondary">
                 <Link href="/admin/reminders">View Reminder Logs</Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section aria-label="School Setup">
+        <Card>
+          <CardHeader>
+            <CardTitle>School Setup</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm">
+            <p className="text-muted-foreground">
+              Create accounts, publish teacher profiles, and prepare classes for lessons.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button asChild variant="secondary" size="sm">
+                <Link href="/admin/users">User Accounts</Link>
+              </Button>
+              <Button asChild size="sm">
+                <Link href="/admin/users?createRole=TEACHER">Create Teacher Account</Link>
+              </Button>
+              <Button asChild variant="secondary" size="sm">
+                <Link href="/admin/teachers">Teacher Profiles</Link>
+              </Button>
+              <Button asChild variant="secondary" size="sm">
+                <Link href="/admin/classes/new">Create Class Group</Link>
+              </Button>
+              <Button asChild variant="secondary" size="sm">
+                <Link href="/admin/students">Students</Link>
+              </Button>
+              <Button asChild variant="secondary" size="sm">
+                <Link href="/admin/subjects">Subjects</Link>
               </Button>
             </div>
           </CardContent>

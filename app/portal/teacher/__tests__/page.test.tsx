@@ -407,10 +407,11 @@ describe("Teacher Portal misleading UI safeguards", () => {
     expect(screen.getByText("5")).toBeDefined();
     expect(screen.getByText("6")).toBeDefined();
 
-    expect(screen.queryByText("My Classes")).toBeNull();
-    expect(screen.queryByText("Students")).toBeNull();
-    expect(screen.queryByText(/attendance/i)).toBeNull();
-    expect(screen.queryByText(/reports/i)).toBeNull();
+    const metrics = screen.getByRole("region", { name: "Metrics" });
+    expect(within(metrics).queryByText("My Classes")).toBeNull();
+    expect(within(metrics).queryByText("Students")).toBeNull();
+    expect(within(metrics).queryByText(/attendance/i)).toBeNull();
+    expect(within(metrics).queryByText(/reports/i)).toBeNull();
   });
 
   it("does not read legacy dashboard metric names from the page source", () => {
@@ -442,6 +443,32 @@ describe("Teacher Portal misleading UI safeguards", () => {
     expect(screen.getByRole("link", { name: /availability/i })).toHaveAttribute(
       "href",
       "/portal/teacher/availability",
+    );
+  });
+
+  it("links every teacher workspace from quick navigation", async () => {
+    await renderServerComponent(<TeacherPortalPage />);
+
+    const expectedLinks = [
+      ["Classes", "/portal/teacher/classes"],
+      ["Students", "/portal/teacher/students"],
+      ["Schedule", "/portal/teacher/schedule"],
+      ["Availability", "/portal/teacher/availability"],
+      ["Assignments", "/portal/teacher/assignments"],
+      ["Submissions", "/portal/teacher/submissions"],
+      ["Progress", "/portal/teacher/progress"],
+      ["Materials", "/portal/teacher/materials"],
+      ["Gradebook", "/portal/teacher/gradebook"],
+      ["Reports", "/portal/teacher/reports"],
+      ["Activity", "/portal/teacher/activity"],
+    ] as const;
+
+    for (const [name, href] of expectedLinks) {
+      expect(screen.getByRole("link", { name })).toHaveAttribute("href", href);
+    }
+    expect(screen.getByRole("link", { name: /^notifications/i })).toHaveAttribute(
+      "href",
+      "/portal/teacher/notifications",
     );
   });
 

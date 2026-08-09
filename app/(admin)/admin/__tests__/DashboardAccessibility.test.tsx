@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -110,6 +110,24 @@ describe("Admin dashboard accessibility and responsive behavior", () => {
       "section[aria-label], section[aria-labelledby]",
     );
     expect(labeledSections.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("provides every teacher onboarding destination in a school setup region", async () => {
+    await renderServerComponent(<AdminDashboardPage />);
+
+    const schoolSetup = screen.getByRole("region", { name: /school setup/i });
+    const expectedLinks = [
+      ["User Accounts", "/admin/users"],
+      ["Create Teacher Account", "/admin/users?createRole=TEACHER"],
+      ["Teacher Profiles", "/admin/teachers"],
+      ["Create Class Group", "/admin/classes/new"],
+      ["Students", "/admin/students"],
+      ["Subjects", "/admin/subjects"],
+    ] as const;
+
+    for (const [name, href] of expectedLinks) {
+      expect(within(schoolSetup).getByRole("link", { name })).toHaveAttribute("href", href);
+    }
   });
 
   it("keeps analytics cards stacked by default and only expands them from md upwards", async () => {

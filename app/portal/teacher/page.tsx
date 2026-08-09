@@ -640,6 +640,12 @@ export default async function TeacherPortalDashboard() {
         />
         <div id="quick-navigation" className="flex flex-wrap gap-2">
           <Button asChild variant="secondary" size="sm">
+            <Link href="/portal/teacher/classes">Classes</Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm">
+            <Link href="/portal/teacher/students">Students</Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm">
             <Link href="/portal/teacher/schedule">Schedule</Link>
           </Button>
           <Button asChild variant="secondary" size="sm">
@@ -656,6 +662,15 @@ export default async function TeacherPortalDashboard() {
           </Button>
           <Button asChild variant="secondary" size="sm">
             <Link href="/portal/teacher/materials">Materials</Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm">
+            <Link href="/portal/teacher/gradebook">Gradebook</Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm">
+            <Link href="/portal/teacher/reports">Reports</Link>
+          </Button>
+          <Button asChild variant="secondary" size="sm">
+            <Link href="/portal/teacher/activity">Activity</Link>
           </Button>
           <Button asChild variant="secondary" size="sm">
             <Link href="/portal/teacher/notifications">

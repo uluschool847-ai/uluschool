@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const findAllUsersMock = vi.hoisted(() => vi.fn());
@@ -127,6 +127,30 @@ describe("Admin user management page", () => {
     render(element);
 
     expect(screen.getByText(/no users|no accounts|nothing found/i)).toBeDefined();
+  });
+
+  it.each([
+    ["TEACHER", "TEACHER"],
+    ["INVALID", "STUDENT"],
+  ])("uses %s as a safe initial create role", async (createRole, expectedRole) => {
+    findAllUsersMock.mockResolvedValueOnce({
+      items: [],
+      totalCount: 0,
+      totalPages: 0,
+    });
+
+    const page = await loadUsersPage();
+    const element = await page.default({ searchParams: { createRole } });
+    render(element);
+
+    const createUserSection = screen
+      .getByRole("heading", { name: "Create User" })
+      .closest("section");
+    expect(createUserSection).not.toBeNull();
+    expect(within(createUserSection as HTMLElement).getByLabelText("Role")).toHaveProperty(
+      "value",
+      expectedRole,
+    );
   });
 
   it("preserves search, role, and sort params across pagination links", async () => {
