@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { PageHero } from "@/components/sections/page-hero";
+import { DEFAULT_SCHOOL_CONTACT_EMAIL } from "@/lib/contact-email";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
@@ -8,7 +9,7 @@ export const metadata: Metadata = {
 };
 
 export default function PrivacyPolicyPage() {
-  const privacyEmail = process.env.PRIVACY_CONTACT_EMAIL?.trim() || "info@uluglobalacademy.com";
+  const privacyEmail = process.env.PRIVACY_CONTACT_EMAIL?.trim() || DEFAULT_SCHOOL_CONTACT_EMAIL;
   const emailProcessor =
     process.env.PRIVACY_EMAIL_PROCESSOR_NAME?.trim() || "the configured email delivery provider";
 

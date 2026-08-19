@@ -68,9 +68,9 @@ describe("Privacy Policy", () => {
 
     render(<PrivacyPolicyPage />);
 
-    expect(screen.getByRole("link", { name: "info@uluglobalacademy.com" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "uluschool2@gmail.com" })).toHaveAttribute(
       "href",
-      "mailto:info@uluglobalacademy.com",
+      "mailto:uluschool2@gmail.com",
     );
     expect(document.body.textContent).toMatch(/configured email delivery provider/i);
   });
@@ -84,9 +84,9 @@ describe("Privacy Policy", () => {
 
     render(<PrivacyPolicyPage />);
 
-    expect(screen.getByRole("link", { name: "info@uluglobalacademy.com" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "uluschool2@gmail.com" })).toHaveAttribute(
       "href",
-      "mailto:info@uluglobalacademy.com",
+      "mailto:uluschool2@gmail.com",
     );
     expect(document.body.textContent).toMatch(/configured email delivery provider/i);
     expect(document.querySelector('a[href="mailto:"]')).toBeNull();

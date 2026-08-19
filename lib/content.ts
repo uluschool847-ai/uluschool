@@ -1,3 +1,5 @@
+import { DEFAULT_SCHOOL_CONTACT_EMAIL } from "@/lib/contact-email";
+
 function optionalContactValue(value: string | undefined) {
   const normalized = value?.trim();
   return normalized ? normalized : null;
@@ -23,7 +25,7 @@ export const siteConfig = {
     "ULU Online School delivers structured, interactive, and exam-focused Cambridge education to students anywhere in the world.",
   contact: {
     email:
-      optionalContactValue(process.env.NEXT_PUBLIC_CONTACT_EMAIL) ?? "info@uluglobalacademy.com",
+      optionalContactValue(process.env.NEXT_PUBLIC_CONTACT_EMAIL) ?? DEFAULT_SCHOOL_CONTACT_EMAIL,
     phone: contactPhone,
     phoneHref: phoneHref(contactPhone),
     whatsapp: contactWhatsapp,

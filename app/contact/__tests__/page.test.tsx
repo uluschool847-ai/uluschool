@@ -13,9 +13,13 @@ import ContactPage from "@/app/contact/page";
 afterEach(() => cleanup());
 
 describe("Contact page public details", () => {
-  it("renders the verified phone and WhatsApp as actionable links", () => {
+  it("renders the verified email, phone, and WhatsApp as actionable links", () => {
     render(<ContactPage />);
 
+    expect(screen.getByRole("link", { name: "uluschool2@gmail.com" })).toHaveAttribute(
+      "href",
+      "mailto:uluschool2@gmail.com",
+    );
     expect(screen.getByRole("link", { name: "+254 701 256 095" })).toHaveAttribute(
       "href",
       "tel:+254701256095",

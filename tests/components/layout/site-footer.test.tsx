@@ -63,7 +63,10 @@ describe("SiteFooter Navigation", () => {
 
     render(<LocalSiteFooter />);
 
-    expect(screen.getByText("Email: info@uluglobalacademy.com")).toBeDefined();
+    expect(screen.getByRole("link", { name: "uluschool2@gmail.com" })).toHaveAttribute(
+      "href",
+      "mailto:uluschool2@gmail.com",
+    );
     expect(screen.getByRole("link", { name: "+254 701 256 095" })).toHaveAttribute(
       "href",
       "tel:+254701256095",

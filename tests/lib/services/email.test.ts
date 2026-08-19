@@ -391,7 +391,7 @@ describe("lib/services/email.ts env handling", () => {
           name: "ULU Online School",
           address: "no-reply@uluglobalacademy.com",
         },
-        to: { name: "", address: "info@uluglobalacademy.com" },
+        to: { name: "", address: "uluschool2@gmail.com" },
         replyTo: { name: "", address: ENROL_PAYLOAD.email },
       }),
     );
@@ -519,7 +519,7 @@ describe("lib/services/email.ts env handling", () => {
     expect(message.text).toContain(SCRIPT_MESSAGE);
     expect(message.subject).not.toMatch(/[\r\n]/);
     expect(Array.from(message.subject)).toHaveLength(200);
-    expect(message.to).toEqual({ name: "", address: "info@uluglobalacademy.com" });
+    expect(message.to).toEqual({ name: "", address: "uluschool2@gmail.com" });
     expect(message.replyTo).toEqual({ name: "", address: ENROL_PAYLOAD.email });
   });
 
@@ -545,7 +545,7 @@ describe("lib/services/email.ts env handling", () => {
     expect(message.text).toContain(MIXED_NEWLINE_MESSAGE);
     expect(message.subject).not.toMatch(/[\r\n]/);
     expect(Array.from(message.subject).length).toBeLessThanOrEqual(200);
-    expect(message.to).toEqual({ name: "", address: "info@uluglobalacademy.com" });
+    expect(message.to).toEqual({ name: "", address: "uluschool2@gmail.com" });
     expect(message.replyTo).toEqual({ name: "", address: CONTACT_PAYLOAD.email });
   });
 
@@ -574,7 +574,7 @@ describe("lib/services/email.ts env handling", () => {
     expect(fallbackMessage.to).toEqual({ name: "", address: "student@example.com" });
     expect(fallbackMessage.replyTo).toEqual({
       name: "",
-      address: "info@uluglobalacademy.com",
+      address: "uluschool2@gmail.com",
     });
 
     await sendClassReminderEmail({
@@ -614,7 +614,7 @@ describe("lib/services/email.ts env handling", () => {
     expect(message.to).toEqual({ name: "", address: "student@example.com" });
     expect(message.replyTo).toEqual({
       name: "",
-      address: "info@uluglobalacademy.com",
+      address: "uluschool2@gmail.com",
     });
   });
 

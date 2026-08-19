@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 
+import { DEFAULT_SCHOOL_CONTACT_EMAIL } from "@/lib/contact-email";
 import { validateLiveLessonUrl } from "@/lib/lessons/live-lesson-url";
 import {
   escapeHtml,
@@ -72,7 +73,7 @@ function getFromAddress() {
 }
 
 function getToAddress() {
-  return process.env.SCHOOL_INBOX_EMAIL ?? "info@uluglobalacademy.com";
+  return process.env.SCHOOL_INBOX_EMAIL ?? DEFAULT_SCHOOL_CONTACT_EMAIL;
 }
 
 function buildEnrolmentMessage(payload: EnrolmentInput) {

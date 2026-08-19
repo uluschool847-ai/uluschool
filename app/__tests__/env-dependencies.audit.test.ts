@@ -336,7 +336,7 @@ describe("production environment startup contract", () => {
   it("keeps local-safe defaults and empty provider placeholders", () => {
     expect(envValue("APP_ENV")).toBe('""');
     expect(envValue("SENTRY_ENABLED")).toBe('"false"');
-    expect(envValue("PRIVACY_CONTACT_EMAIL")).toBe('"info@uluglobalacademy.com"');
+    expect(envValue("PRIVACY_CONTACT_EMAIL")).toBe('"uluschool2@gmail.com"');
     expect(envValue("STORAGE_DRIVER")).toBe('"local"');
 
     for (const key of [

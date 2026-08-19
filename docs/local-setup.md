@@ -142,7 +142,7 @@ accounts remain protected with provider-level 2FA.
 | `SMTP_PASS` | `password` | SMTP password |
 | `SMTP_SECURE` | `false` | Toggles secure transport |
 | `SMTP_FROM` | `ULU Online School <no-reply@...>` | From address for notifications |
-| `SCHOOL_INBOX_EMAIL` | `info@uluglobalacademy.com` | Inbox for contact/enrolment notifications |
+| `SCHOOL_INBOX_EMAIL` | `uluschool2@gmail.com` | Inbox for contact/enrolment notifications |
 | `SMTP_MAX_RETRIES` | `3` | Retry count for email sending |
 | `EMAIL_USER` / `EMAIL_PASS` | empty | Gmail fallback if the primary SMTP tuple is not used |
 

@@ -18,7 +18,12 @@ export function SiteFooter() {
             Contact
           </h3>
           <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
-            <li>Email: {siteConfig.contact.email}</li>
+            <li>
+              Email:{" "}
+              <a className="hover:text-primary" href={`mailto:${siteConfig.contact.email}`}>
+                {siteConfig.contact.email}
+              </a>
+            </li>
             <li>
               Phone:{" "}
               <a className="hover:text-primary" href={siteConfig.contact.phoneHref}>

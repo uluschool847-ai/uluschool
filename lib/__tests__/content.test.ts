@@ -42,7 +42,7 @@ describe("site contact content", () => {
     const { siteConfig } = await import("@/lib/content");
 
     expect(siteConfig.contact).toEqual({
-      email: "info@uluglobalacademy.com",
+      email: "uluschool2@gmail.com",
       phone: "+254 701 256 095",
       phoneHref: "tel:+254701256095",
       whatsapp: "+254 706 359 133",

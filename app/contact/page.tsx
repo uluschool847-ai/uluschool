@@ -27,7 +27,15 @@ export default function ContactPage() {
           <div className="rounded-xl border bg-card p-6">
             <h2 className="text-xl font-semibold">Contact Details</h2>
             <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
-              <li>Email: {siteConfig.contact.email}</li>
+              <li>
+                Email:{" "}
+                <a
+                  className="font-medium text-primary hover:underline"
+                  href={`mailto:${siteConfig.contact.email}`}
+                >
+                  {siteConfig.contact.email}
+                </a>
+              </li>
               <li>
                 Phone:{" "}
                 <a

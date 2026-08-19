@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { PageHero } from "@/components/sections/page-hero";
+import { siteConfig } from "@/lib/content";
 
 export const metadata: Metadata = {
   title: "Terms & Conditions",
@@ -64,7 +65,13 @@ export default function TermsAndConditionsPage() {
           </p>
           <h2 className="text-xl font-semibold text-foreground">10. Contact</h2>
           <p>
-            Questions about these terms should be sent to <strong>info@uluglobalacademy.com</strong>
+            Questions about these terms should be sent to{" "}
+            <a
+              className="font-medium text-primary underline"
+              href={`mailto:${siteConfig.contact.email}`}
+            >
+              {siteConfig.contact.email}
+            </a>
             .
           </p>
         </div>
